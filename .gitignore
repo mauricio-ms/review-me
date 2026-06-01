@@ -1,0 +1,16 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+
+# rust / tauri
+src-tauri/target/
+src-tauri/gen/
+
+# editor / os
+.DS_Store
+*.log
+
+# sandbox marker
+.ai-jail

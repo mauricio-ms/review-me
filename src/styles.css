@@ -1,0 +1,97 @@
+:root {
+  color-scheme: dark;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Inter", sans-serif;
+  font-size: 14px;
+
+  --status-bar-h: 26px;
+  --bg-0: #0b0f14;
+  --bg-1: #101720;
+  --bg-2: #151e29;
+  --bg-3: #263342;
+  --bg-4: #1d2a38;
+  --bg-deep: #070a0e;
+  --bg-panel-end: #0f1620;
+  --bg-start-end: #14141c;
+  --fg-0: #e6edf3;
+  --fg-1: #b9c4cf;
+  --fg-2: #8493a3;
+  --fg-3: #536170;
+  --accent-teal: #31d4c9;
+  --accent-blue: #5aa9ff;
+  --accent-violet: #b58cff;
+  --accent-amber: #f6b44b;
+  --accent-green: #59d98e;
+  --accent-red: #ff5c7a;
+  --bg-0-rgb: 11, 15, 20;
+  --bg-1-rgb: 16, 23, 32;
+  --bg-3-rgb: 38, 51, 66;
+  --accent-teal-rgb: 49, 212, 201;
+  --accent-blue-rgb: 90, 169, 255;
+  --accent-violet-rgb: 181, 140, 255;
+  --accent-amber-rgb: 246, 180, 75;
+  --accent-green-rgb: 89, 217, 142;
+  --accent-red-rgb: 255, 92, 122;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100vh;
+  background: var(--bg-0);
+  color: var(--fg-0);
+}
+
+kbd {
+  font-family: ui-monospace, "JetBrains Mono", "Fira Code", monospace;
+  background: rgba(var(--bg-3-rgb), 0.72);
+  color: var(--accent-teal);
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+  border: 1px solid rgba(var(--accent-teal-rgb), 0.28);
+}
+
+/* ---------- startup ---------- */
+
+.startup-dashboard {
+  height: 100%;
+  background:
+    radial-gradient(
+      circle at 78% 16%,
+      rgba(var(--accent-teal-rgb), 0.14),
+      transparent 32%
+    ),
+    radial-gradient(
+      circle at 16% 82%,
+      rgba(var(--accent-violet-rgb), 0.1),
+      transparent 34%
+    ),
+    linear-gradient(
+      145deg,
+      var(--bg-0) 0%,
+      var(--bg-1) 58%,
+      var(--bg-start-end) 100%
+    );
+  color: var(--accent-teal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  outline: none;
+  font-family:
+    "JetBrainsMono Nerd Font", "JetBrains Mono", "Fira Code", ui-monospace,
+    monospace;
+  user-select: none;
+}
+
+.startup-logo {
+  font-size: 42px;
+  letter-spacing: 0.18em;
+  text-transform: lowercase;
+  text-shadow: 0 0 24px rgba(var(--accent-teal-rgb), 0.4);
+}
