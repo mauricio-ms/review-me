@@ -180,15 +180,19 @@ printf 'changed\0bytes\n' > logo.bin                        # binary change
 - [ ] **Steps:** Open a `.java` file in project mode, put the cursor on a type or method name that's defined elsewhere, press `gd` (or `Space` → `g` → `d`).
 - [ ] **Expect:** If there's a single definition, the viewer jumps straight to it (opening the defining file if needed, cursor on the declaration). If multiple, the **Cross-reference** panel lists them; `Enter` navigates. A symbol with no definition shows a "no definition" panel.
 
-### 4.2 Find references
+### 4.2 Click to definition
+- [ ] **Steps:** In the viewer, hold `Ctrl` (or `Cmd` on macOS) and click directly on a type/method reference that's defined elsewhere.
+- [ ] **Expect:** The cursor turns into a pointer while the modifier is held; clicking jumps to the definition exactly like `gd` (single hit navigates; multiple hits open the Cross-reference panel). A plain click (no modifier) still just places the cursor / selects text. `Ctrl`/`Cmd`+click on whitespace or an unresolved word does nothing.
+
+### 4.3 Find references
 - [ ] **Steps:** Cursor on a symbol, press `gr` (or `Space` → `g` → `r`).
 - [ ] **Expect:** The panel lists every occurrence as `file:line` + source snippet, with `def`/`ref` badges; same-file results are ranked first. `↑`/`↓`/`j`/`k` move, `Enter` opens the chosen location in the viewer at that line, `Esc` closes.
 
-### 4.3 Index freshness
+### 4.4 Index freshness
 - [ ] **Steps:** Open a repo (the index builds in the background). Run `gd`/`gr` — they should work without a manual build step. Add/rename a Java symbol, then `Space` → `r` (refresh).
 - [ ] **Expect:** After refresh, cross-references reflect the updated code.
 
-### 4.4 Non-Java / no symbol
+### 4.5 Non-Java / no symbol
 - [ ] **Steps:** Try `gd` on whitespace, or in a non-`.java` file.
 - [ ] **Expect:** Nothing happens (no symbol resolved) — no crash.
 

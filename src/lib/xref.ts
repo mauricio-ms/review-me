@@ -26,13 +26,18 @@ export async function navigateTo(result: XrefResult): Promise<void> {
   );
 }
 
-/** Go to definition of the symbol under the viewer cursor. */
-export async function gotoDefinition(): Promise<void> {
-  const c = ctx();
-  if (!c) return;
-  const symbol = await symbolAt(c.repo, c.path, c.cursor.line, c.cursor.col);
+/**
+ * Resolve and jump to the definition of the symbol at an explicit viewer
+ * position (1-based line, 0-based col). Shared by the `gd` vim action and the
+ * Ctrl/Cmd+click handler.
+ */
+export async function gotoDefinitionAt(line: number, col: number): Promise<void> {
+  const repo = useRepoStore.getState().repoPath;
+  const path = useProjectStore.getState().openPath;
+  if (!repo || !path) return;
+  const symbol = await symbolAt(repo, path, line, col);
   if (!symbol) return;
-  const defs = await findDefinition(c.repo, symbol);
+  const defs = await findDefinition(repo, symbol);
   if (defs.length === 0) {
     useXrefStore.getState().show(`no definition for ${symbol.name}`, []);
   } else if (defs.length === 1) {
@@ -40,6 +45,12 @@ export async function gotoDefinition(): Promise<void> {
   } else {
     useXrefStore.getState().show(`definition: ${symbol.name}`, defs);
   }
+}
+
+/** Go to definition of the symbol under the viewer cursor. */
+export async function gotoDefinition(): Promise<void> {
+  const cursor = projectCursor();
+  if (cursor) await gotoDefinitionAt(cursor.line, cursor.col);
 }
 
 /** Find references to the symbol under the viewer cursor. */

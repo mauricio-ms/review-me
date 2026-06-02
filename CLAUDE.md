@@ -84,7 +84,9 @@ fundamentally per-hunk; file/line coverage is **derived** in `src/lib/coverage.t
 map). Resolution is **name+kind only** (no type/scope resolution) — navigation-grade, so
 same-named symbols across classes may all appear. `symbol_at` resolves the identifier
 under a cursor; results are ranked same-file-first. The frontend binds `gd`/`gr` as vim
-actions (`editor/vim-xref.ts`) and as `Space g d`/`g r` palette commands. The index is
+actions (`editor/vim-xref.ts`) and as `Space g d`/`g r` palette commands; a Ctrl/Cmd+click
+in the viewer (`editor/xref-click.ts`) also jumps to definition. Both the `gd` action and
+the click route through `xref.ts`'s `gotoDefinitionAt(line, col)`. The index is
 warmed in the background on repo open/refresh.
 
 ## Extending

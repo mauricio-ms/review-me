@@ -9,6 +9,7 @@ import CodeMirror from "@uiw/react-codemirror";
 import { leaderKeymap, vimEscapeKeymap } from "../editor/cm-shared";
 import { flagDecorations, setFlagLines } from "../editor/flag-decorations";
 import { defineXrefVim } from "../editor/vim-xref";
+import { xrefClick } from "../editor/xref-click";
 import { fileIcon } from "../lib/file-icons";
 import { openProjectFile, loadDir, toggleDir } from "../lib/project";
 import { setProjectView } from "../lib/project-view";
@@ -94,6 +95,7 @@ export default function ProjectBuffer() {
       vim(),
       leaderKeymap,
       vimEscapeKeymap,
+      xrefClick,
       flagDecorations,
       EditorState.readOnly.of(true),
       EditorView.lineWrapping,

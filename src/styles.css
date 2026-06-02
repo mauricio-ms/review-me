@@ -575,6 +575,11 @@ kbd {
   box-shadow: inset 2px 0 0 var(--accent-amber);
 }
 
+/* Ctrl/Cmd held → symbols read as clickable (go-to-definition). */
+.project-viewer .cm-content.xref-mod {
+  cursor: pointer;
+}
+
 /* ---------- fuzzy finder ---------- */
 
 .fuzzy-finder {
