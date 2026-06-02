@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { fileIcon } from "../lib/file-icons";
 import { openFileInProject } from "../lib/project";
 import { fuzzyFiles } from "../lib/tauri";
 import { useRepoStore } from "../state/repo";
@@ -127,17 +128,22 @@ export default function FuzzyFinderHost() {
           {rows.length === 0 ? (
             <div className="neo-empty">no matching files</div>
           ) : (
-            rows.map((row, idx) => (
-              <div
-                key={row.path}
-                className={`neo-row fz-row ${idx === selected ? "is-selected" : ""}`}
-                onMouseEnter={() => setSelected(idx)}
-                onClick={() => openSelected(row)}
-              >
-                <span className="neo-icon"></span>
-                <span className="fz-path">{highlight(row.path, row.indices)}</span>
-              </div>
-            ))
+            rows.map((row, idx) => {
+              const icon = fileIcon(row.path.split("/").pop() ?? row.path, false);
+              return (
+                <div
+                  key={row.path}
+                  className={`neo-row fz-row ${idx === selected ? "is-selected" : ""}`}
+                  onMouseEnter={() => setSelected(idx)}
+                  onClick={() => openSelected(row)}
+                >
+                  <span className="neo-icon" style={{ color: icon.color }}>
+                    {icon.glyph}
+                  </span>
+                  <span className="fz-path">{highlight(row.path, row.indices)}</span>
+                </div>
+              );
+            })
           )}
         </div>
         <div className="neo-footer">

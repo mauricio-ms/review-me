@@ -518,7 +518,9 @@ kbd {
 }
 
 .tree-icon {
-  width: 12px;
+  flex: 0 0 auto;
+  width: 1.3em;
+  text-align: center;
   color: var(--fg-3);
 }
 

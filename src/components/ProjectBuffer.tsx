@@ -9,6 +9,7 @@ import CodeMirror from "@uiw/react-codemirror";
 import { leaderKeymap, vimEscapeKeymap } from "../editor/cm-shared";
 import { flagDecorations, setFlagLines } from "../editor/flag-decorations";
 import { defineXrefVim } from "../editor/vim-xref";
+import { fileIcon } from "../lib/file-icons";
 import { openProjectFile, loadDir, toggleDir } from "../lib/project";
 import { setProjectView } from "../lib/project-view";
 import { useProjectStore } from "../state/project";
@@ -177,28 +178,31 @@ export default function ProjectBuffer() {
         {nodes.length === 0 ? (
           <div className="project-tree-empty">loading…</div>
         ) : (
-          nodes.map((node, idx) => (
-            <div
-              key={node.entry.path}
-              className={`tree-row ${idx === cursor ? "is-selected" : ""} ${
-                node.entry.path === openPath ? "is-open" : ""
-              }`}
-              style={{ paddingLeft: 8 + node.depth * 14 }}
-              onClick={() => {
-                setCursor(idx);
-                activate(node);
-              }}
-            >
-              <span className="tree-icon">
-                {node.entry.isDir
-                  ? expanded.has(node.entry.path)
-                    ? "▾"
-                    : "▸"
-                  : ""}
-              </span>
-              <span className="tree-name">{node.entry.name}</span>
-            </div>
-          ))
+          nodes.map((node, idx) => {
+            const icon = fileIcon(
+              node.entry.name,
+              node.entry.isDir,
+              expanded.has(node.entry.path),
+            );
+            return (
+              <div
+                key={node.entry.path}
+                className={`tree-row ${idx === cursor ? "is-selected" : ""} ${
+                  node.entry.path === openPath ? "is-open" : ""
+                }`}
+                style={{ paddingLeft: 8 + node.depth * 14 }}
+                onClick={() => {
+                  setCursor(idx);
+                  activate(node);
+                }}
+              >
+                <span className="tree-icon" style={{ color: icon.color }}>
+                  {icon.glyph}
+                </span>
+                <span className="tree-name">{node.entry.name}</span>
+              </div>
+            );
+          })
         )}
       </div>
 
