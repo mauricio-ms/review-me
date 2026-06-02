@@ -3,10 +3,12 @@ mod diff;
 mod error;
 mod fs_browse;
 mod fuzzy;
+mod queries;
 mod repo;
 mod repo_library;
 mod tags;
 mod tree;
+mod xref;
 
 pub fn run() {
     tauri::Builder::default()
@@ -26,6 +28,10 @@ pub fn run() {
             commands::unreview_range,
             commands::fuzzy_files,
             commands::list_repo_dir,
+            commands::build_symbol_index,
+            commands::symbol_at,
+            commands::find_definition,
+            commands::find_references,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

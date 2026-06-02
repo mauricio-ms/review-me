@@ -8,6 +8,7 @@ use crate::repo::{self, RepoInfo};
 use crate::repo_library::{self, RememberedRepo};
 use crate::tags::{self, AnchorKind, TagStore};
 use crate::tree::{self, TreeListing};
+use crate::xref::{self, IndexStats, SymbolRef, XrefResult};
 
 /// Resolve and validate the repo at `repo`, returning its canonical working-dir root.
 fn repo_root(repo: String) -> AppResult<PathBuf> {
@@ -117,6 +118,42 @@ pub fn fuzzy_files(repo: String, query: String, limit: u32) -> AppResult<Vec<Fil
 pub fn list_repo_dir(repo: String, path: String) -> AppResult<TreeListing> {
     let repository = repo::open(&PathBuf::from(repo))?;
     tree::list_dir(&repository, &path)
+}
+
+/// (Re)build the tree-sitter symbol index for cross-references.
+#[tauri::command]
+pub fn build_symbol_index(repo: String) -> AppResult<IndexStats> {
+    let repository = repo::open(&PathBuf::from(repo))?;
+    let root = repo::root(&repository)?;
+    let files = fuzzy::repo_files(&repository)?;
+    xref::build_index(&root, &files)
+}
+
+/// Resolve the symbol under a cursor position (1-based line, 0-based col).
+#[tauri::command]
+pub fn symbol_at(
+    repo: String,
+    path: String,
+    line: u32,
+    col: u32,
+) -> AppResult<Option<SymbolRef>> {
+    xref::symbol_at(&repo_root(repo)?, &path, line, col)
+}
+
+#[tauri::command]
+pub fn find_definition(repo: String, symbol: SymbolRef) -> AppResult<Vec<XrefResult>> {
+    let repository = repo::open(&PathBuf::from(repo))?;
+    let root = repo::root(&repository)?;
+    let files = fuzzy::repo_files(&repository)?;
+    xref::find_definition(&root, &files, &symbol)
+}
+
+#[tauri::command]
+pub fn find_references(repo: String, symbol: SymbolRef) -> AppResult<Vec<XrefResult>> {
+    let repository = repo::open(&PathBuf::from(repo))?;
+    let root = repo::root(&repository)?;
+    let files = fuzzy::repo_files(&repository)?;
+    xref::find_references(&root, &files, &symbol)
 }
 
 /// Remove every reviewed tag overlapping `[start_line, end_line]` in `file`.
