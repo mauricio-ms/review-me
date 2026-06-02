@@ -33,3 +33,22 @@ export interface DirectoryListing {
   parent: string | null;
   entries: { name: string; path: string; isSymlink: boolean }[];
 }
+
+export interface FileMatch {
+  path: string;
+  score: number;
+  /** Char indices in `path` that matched the query. */
+  indices: number[];
+}
+
+export interface TreeEntry {
+  name: string;
+  /** Repo-relative path. */
+  path: string;
+  isDir: boolean;
+}
+
+export interface TreeListing {
+  path: string;
+  entries: TreeEntry[];
+}

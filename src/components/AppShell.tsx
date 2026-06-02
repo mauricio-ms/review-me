@@ -6,6 +6,7 @@ import BufferStatusBar from "./BufferStatusBar";
 import CommandLine from "./CommandLine";
 import CommandTransient from "./CommandTransient";
 import DiffBuffer from "./DiffBuffer";
+import FuzzyFinderHost from "./FuzzyFinderHost";
 import OpenRepoHost from "./OpenRepoHost";
 import ProjectBuffer from "./ProjectBuffer";
 import RecentReposHost from "./RecentReposHost";
@@ -95,6 +96,7 @@ export default function AppShell() {
       {hasRepo && <BufferStatusBar />}
       <OpenRepoHost />
       <RecentReposHost />
+      <FuzzyFinderHost />
       {transientOpen && <CommandTransient />}
       {commandLineOpen && <CommandLine />}
     </div>

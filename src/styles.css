@@ -464,6 +464,127 @@ kbd {
   color: var(--fg-1);
 }
 
+/* ---------- project buffer ---------- */
+
+.project-buffer {
+  display: grid;
+  grid-template-columns: minmax(220px, 320px) 1fr;
+  background: var(--bg-0);
+}
+
+.project-tree {
+  border-right: 1px solid var(--bg-3);
+  overflow-y: auto;
+  padding: 6px 0;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  outline: none;
+  background: var(--bg-1);
+}
+
+.project-tree.is-focused {
+  background: var(--bg-2);
+}
+
+.project-tree-empty {
+  padding: 12px;
+  color: var(--fg-3);
+}
+
+.tree-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 10px 2px 8px;
+  white-space: nowrap;
+  cursor: pointer;
+  color: var(--fg-1);
+}
+
+.tree-row.is-selected {
+  background: rgba(var(--accent-teal-rgb), 0.14);
+  box-shadow: inset 3px 0 0 var(--accent-amber);
+}
+
+.tree-row.is-open .tree-name {
+  color: var(--accent-blue);
+}
+
+.tree-icon {
+  width: 12px;
+  color: var(--fg-3);
+}
+
+.tree-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.project-viewer {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.project-viewer-path {
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--bg-3);
+  background: var(--bg-1);
+  color: var(--fg-2);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.project-viewer-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  color: var(--fg-2);
+  gap: 10px;
+  padding: 24px;
+}
+
+/* Give the CodeMirror wrapper a real height (the height-chain gotcha). */
+.project-viewer .cm-editor {
+  height: 100%;
+}
+
+.project-viewer > div:last-child {
+  flex: 1;
+  min-height: 0;
+}
+
+.cm-flagged-line {
+  background: rgba(var(--accent-amber-rgb), 0.14);
+  box-shadow: inset 2px 0 0 var(--accent-amber);
+}
+
+/* ---------- fuzzy finder ---------- */
+
+.fuzzy-finder {
+  width: min(820px, 94vw);
+  height: min(620px, 84vh);
+}
+
+.fz-row {
+  grid-template-columns: 24px 1fr;
+}
+
+.fz-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fz-hit {
+  color: var(--accent-amber);
+  font-weight: 700;
+}
+
 /* ---------- command transient ---------- */
 
 .asset-picker.command-transient {

@@ -1,6 +1,9 @@
 import { useCallback, useState } from "react";
 
 import { refreshDiff } from "../lib/open-repo";
+import { projectSelectionRange } from "../lib/project-view";
+import { addFlag } from "../lib/review-actions";
+import { useProjectStore } from "../state/project";
 import { useRepoStore } from "../state/repo";
 import { useTagsStore } from "../state/tags";
 import { useUIStore, type BufferName } from "../state/ui";
@@ -44,6 +47,7 @@ export function useCommands(rawClose: CommandClose): {
   const requestFocus = useUIStore((s) => s.requestFocus);
   const repo = useRepoStore((s) => s.repo);
   const closeRepo = useRepoStore((s) => s.closeRepo);
+  const openPath = useProjectStore((s) => s.openPath);
 
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -80,8 +84,26 @@ export function useCommands(rawClose: CommandClose): {
     close({ restoreFocus: false });
     closeRepo();
     useTagsStore.getState().clear();
+    useProjectStore.getState().reset();
     requestFocus();
   }, [close, closeRepo, requestFocus]);
+
+  const handleFind = useCallback(() => {
+    close({ restoreFocus: false });
+    openPicker("fuzzyFiles");
+  }, [close, openPicker]);
+
+  const handleProjectFlag = useCallback(async () => {
+    close({ restoreFocus: false });
+    const path = useProjectStore.getState().openPath;
+    const range = projectSelectionRange();
+    if (!path || !range) return;
+    try {
+      await addFlag(path, range.lo, range.hi, "range");
+    } finally {
+      requestFocus();
+    }
+  }, [close, requestFocus]);
 
   const switchTo = useCallback(
     (buffer: BufferName) => {
@@ -116,6 +138,17 @@ export function useCommands(rawClose: CommandClose): {
       run: handleRecentRepos,
     },
     {
+      id: "find",
+      name: "find",
+      aliases: ["files", "ff"],
+      label: "find file (fuzzy)",
+      group: "find",
+      prefix: null,
+      key: "f",
+      enabled: !!repo,
+      run: handleFind,
+    },
+    {
       id: "refresh",
       name: "refresh",
       aliases: ["reload", "g"],
@@ -125,6 +158,18 @@ export function useCommands(rawClose: CommandClose): {
       key: "r",
       enabled: !!repo,
       run: handleRefresh,
+    },
+    {
+      id: "flag",
+      name: "flag",
+      aliases: ["mark"],
+      label: openPath ? "flag selection" : "flag (open a file first)",
+      group: "tag",
+      prefix: "t",
+      key: "f",
+      buffer: "project",
+      enabled: !!openPath,
+      run: handleProjectFlag,
     },
     {
       id: "close",

@@ -3,9 +3,11 @@ import { invoke } from "@tauri-apps/api/core";
 import type { DiffSummary } from "../types/diff";
 import type {
   DirectoryListing,
+  FileMatch,
   FileSystemListing,
   RememberedRepo,
   RepoInfo,
+  TreeListing,
 } from "../types/repo";
 import type { AnchorKind, TagStore } from "../types/tags";
 
@@ -95,4 +97,16 @@ export function unreviewRange(
   endLine: number,
 ): Promise<TagStore> {
   return invoke<TagStore>("unreview_range", { repo, file, startLine, endLine });
+}
+
+export function fuzzyFiles(
+  repo: string,
+  query: string,
+  limit: number,
+): Promise<FileMatch[]> {
+  return invoke<FileMatch[]>("fuzzy_files", { repo, query, limit });
+}
+
+export function listRepoDir(repo: string, path: string): Promise<TreeListing> {
+  return invoke<TreeListing>("list_repo_dir", { repo, path });
 }
