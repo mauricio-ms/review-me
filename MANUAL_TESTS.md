@@ -162,6 +162,8 @@ printf 'changed\0bytes\n' > logo.bin                        # binary change
 ### 3.3 File viewer
 - [ ] **Steps:** Open a `.java` file. Move the cursor into the viewer (open a file via `Enter`, or `Ctrl-h` toggles back to the tree).
 - [ ] **Expect:** Java syntax highlighting, line numbers, **vim motions** (`j/k`, `gg`/`G`, `/search`, `w/b`). The file is **read-only** (insert keys don't change it). `Ctrl-h` returns focus to the tree. `Space`/`:` still open the palette/command line from normal mode.
+- [ ] **Steps:** Open files of other types (e.g. `.ts`, `.rs`, `.py`, `.json`, `.md`, `Cargo.toml`).
+- [ ] **Expect:** Each gets language-appropriate syntax highlighting (the grammar lazy-loads by file name on first open). Unknown/plain extensions (e.g. `.txt`, `logo.bin`) render as uncolored text — no error.
 
 ### 3.4 Flag in project mode
 - [ ] **Steps:** In the viewer, visually select a few lines (`v` + `j`), then `Space` → `t` → `f`.

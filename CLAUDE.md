@@ -66,7 +66,8 @@ conventions that will bite if ignored:
 `DiffBuffer.tsx` is a custom keyboard-navigable HTML list (magit-status), driven by its
 own `onKeyDown` over a flattened `Row[]` (file/hunk/line) with a `pending` ref for chords
 (`gg`, `]h`, `]f`) and a `visualAnchor` for `v` selection. Only the **project viewer**
-(`ProjectBuffer.tsx`) uses CodeMirror (read-only + vim + `lang-java`).
+(`ProjectBuffer.tsx`) uses CodeMirror (read-only + vim + per-file syntax
+highlighting lazy-loaded by extension via `@codemirror/language-data`).
 
 ### Tagging & anchoring (the subtle part)
 

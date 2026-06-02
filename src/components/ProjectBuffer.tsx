@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { java } from "@codemirror/lang-java";
-import { EditorState } from "@codemirror/state";
+import { LanguageDescription } from "@codemirror/language";
+import { languages } from "@codemirror/language-data";
+import { EditorState, type Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { getCM, vim } from "@replit/codemirror-vim";
 import CodeMirror from "@uiw/react-codemirror";
@@ -56,6 +57,7 @@ export default function ProjectBuffer() {
   const viewRef = useRef<EditorView | null>(null);
   const [cursor, setCursor] = useState(0);
   const [focusPane, setFocusPane] = useState<"tree" | "viewer">("tree");
+  const [langExt, setLangExt] = useState<Extension | null>(null);
 
   const nodes = useMemo(() => buildVisible(dirs, expanded), [dirs, expanded]);
 
@@ -90,6 +92,24 @@ export default function ProjectBuffer() {
     view.dispatch({ effects: setFlagLines.of(ranges) });
   }, [flags, openPath, content]);
 
+  // Lazily load the CodeMirror language for the open file, dispatched by file
+  // name (extension, plus special names like Dockerfile). The highlight colors
+  // come from the existing `theme="dark"`; this just supplies the grammar.
+  useEffect(() => {
+    setLangExt(null);
+    if (!openPath) return;
+    const name = openPath.split("/").pop() ?? openPath;
+    const desc = LanguageDescription.matchFilename(languages, name);
+    if (!desc) return;
+    let cancelled = false;
+    void desc.load().then((support) => {
+      if (!cancelled) setLangExt(support);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [openPath]);
+
   const extensions = useMemo(() => {
     const ext = [
       vim(),
@@ -100,9 +120,9 @@ export default function ProjectBuffer() {
       EditorState.readOnly.of(true),
       EditorView.lineWrapping,
     ];
-    if (openPath?.endsWith(".java")) ext.push(java());
+    if (langExt) ext.push(langExt);
     return ext;
-  }, [openPath]);
+  }, [langExt]);
 
   const onCreateEditor = useCallback(
     (view: EditorView) => {
