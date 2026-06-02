@@ -7,6 +7,7 @@ import type {
   RememberedRepo,
   RepoInfo,
 } from "../types/repo";
+import type { AnchorKind, TagStore } from "../types/tags";
 
 export function openRepo(path: string): Promise<RepoInfo> {
   return invoke<RepoInfo>("open_repo", { path });
@@ -37,4 +38,61 @@ export function createDirectory(
   name: string,
 ): Promise<DirectoryListing> {
   return invoke<DirectoryListing>("create_directory", { path, name });
+}
+
+export function readFile(repo: string, path: string): Promise<string> {
+  return invoke<string>("read_file", { repo, path });
+}
+
+export function loadTags(repo: string): Promise<TagStore> {
+  return invoke<TagStore>("load_tags", { repo });
+}
+
+export function addReviewedTag(
+  repo: string,
+  file: string,
+  startLine: number,
+  endLine: number,
+  kind: AnchorKind,
+): Promise<TagStore> {
+  return invoke<TagStore>("add_reviewed_tag", {
+    repo,
+    file,
+    startLine,
+    endLine,
+    kind,
+  });
+}
+
+export function addFlagTag(
+  repo: string,
+  file: string,
+  startLine: number,
+  endLine: number,
+  kind: AnchorKind,
+  note?: string | null,
+  severity?: string | null,
+): Promise<TagStore> {
+  return invoke<TagStore>("add_flag_tag", {
+    repo,
+    file,
+    startLine,
+    endLine,
+    kind,
+    note: note ?? null,
+    severity: severity ?? null,
+  });
+}
+
+export function removeTag(repo: string, id: string): Promise<TagStore> {
+  return invoke<TagStore>("remove_tag", { repo, id });
+}
+
+export function unreviewRange(
+  repo: string,
+  file: string,
+  startLine: number,
+  endLine: number,
+): Promise<TagStore> {
+  return invoke<TagStore>("unreview_range", { repo, file, startLine, endLine });
 }

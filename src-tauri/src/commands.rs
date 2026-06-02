@@ -1,10 +1,16 @@
 use std::path::PathBuf;
 
 use crate::diff::{self, DiffSummary};
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use crate::fs_browse::{self, DirectoryListing, FileSystemListing};
 use crate::repo::{self, RepoInfo};
 use crate::repo_library::{self, RememberedRepo};
+use crate::tags::{self, AnchorKind, TagStore};
+
+/// Resolve and validate the repo at `repo`, returning its canonical working-dir root.
+fn repo_root(repo: String) -> AppResult<PathBuf> {
+    repo::root(&repo::open(&PathBuf::from(repo))?)
+}
 
 /// Open (discover) the git repo at `path`, remember it in the recent list, and
 /// return its summary info.
@@ -43,4 +49,67 @@ pub fn list_file_system_entries(path: Option<String>) -> AppResult<FileSystemLis
 #[tauri::command]
 pub fn create_directory(path: String, name: String) -> AppResult<DirectoryListing> {
     fs_browse::create_directory(path, name)
+}
+
+/// Read a repo-relative file's text content (project mode + tag anchoring).
+#[tauri::command]
+pub fn read_file(repo: String, path: String) -> AppResult<String> {
+    let root = repo_root(repo)?;
+    let full = root.join(&path);
+    // Keep reads inside the repo root.
+    let canonical = full.canonicalize()?;
+    if !canonical.starts_with(&root) {
+        return Err(AppError::Repo("path escapes the repository".into()));
+    }
+    Ok(std::fs::read_to_string(canonical)?)
+}
+
+#[tauri::command]
+pub fn load_tags(repo: String) -> AppResult<TagStore> {
+    tags::load(&repo_root(repo)?)
+}
+
+#[tauri::command]
+pub fn save_tags(repo: String, store: TagStore) -> AppResult<()> {
+    tags::save(&repo_root(repo)?, &store)
+}
+
+#[tauri::command]
+pub fn add_reviewed_tag(
+    repo: String,
+    file: String,
+    start_line: u32,
+    end_line: u32,
+    kind: AnchorKind,
+) -> AppResult<TagStore> {
+    tags::add_reviewed(&repo_root(repo)?, &file, start_line, end_line, kind)
+}
+
+#[tauri::command]
+pub fn add_flag_tag(
+    repo: String,
+    file: String,
+    start_line: u32,
+    end_line: u32,
+    kind: AnchorKind,
+    note: Option<String>,
+    severity: Option<String>,
+) -> AppResult<TagStore> {
+    tags::add_flag(&repo_root(repo)?, &file, start_line, end_line, kind, note, severity)
+}
+
+#[tauri::command]
+pub fn remove_tag(repo: String, id: String) -> AppResult<TagStore> {
+    tags::remove(&repo_root(repo)?, &id)
+}
+
+/// Remove every reviewed tag overlapping `[start_line, end_line]` in `file`.
+#[tauri::command]
+pub fn unreview_range(
+    repo: String,
+    file: String,
+    start_line: u32,
+    end_line: u32,
+) -> AppResult<TagStore> {
+    tags::unreview_range(&repo_root(repo)?, &file, start_line, end_line)
 }

@@ -216,6 +216,14 @@ kbd {
   flex: 1;
 }
 
+.status-reviewed {
+  color: var(--accent-green);
+}
+
+.status-flagged {
+  color: var(--accent-amber);
+}
+
 .status-hint {
   color: var(--fg-3);
   display: flex;
@@ -268,6 +276,15 @@ kbd {
   color: var(--accent-red);
 }
 
+.diff-header-visual {
+  color: var(--bg-0);
+  background: var(--accent-amber);
+  padding: 0 6px;
+  border-radius: 3px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
 .diff-list {
   flex: 1;
   min-height: 0;
@@ -289,6 +306,45 @@ kbd {
 .diff-row.is-selected {
   background: rgba(var(--accent-teal-rgb), 0.12);
   box-shadow: inset 3px 0 0 var(--accent-amber);
+}
+
+.diff-row.is-visual-sel {
+  background: rgba(var(--accent-violet-rgb), 0.16);
+}
+
+.diff-row.is-visual-sel.is-selected {
+  background: rgba(var(--accent-violet-rgb), 0.24);
+}
+
+/* Review/flag indicator column shared by file/hunk/line rows. */
+.diff-mark {
+  display: inline-flex;
+  gap: 3px;
+  width: 26px;
+  flex: 0 0 26px;
+  justify-content: flex-start;
+}
+
+.mark-reviewed {
+  color: var(--accent-green);
+}
+
+.mark-flagged {
+  color: var(--accent-amber);
+}
+
+.diff-line-row.is-reviewed {
+  box-shadow: inset 2px 0 0 rgba(var(--accent-green-rgb), 0.7);
+}
+
+.diff-line-row.is-flagged {
+  box-shadow: inset 2px 0 0 var(--accent-amber);
+}
+
+.diff-line-row.is-reviewed.is-flagged {
+  box-shadow:
+    inset 2px 0 0 var(--accent-amber),
+    inset 5px 0 0 rgba(var(--accent-green-rgb), 0.7);
 }
 
 .diff-file-row {

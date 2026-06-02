@@ -1,13 +1,34 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import {
+  fileNewRange,
+  flagsOverlapping,
+  hunkNewRange,
+  isFileReviewed,
+  isHunkFlagged,
+  isHunkReviewed,
+  isLineFlagged,
+  isLineReviewed,
+} from "../lib/coverage";
+import {
+  addFlag,
+  removeFlags,
+  reviewLines,
+  reviewWholeFile,
+  unreviewLines,
+} from "../lib/review-actions";
 import { useRepoStore } from "../state/repo";
+import { useTagsStore } from "../state/tags";
 import { useUIStore } from "../state/ui";
 import type { ChangedFile, DiffLine, Hunk } from "../types/diff";
+import type { AnchorKind } from "../types/tags";
 
 type Row =
   | { kind: "file"; file: ChangedFile }
   | { kind: "hunk"; file: ChangedFile; hunk: Hunk }
   | { kind: "line"; file: ChangedFile; hunk: Hunk; line: DiffLine };
+
+type Scope = { file: ChangedFile; lo: number; hi: number; kind: AnchorKind };
 
 const STATUS_GLYPH: Record<ChangedFile["status"], string> = {
   added: "A",
@@ -35,6 +56,8 @@ export default function DiffBuffer() {
   const status = useRepoStore((s) => s.status);
   const expandedFiles = useRepoStore((s) => s.expandedFiles);
   const toggleFile = useRepoStore((s) => s.toggleFile);
+  const reviewed = useTagsStore((s) => s.reviewed);
+  const flags = useTagsStore((s) => s.flags);
   const activeBuffer = useUIStore((s) => s.activeBuffer);
   const focusRequest = useUIStore((s) => s.focusRequest);
 
@@ -42,6 +65,7 @@ export default function DiffBuffer() {
   const rowRefs = useRef<(HTMLDivElement | null)[]>([]);
   const pending = useRef<string | null>(null);
   const [cursor, setCursor] = useState(0);
+  const [visualAnchor, setVisualAnchor] = useState<number | null>(null);
 
   const files = useMemo(() => diff?.files ?? [], [diff]);
   const rows = useMemo(
@@ -49,20 +73,95 @@ export default function DiffBuffer() {
     [files, expandedFiles],
   );
 
-  // Keep the cursor in range as rows expand/collapse.
   useEffect(() => {
     setCursor((c) => Math.min(Math.max(0, c), Math.max(0, rows.length - 1)));
   }, [rows.length]);
 
-  // Grab focus when this buffer becomes active or a focus is requested.
   useEffect(() => {
     if (activeBuffer === "diff") rootRef.current?.focus({ preventScroll: true });
   }, [activeBuffer, focusRequest]);
 
-  // Scroll the selected row into view.
   useEffect(() => {
     rowRefs.current[cursor]?.scrollIntoView({ block: "nearest" });
   }, [cursor]);
+
+  const selectionRange = (): [number, number] =>
+    visualAnchor == null
+      ? [cursor, cursor]
+      : [Math.min(visualAnchor, cursor), Math.max(visualAnchor, cursor)];
+
+  // The new-side line range + scope kind targeted by the current cursor/selection.
+  const targetScope = (): Scope | null => {
+    if (visualAnchor != null) {
+      const [a, b] = selectionRange();
+      const file = rows[cursor]?.file;
+      if (!file) return null;
+      let lo = Infinity;
+      let hi = -Infinity;
+      for (let i = a; i <= b; i++) {
+        const r = rows[i];
+        if (r.kind === "line" && r.file.path === file.path && r.line.newLine != null) {
+          lo = Math.min(lo, r.line.newLine);
+          hi = Math.max(hi, r.line.newLine);
+        }
+      }
+      if (lo === Infinity) return cursorScope();
+      return { file, lo, hi, kind: "range" };
+    }
+    return cursorScope();
+  };
+
+  const cursorScope = (): Scope | null => {
+    const row = rows[cursor];
+    if (!row) return null;
+    if (row.kind === "file") {
+      const r = fileNewRange(row.file);
+      if (!r) return null;
+      return { file: row.file, lo: r.lo, hi: r.hi, kind: "file" };
+    }
+    if (row.kind === "hunk") {
+      const r = hunkNewRange(row.hunk);
+      if (!r) return null;
+      return { file: row.file, lo: r.lo, hi: r.hi, kind: "hunk" };
+    }
+    if (row.line.newLine != null) {
+      return { file: row.file, lo: row.line.newLine, hi: row.line.newLine, kind: "range" };
+    }
+    const r = hunkNewRange(row.hunk);
+    if (!r) return null;
+    return { file: row.file, lo: r.lo, hi: r.hi, kind: "hunk" };
+  };
+
+  const exitVisual = () => setVisualAnchor(null);
+
+  const doReview = () => {
+    const row = rows[cursor];
+    if (visualAnchor == null && row?.kind === "file") {
+      void reviewWholeFile(row.file);
+      return;
+    }
+    const scope = targetScope();
+    if (scope) void reviewLines(scope.file.path, scope.lo, scope.hi, scope.kind);
+    exitVisual();
+  };
+
+  const doUnreview = () => {
+    const scope = targetScope();
+    if (scope) void unreviewLines(scope.file.path, scope.lo, scope.hi);
+    exitVisual();
+  };
+
+  const doFlag = () => {
+    const scope = targetScope();
+    if (!scope) return;
+    const overlapping = flagsOverlapping(flags, scope.file.path, scope.lo, scope.hi);
+    if (overlapping.length > 0) {
+      void removeFlags(overlapping.map((t) => t.id));
+    } else {
+      void addFlag(scope.file.path, scope.lo, scope.hi, scope.kind);
+    }
+    exitVisual();
+  };
 
   const fileRowIndex = (path: string) =>
     rows.findIndex((r) => r.kind === "file" && r.file.path === path);
@@ -76,11 +175,7 @@ export default function DiffBuffer() {
   };
 
   const jumpTo = (predicate: (r: Row) => boolean, dir: 1 | -1) => {
-    for (
-      let i = cursor + dir;
-      i >= 0 && i < rows.length;
-      i += dir
-    ) {
+    for (let i = cursor + dir; i >= 0 && i < rows.length; i += dir) {
       if (predicate(rows[i])) {
         setCursor(i);
         return;
@@ -139,16 +234,41 @@ export default function DiffBuffer() {
         e.preventDefault();
         toggleAtCursor();
         break;
+      case "v":
+      case "V":
+        e.preventDefault();
+        setVisualAnchor((a) => (a == null ? cursor : null));
+        break;
+      case "Escape":
+        if (visualAnchor != null) {
+          e.preventDefault();
+          exitVisual();
+        }
+        break;
+      case "r":
+        e.preventDefault();
+        doReview();
+        break;
+      case "u":
+        e.preventDefault();
+        doUnreview();
+        break;
+      case "f":
+        e.preventDefault();
+        doFlag();
+        break;
     }
   };
 
   const loading = status.kind === "loading";
   const error = status.kind === "error" ? status.message : null;
+  const [selLo, selHi] = selectionRange();
+  const visual = visualAnchor != null;
 
   return (
     <div
       ref={rootRef}
-      className="buffer diff-buffer"
+      className={`buffer diff-buffer ${visual ? "is-visual" : ""}`}
       tabIndex={0}
       onKeyDown={onKeyDown}
     >
@@ -160,6 +280,7 @@ export default function DiffBuffer() {
             ? "working tree clean"
             : `${files.length} changed file${files.length === 1 ? "" : "s"}`}
         </span>
+        {visual && <span className="diff-header-visual">VISUAL</span>}
         {loading && <span className="diff-header-status">refreshing…</span>}
         {error && <span className="diff-header-error">{error}</span>}
       </div>
@@ -167,23 +288,29 @@ export default function DiffBuffer() {
       <div className="diff-list">
         {rows.map((row, idx) => {
           const selected = idx === cursor;
+          const inVisual = visual && idx >= selLo && idx <= selHi;
+          const cls = `${selected ? "is-selected" : ""} ${inVisual ? "is-visual-sel" : ""}`;
           const ref = (el: HTMLDivElement | null) => {
             rowRefs.current[idx] = el;
           };
           if (row.kind === "file") {
             const f = row.file;
             const open = expandedFiles.has(f.path) && !f.binary;
+            const fileReviewed = isFileReviewed(reviewed, f);
+            const fileFlagged = flags.some((t) => t.anchor.file === f.path);
             return (
               <div
                 key={`f:${f.path}`}
                 ref={ref}
-                className={`diff-row diff-file-row status-${f.status} ${
-                  selected ? "is-selected" : ""
-                }`}
+                className={`diff-row diff-file-row status-${f.status} ${cls}`}
                 onClick={() => setCursor(idx)}
                 onDoubleClick={toggleAtCursor}
               >
                 <span className="diff-caret">{f.binary ? " " : open ? "▾" : "▸"}</span>
+                <span className="diff-mark">
+                  {fileReviewed && <span className="mark-reviewed">✓</span>}
+                  {fileFlagged && <span className="mark-flagged">⚑</span>}
+                </span>
                 <span className="diff-status-glyph">{STATUS_GLYPH[f.status]}</span>
                 <span className="diff-file-path">
                   {f.oldPath ? `${f.oldPath} → ${f.path}` : f.path}
@@ -203,25 +330,35 @@ export default function DiffBuffer() {
             );
           }
           if (row.kind === "hunk") {
+            const hunkReviewed = isHunkReviewed(reviewed, row.file.path, row.hunk);
+            const hunkFlagged = isHunkFlagged(flags, row.file.path, row.hunk);
             return (
               <div
                 key={`h:${row.hunk.id}`}
                 ref={ref}
-                className={`diff-row diff-hunk-row ${selected ? "is-selected" : ""}`}
+                className={`diff-row diff-hunk-row ${cls}`}
                 onClick={() => setCursor(idx)}
               >
+                <span className="diff-mark">
+                  {hunkReviewed && <span className="mark-reviewed">✓</span>}
+                  {hunkFlagged && <span className="mark-flagged">⚑</span>}
+                </span>
                 <span className="diff-hunk-header">{row.hunk.header}</span>
               </div>
             );
           }
           const line = row.line;
+          const lineReviewed =
+            line.newLine != null && isLineReviewed(reviewed, row.file.path, line.newLine);
+          const lineFlagged =
+            line.newLine != null && isLineFlagged(flags, row.file.path, line.newLine);
           return (
             <div
               key={`l:${row.hunk.id}:${idx}`}
               ref={ref}
               className={`diff-row diff-line-row line-${line.kind} ${
-                selected ? "is-selected" : ""
-              }`}
+                lineReviewed ? "is-reviewed" : ""
+              } ${lineFlagged ? "is-flagged" : ""} ${cls}`}
               onClick={() => setCursor(idx)}
             >
               <span className="diff-gutter">{line.oldLine ?? ""}</span>

@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 
 import { refreshDiff } from "../lib/open-repo";
 import { useRepoStore } from "../state/repo";
+import { useTagsStore } from "../state/tags";
 import { useUIStore, type BufferName } from "../state/ui";
 
 /** Closes the overlay that invoked a command. Provided by each consumer. */
@@ -78,6 +79,7 @@ export function useCommands(rawClose: CommandClose): {
   const handleCloseRepo = useCallback(() => {
     close({ restoreFocus: false });
     closeRepo();
+    useTagsStore.getState().clear();
     requestFocus();
   }, [close, closeRepo, requestFocus]);
 

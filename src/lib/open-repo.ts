@@ -1,10 +1,12 @@
 import { useRepoStore } from "../state/repo";
+import { useTagsStore } from "../state/tags";
 import { useUIStore } from "../state/ui";
-import { computeDiff, openRepo } from "./tauri";
+import { computeDiff, loadTags, openRepo } from "./tauri";
 
 /**
- * Open a repository by path: load its info, compute the working-tree diff, switch
- * to the diff buffer, and focus it. Throws on failure (callers surface the error).
+ * Open a repository by path: load its info, compute the working-tree diff, load
+ * saved review/flag tags (re-anchored), switch to the diff buffer, and focus it.
+ * Throws on failure (callers surface the error).
  */
 export async function openRepoByPath(path: string): Promise<void> {
   const repoStore = useRepoStore.getState();
@@ -14,19 +16,24 @@ export async function openRepoByPath(path: string): Promise<void> {
   repoStore.setRepo(info, info.root);
   const diff = await computeDiff(info.root);
   repoStore.setDiff(diff);
+  try {
+    useTagsStore.getState().setStore(await loadTags(info.root));
+  } catch {
+    useTagsStore.getState().clear();
+  }
   ui.setActiveBuffer("diff");
   ui.requestFocus();
 }
 
-/** Recompute the diff for the already-open repo (the `refresh` command). */
+/** Recompute the diff and reload tags for the already-open repo (`refresh`). */
 export async function refreshDiff(): Promise<void> {
   const repoStore = useRepoStore.getState();
   const path = repoStore.repoPath;
   if (!path) return;
   repoStore.setStatus({ kind: "loading" });
   try {
-    const diff = await computeDiff(path);
-    repoStore.setDiff(diff);
+    repoStore.setDiff(await computeDiff(path));
+    useTagsStore.getState().setStore(await loadTags(path));
   } catch (e) {
     repoStore.setStatus({ kind: "error", message: String(e) });
   }
