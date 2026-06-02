@@ -142,7 +142,33 @@ printf 'changed\0bytes\n' > logo.bin                        # binary change
 
 ---
 
-## 3. Regression sanity
+## 3. M3 — Fuzzy finder & project mode
+
+> Optional fixture prep for ignore-awareness: in `/tmp/air-fixture`, add
+> `echo 'build/' > .gitignore && mkdir build && echo junk > build/out.o`, and a
+> nested source dir: `mkdir -p src/app && echo 'class B {}' > src/app/B.java`.
+
+### 3.1 Fuzzy file finder
+- [ ] **Steps:** With a repo open, press `Space` → `f` (or `:` → `find`). Type part of a filename (e.g. `bjava`).
+- [ ] **Expect:** Results rank by fuzzy score; the matched characters are highlighted amber. `↑`/`↓` (or `Ctrl-n`/`Ctrl-p`) move, `Enter` opens the file in **project mode**, `Esc` cancels. Empty query lists files immediately.
+- [ ] **Expect:** Git-ignored files (e.g. `build/out.o`) do **not** appear.
+
+### 3.2 Project tree navigation
+- [ ] **Steps:** `Space` → `b` → `p` to enter project mode (or open a file via the finder). Focus the left tree.
+- [ ] **Expect:** Repo file tree; `.git` and ignored dirs (`build/`) are hidden. Directories sort first. `j`/`k` move, `l`/`Enter` expands a dir (lazy-loads children) or opens a file, `h` collapses an expanded dir or jumps to the parent, `G` to bottom.
+
+### 3.3 File viewer
+- [ ] **Steps:** Open a `.java` file. Move the cursor into the viewer (open a file via `Enter`, or `Ctrl-h` toggles back to the tree).
+- [ ] **Expect:** Java syntax highlighting, line numbers, **vim motions** (`j/k`, `gg`/`G`, `/search`, `w/b`). The file is **read-only** (insert keys don't change it). `Ctrl-h` returns focus to the tree. `Space`/`:` still open the palette/command line from normal mode.
+
+### 3.4 Flag in project mode
+- [ ] **Steps:** In the viewer, visually select a few lines (`v` + `j`), then `Space` → `t` → `f`.
+- [ ] **Expect:** Those lines get an amber flag highlight; status-bar `⚑` count increments. Switch buffers / reopen the file → the flag highlight persists (and is in `.ai-review/tags.json`).
+- [ ] **Expect:** There is **no** "reviewed" action in project mode (reviewing is diff-only); only flagging is available here.
+
+---
+
+## 4. Regression sanity
 - [ ] App builds: `npm run build` (frontend) and `cd src-tauri && cargo test` (backend, all green).
 - [ ] No console errors in the dev tools during normal use.
 - [ ] Theme/contrast readable; long file paths truncate rather than overflow.
@@ -150,7 +176,6 @@ printf 'changed\0bytes\n' > logo.bin                        # binary change
 ---
 
 ## Not yet implemented (do not test)
-- **Project mode** (M3): file tree + viewer, fuzzy file finder — currently a placeholder.
 - **Cross-references** (M4): `gd` / `gr` go-to-definition / find-usages via tree-sitter (Java).
 
-_When M3/M4 land, add their scenarios under new sections here._
+_When M4 lands, add its scenarios under a new section here._
