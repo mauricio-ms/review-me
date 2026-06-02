@@ -2,9 +2,11 @@ mod commands;
 mod diff;
 mod error;
 mod fs_browse;
+mod fuzzy;
 mod repo;
 mod repo_library;
 mod tags;
+mod tree;
 
 pub fn run() {
     tauri::Builder::default()
@@ -22,6 +24,8 @@ pub fn run() {
             commands::add_flag_tag,
             commands::remove_tag,
             commands::unreview_range,
+            commands::fuzzy_files,
+            commands::list_repo_dir,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

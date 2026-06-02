@@ -3,9 +3,11 @@ use std::path::PathBuf;
 use crate::diff::{self, DiffSummary};
 use crate::error::{AppError, AppResult};
 use crate::fs_browse::{self, DirectoryListing, FileSystemListing};
+use crate::fuzzy::{self, FileMatch};
 use crate::repo::{self, RepoInfo};
 use crate::repo_library::{self, RememberedRepo};
 use crate::tags::{self, AnchorKind, TagStore};
+use crate::tree::{self, TreeListing};
 
 /// Resolve and validate the repo at `repo`, returning its canonical working-dir root.
 fn repo_root(repo: String) -> AppResult<PathBuf> {
@@ -101,6 +103,20 @@ pub fn add_flag_tag(
 #[tauri::command]
 pub fn remove_tag(repo: String, id: String) -> AppResult<TagStore> {
     tags::remove(&repo_root(repo)?, &id)
+}
+
+/// Fuzzy-rank repo files for the file finder.
+#[tauri::command]
+pub fn fuzzy_files(repo: String, query: String, limit: u32) -> AppResult<Vec<FileMatch>> {
+    let repository = repo::open(&PathBuf::from(repo))?;
+    fuzzy::fuzzy_files(&repository, &query, limit as usize)
+}
+
+/// List the children of a repo-relative directory for project-mode navigation.
+#[tauri::command]
+pub fn list_repo_dir(repo: String, path: String) -> AppResult<TreeListing> {
+    let repository = repo::open(&PathBuf::from(repo))?;
+    tree::list_dir(&repository, &path)
 }
 
 /// Remove every reviewed tag overlapping `[start_line, end_line]` in `file`.
