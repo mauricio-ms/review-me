@@ -1,7 +1,11 @@
 :root {
   color-scheme: dark;
-  font-family: ui-sans-serif, system-ui, -apple-system, "Inter", sans-serif;
+  font-family: var(--mono);
   font-size: 14px;
+
+  /* Code surfaces (diff list, project tree, project viewer) match the user's
+     emacs default face: JetBrains Mono at :height 190 (≈ 19px). */
+  --code-font-size: 19px;
 
   --status-bar-h: 26px;
   --bg-0: #0b0f14;
@@ -32,8 +36,11 @@
   --accent-green-rgb: 89, 217, 142;
   --accent-red-rgb: 255, 92, 122;
 
-  --mono: ui-monospace, "JetBrainsMono Nerd Font", "JetBrains Mono", "Fira Code",
-    monospace;
+  /* Plain "JetBrains Mono" first (exact match for the emacs default face);
+     the Nerd Font variants stay reachable for per-glyph fallback so the
+     file-type icons in the tree/picker resolve. */
+  --mono: "JetBrains Mono", "JetBrainsMono Nerd Font", "Symbols Nerd Font Mono",
+    ui-monospace, "Fira Code", monospace;
 }
 
 * {
@@ -290,7 +297,7 @@ kbd {
   min-height: 0;
   overflow-y: auto;
   padding: 6px 0 40px;
-  font-size: 12.5px;
+  font-size: var(--code-font-size);
   line-height: 1.55;
 }
 
@@ -391,12 +398,12 @@ kbd {
 
 .diff-staged-dot {
   color: var(--accent-green);
-  font-size: 10px;
+  font-size: 0.7em;
 }
 
 .diff-file-stat {
   color: var(--fg-3);
-  font-size: 11px;
+  font-size: 0.78em;
   font-weight: 400;
 }
 
@@ -428,7 +435,7 @@ kbd {
   color: var(--fg-3);
   text-align: right;
   padding-right: 10px;
-  font-size: 11px;
+  font-size: 0.8em;
   user-select: none;
 }
 
@@ -477,7 +484,7 @@ kbd {
   overflow-y: auto;
   padding: 6px 0;
   font-family: var(--mono);
-  font-size: 12.5px;
+  font-size: var(--code-font-size);
   outline: none;
   background: var(--bg-1);
 }
@@ -548,9 +555,12 @@ kbd {
   padding: 24px;
 }
 
-/* Give the CodeMirror wrapper a real height (the height-chain gotcha). */
+/* Give the CodeMirror wrapper a real height (the height-chain gotcha), and
+   match the emacs editing surface: JetBrains Mono at the shared code size. */
 .project-viewer .cm-editor {
   height: 100%;
+  font-family: var(--mono);
+  font-size: var(--code-font-size);
 }
 
 .project-viewer > div:last-child {
