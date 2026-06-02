@@ -471,6 +471,20 @@ kbd {
   color: var(--fg-1);
 }
 
+/* Intra-line (word) diff: stronger tint on just the changed segments. Background
+   only — no padding — so monospace columns stay aligned. */
+.diff-word {
+  border-radius: 2px;
+}
+
+.line-added .diff-word {
+  background: rgba(var(--accent-green-rgb), 0.34);
+}
+
+.line-removed .diff-word {
+  background: rgba(var(--accent-red-rgb), 0.34);
+}
+
 /* ---------- project buffer ---------- */
 
 .project-buffer {

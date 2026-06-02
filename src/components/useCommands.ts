@@ -49,6 +49,8 @@ export function useCommands(rawClose: CommandClose): {
   const repo = useRepoStore((s) => s.repo);
   const closeRepo = useRepoStore((s) => s.closeRepo);
   const openPath = useProjectStore((s) => s.openPath);
+  const diffHighlight = useUIStore((s) => s.diffHighlight);
+  const toggleDiffHighlight = useUIStore((s) => s.toggleDiffHighlight);
 
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -93,6 +95,11 @@ export function useCommands(rawClose: CommandClose): {
     close({ restoreFocus: false });
     openPicker("fuzzyFiles");
   }, [close, openPicker]);
+
+  const handleToggleDiffMode = useCallback(() => {
+    toggleDiffHighlight();
+    close();
+  }, [close, toggleDiffHighlight]);
 
   const handleProjectFlag = useCallback(async () => {
     close({ restoreFocus: false });
@@ -169,6 +176,18 @@ export function useCommands(rawClose: CommandClose): {
       key: "r",
       enabled: !!repo,
       run: handleRefresh,
+    },
+    {
+      id: "diff-mode",
+      name: "diffmode",
+      aliases: ["highlight", "worddiff", "hl"],
+      label: `diff highlight → ${diffHighlight === "word" ? "line" : "word"}`,
+      group: "diff",
+      prefix: null,
+      key: "h",
+      buffer: "diff",
+      enabled: !!repo,
+      run: handleToggleDiffMode,
     },
     {
       id: "flag",

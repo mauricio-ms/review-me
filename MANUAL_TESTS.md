@@ -93,6 +93,12 @@ printf 'changed\0bytes\n' > logo.bin                        # binary change
 ### 1.10 Leader keys & focus
 - [ ] **Expect:** `Space` always opens the palette, `:` the command line, from any buffer. `Esc` dismisses overlays. Typing in the command-line input does **not** trigger leader keys.
 
+### 1.11 Word-diff highlighting & mode toggle
+- [ ] **Steps:** Expand a file that has a *modified* line (a line edited in place, not purely added/removed). Look at the changed `+`/`−` line pair.
+- [ ] **Expect (default):** Only the parts that actually changed within the line carry a stronger green/red background; the unchanged parts keep the plain line tint. Purely added/removed lines (no counterpart) stay fully tinted.
+- [ ] **Steps:** In the diff buffer, `Space` → `h` (or `:diffmode` / `:highlight`).
+- [ ] **Expect:** The view switches to whole-line highlighting (no intra-line emphasis); the command label flips to `diff highlight → word`. Toggling again restores word highlighting. The command only appears while the diff buffer is active.
+
 ---
 
 ## 2. M2 — Review & flag tagging

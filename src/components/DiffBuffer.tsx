@@ -17,6 +17,7 @@ import {
   reviewWholeFile,
   unreviewLines,
 } from "../lib/review-actions";
+import { refineHunk, type WordSeg } from "../lib/word-diff";
 import { useRepoStore } from "../state/repo";
 import { useTagsStore } from "../state/tags";
 import { useUIStore } from "../state/ui";
@@ -26,7 +27,14 @@ import type { AnchorKind } from "../types/tags";
 type Row =
   | { kind: "file"; file: ChangedFile }
   | { kind: "hunk"; file: ChangedFile; hunk: Hunk }
-  | { kind: "line"; file: ChangedFile; hunk: Hunk; line: DiffLine };
+  | {
+      kind: "line";
+      file: ChangedFile;
+      hunk: Hunk;
+      line: DiffLine;
+      /** Intra-line word-diff segments, or null when there's nothing to refine. */
+      segments: WordSeg[] | null;
+    };
 
 type Scope = { file: ChangedFile; lo: number; hi: number; kind: AnchorKind };
 
@@ -44,7 +52,10 @@ function buildRows(files: ChangedFile[], expanded: Set<string>): Row[] {
     if (expanded.has(file.path) && !file.binary) {
       for (const hunk of file.hunks) {
         rows.push({ kind: "hunk", file, hunk });
-        for (const line of hunk.lines) rows.push({ kind: "line", file, hunk, line });
+        const segments = refineHunk(hunk.lines);
+        hunk.lines.forEach((line, li) =>
+          rows.push({ kind: "line", file, hunk, line, segments: segments[li] }),
+        );
       }
     }
   }
@@ -60,6 +71,7 @@ export default function DiffBuffer() {
   const flags = useTagsStore((s) => s.flags);
   const activeBuffer = useUIStore((s) => s.activeBuffer);
   const focusRequest = useUIStore((s) => s.focusRequest);
+  const diffHighlight = useUIStore((s) => s.diffHighlight);
 
   const rootRef = useRef<HTMLDivElement | null>(null);
   const rowRefs = useRef<(HTMLDivElement | null)[]>([]);
@@ -366,7 +378,19 @@ export default function DiffBuffer() {
               <span className="diff-line-sign">
                 {line.kind === "added" ? "+" : line.kind === "removed" ? "−" : " "}
               </span>
-              <span className="diff-line-content">{line.content || " "}</span>
+              <span className="diff-line-content">
+                {diffHighlight === "word" && row.segments && row.segments.length > 0
+                  ? row.segments.map((seg, i) =>
+                      seg.changed ? (
+                        <span key={i} className="diff-word">
+                          {seg.text}
+                        </span>
+                      ) : (
+                        <span key={i}>{seg.text}</span>
+                      ),
+                    )
+                  : line.content || " "}
+              </span>
             </div>
           );
         })}

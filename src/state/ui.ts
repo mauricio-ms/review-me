@@ -2,6 +2,8 @@ import { create } from "zustand";
 
 export type BufferName = "diff" | "project";
 export type VimMode = "normal" | "insert" | "visual" | "replace";
+/** How the diff view highlights changes: per-word (intra-line) or whole-line. */
+export type DiffHighlightMode = "word" | "line";
 
 /** Which full-screen modal picker (if any) is open. */
 export type PickerKind = null | "openRepo" | "recentRepos" | "fuzzyFiles";
@@ -14,6 +16,7 @@ type UIState = {
   picker: PickerKind;
   focusRequest: number;
   modalDepth: number;
+  diffHighlight: DiffHighlightMode;
 
   switchBuffer: (dir: "next" | "prev") => void;
   setActiveBuffer: (b: BufferName) => void;
@@ -28,6 +31,8 @@ type UIState = {
   requestFocus: () => void;
   beginModal: () => void;
   endModal: () => void;
+  setDiffHighlight: (m: DiffHighlightMode) => void;
+  toggleDiffHighlight: () => void;
 };
 
 const BUFFERS: BufferName[] = ["diff", "project"];
@@ -40,6 +45,7 @@ export const useUIStore = create<UIState>((set) => ({
   picker: null,
   focusRequest: 0,
   modalDepth: 0,
+  diffHighlight: "word",
 
   switchBuffer: (dir) =>
     set((s) => {
@@ -62,4 +68,7 @@ export const useUIStore = create<UIState>((set) => ({
   requestFocus: () => set((s) => ({ focusRequest: s.focusRequest + 1 })),
   beginModal: () => set((s) => ({ modalDepth: s.modalDepth + 1 })),
   endModal: () => set((s) => ({ modalDepth: Math.max(0, s.modalDepth - 1) })),
+  setDiffHighlight: (m) => set({ diffHighlight: m }),
+  toggleDiffHighlight: () =>
+    set((s) => ({ diffHighlight: s.diffHighlight === "word" ? "line" : "word" })),
 }));

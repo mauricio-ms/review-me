@@ -65,8 +65,11 @@ conventions that will bite if ignored:
 
 `DiffBuffer.tsx` is a custom keyboard-navigable HTML list (magit-status), driven by its
 own `onKeyDown` over a flattened `Row[]` (file/hunk/line) with a `pending` ref for chords
-(`gg`, `]h`, `]f`) and a `visualAnchor` for `v` selection. Only the **project viewer**
-(`ProjectBuffer.tsx`) uses CodeMirror (read-only + vim + per-file syntax
+(`gg`, `]h`, `]f`) and a `visualAnchor` for `v` selection. Line rows carry **intra-line
+word-diff** segments (`lib/word-diff.ts`: pairs each removed line with the added line that
+replaced it, LCS over tokens) — on by default; the `diff highlight` command (`Space h` /
+`:diffmode`) toggles `useUIStore.diffHighlight` between `word` and whole-`line`. Only the
+**project viewer** (`ProjectBuffer.tsx`) uses CodeMirror (read-only + vim + per-file syntax
 highlighting lazy-loaded by extension via `@codemirror/language-data`).
 
 ### Tagging & anchoring (the subtle part)
