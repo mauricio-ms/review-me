@@ -156,7 +156,7 @@ printf 'changed\0bytes\n' > logo.bin                        # binary change
 
 ### 3.2 Project tree navigation
 - [ ] **Steps:** `Space` → `b` → `p` to enter project mode (or open a file via the finder). Focus the left tree.
-- [ ] **Expect:** Repo file tree; `.git` and ignored dirs (`build/`) are hidden. Directories sort first. `j`/`k` move, `l`/`Enter` expands a dir (lazy-loads children) or opens a file, `h` collapses an expanded dir or jumps to the parent, `G` to bottom.
+- [ ] **Expect:** Repo file tree; `.git` and ignored dirs (`build/`) are hidden. Directories sort first. `j`/`k` move, `l`/`Enter` expands a dir (lazy-loads children) or opens a file, `h` collapses an expanded dir or jumps to the parent, `Tab` toggles the folder under the cursor (expand/collapse; no-op on files), `G` to bottom.
 - [ ] **Expect:** Directories show a blue folder icon that switches between closed/open as they expand; files show a colored type icon (Java, Rust, TS, JSON, Markdown, …) matching their extension.
 
 ### 3.3 File viewer

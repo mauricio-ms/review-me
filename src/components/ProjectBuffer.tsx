@@ -174,6 +174,13 @@ export default function ProjectBuffer() {
         e.preventDefault();
         setCursor(Math.max(0, nodes.length - 1));
         break;
+      case "Tab": {
+        // Toggle the folder under the cursor (no-op on files).
+        e.preventDefault();
+        const node = nodes[cursor];
+        if (node?.entry.isDir) void toggleDir(node.entry.path);
+        break;
+      }
       case "Enter":
       case "l":
       case "ArrowRight":
