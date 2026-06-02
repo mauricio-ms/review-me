@@ -1,7 +1,7 @@
 import { useRepoStore } from "../state/repo";
 import { useTagsStore } from "../state/tags";
 import { useUIStore } from "../state/ui";
-import { computeDiff, loadTags, openRepo } from "./tauri";
+import { buildSymbolIndex, computeDiff, loadTags, openRepo } from "./tauri";
 
 /**
  * Open a repository by path: load its info, compute the working-tree diff, load
@@ -21,6 +21,8 @@ export async function openRepoByPath(path: string): Promise<void> {
   } catch {
     useTagsStore.getState().clear();
   }
+  // Warm the cross-reference index in the background.
+  void buildSymbolIndex(info.root).catch(() => {});
   ui.setActiveBuffer("diff");
   ui.requestFocus();
 }
@@ -34,6 +36,7 @@ export async function refreshDiff(): Promise<void> {
   try {
     repoStore.setDiff(await computeDiff(path));
     useTagsStore.getState().setStore(await loadTags(path));
+    void buildSymbolIndex(path).catch(() => {});
   } catch (e) {
     repoStore.setStatus({ kind: "error", message: String(e) });
   }

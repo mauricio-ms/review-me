@@ -585,6 +585,72 @@ kbd {
   font-weight: 700;
 }
 
+/* ---------- xref panel ---------- */
+
+.xref-panel {
+  width: min(900px, 94vw);
+  height: min(560px, 82vh);
+}
+
+.xref-title {
+  flex: 1;
+  min-width: 0;
+  color: var(--fg-1);
+  font-size: 18px;
+  border-left: 1px solid rgba(var(--accent-teal-rgb), 0.18);
+  padding-left: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.xref-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.xref-row.is-selected {
+  background: rgba(var(--accent-teal-rgb), 0.14);
+  box-shadow: inset 3px 0 0 var(--accent-amber);
+}
+
+.xref-loc {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--accent-blue);
+}
+
+.xref-kind {
+  font-size: 11px;
+  padding: 0 5px;
+  border-radius: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.xref-kind.kind-definition {
+  background: rgba(var(--accent-green-rgb), 0.16);
+  color: var(--accent-green);
+}
+
+.xref-kind.kind-reference {
+  background: rgba(var(--accent-violet-rgb), 0.16);
+  color: var(--accent-violet);
+}
+
+.xref-snippet {
+  color: var(--fg-2);
+  font-family: var(--mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ---------- command transient ---------- */
 
 .asset-picker.command-transient {

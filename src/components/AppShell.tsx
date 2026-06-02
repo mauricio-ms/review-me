@@ -11,6 +11,7 @@ import OpenRepoHost from "./OpenRepoHost";
 import ProjectBuffer from "./ProjectBuffer";
 import RecentReposHost from "./RecentReposHost";
 import StartupDashboard from "./StartupDashboard";
+import XrefHost from "./XrefHost";
 
 function isTypingTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
@@ -97,6 +98,7 @@ export default function AppShell() {
       <OpenRepoHost />
       <RecentReposHost />
       <FuzzyFinderHost />
+      <XrefHost />
       {transientOpen && <CommandTransient />}
       {commandLineOpen && <CommandLine />}
     </div>

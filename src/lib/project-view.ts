@@ -18,3 +18,27 @@ export function projectSelectionRange(): { lo: number; hi: number } | null {
     hi: state.doc.lineAt(sel.to).number,
   };
 }
+
+/** Cursor position as 1-based line + 0-based column. */
+export function projectCursor(): { line: number; col: number } | null {
+  if (!activeView) return null;
+  const { state } = activeView;
+  const head = state.selection.main.head;
+  const line = state.doc.lineAt(head);
+  return { line: line.number, col: head - line.from };
+}
+
+/** Move the viewer cursor to a 1-based line / 0-based col and scroll to it. */
+export function setProjectCursor(line: number, col = 0): void {
+  const view = activeView;
+  if (!view) return;
+  const lineCount = view.state.doc.lines;
+  const ln = Math.min(Math.max(1, line), lineCount);
+  const lineObj = view.state.doc.line(ln);
+  const pos = Math.min(lineObj.from + col, lineObj.to);
+  view.dispatch({
+    selection: { anchor: pos, head: pos },
+    scrollIntoView: true,
+  });
+  view.focus();
+}

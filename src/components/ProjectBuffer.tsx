@@ -8,6 +8,7 @@ import CodeMirror from "@uiw/react-codemirror";
 
 import { leaderKeymap, vimEscapeKeymap } from "../editor/cm-shared";
 import { flagDecorations, setFlagLines } from "../editor/flag-decorations";
+import { defineXrefVim } from "../editor/vim-xref";
 import { openProjectFile, loadDir, toggleDir } from "../lib/project";
 import { setProjectView } from "../lib/project-view";
 import { useProjectStore } from "../state/project";
@@ -55,6 +56,11 @@ export default function ProjectBuffer() {
   const [focusPane, setFocusPane] = useState<"tree" | "viewer">("tree");
 
   const nodes = useMemo(() => buildVisible(dirs, expanded), [dirs, expanded]);
+
+  // Register gd/gr vim mappings once.
+  useEffect(() => {
+    defineXrefVim();
+  }, []);
 
   // Load the repo root the first time project mode is shown.
   useEffect(() => {

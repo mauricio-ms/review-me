@@ -3,6 +3,7 @@ import { useCallback, useState } from "react";
 import { refreshDiff } from "../lib/open-repo";
 import { projectSelectionRange } from "../lib/project-view";
 import { addFlag } from "../lib/review-actions";
+import { findUsages, gotoDefinition } from "../lib/xref";
 import { useProjectStore } from "../state/project";
 import { useRepoStore } from "../state/repo";
 import { useTagsStore } from "../state/tags";
@@ -105,6 +106,16 @@ export function useCommands(rawClose: CommandClose): {
     }
   }, [close, requestFocus]);
 
+  const handleGotoDef = useCallback(() => {
+    close({ restoreFocus: false });
+    void gotoDefinition();
+  }, [close]);
+
+  const handleFindRefs = useCallback(() => {
+    close({ restoreFocus: false });
+    void findUsages();
+  }, [close]);
+
   const switchTo = useCallback(
     (buffer: BufferName) => {
       close({ restoreFocus: false });
@@ -170,6 +181,30 @@ export function useCommands(rawClose: CommandClose): {
       buffer: "project",
       enabled: !!openPath,
       run: handleProjectFlag,
+    },
+    {
+      id: "goto-def",
+      name: "definition",
+      aliases: ["def", "gd"],
+      label: "go to definition",
+      group: "xref",
+      prefix: "g",
+      key: "d",
+      buffer: "project",
+      enabled: !!openPath,
+      run: handleGotoDef,
+    },
+    {
+      id: "find-refs",
+      name: "references",
+      aliases: ["refs", "gr", "usages"],
+      label: "find references",
+      group: "xref",
+      prefix: "g",
+      key: "r",
+      buffer: "project",
+      enabled: !!openPath,
+      run: handleFindRefs,
     },
     {
       id: "close",

@@ -10,6 +10,7 @@ import type {
   TreeListing,
 } from "../types/repo";
 import type { AnchorKind, TagStore } from "../types/tags";
+import type { IndexStats, SymbolRef, XrefResult } from "../types/xref";
 
 export function openRepo(path: string): Promise<RepoInfo> {
   return invoke<RepoInfo>("open_repo", { path });
@@ -109,4 +110,31 @@ export function fuzzyFiles(
 
 export function listRepoDir(repo: string, path: string): Promise<TreeListing> {
   return invoke<TreeListing>("list_repo_dir", { repo, path });
+}
+
+export function buildSymbolIndex(repo: string): Promise<IndexStats> {
+  return invoke<IndexStats>("build_symbol_index", { repo });
+}
+
+export function symbolAt(
+  repo: string,
+  path: string,
+  line: number,
+  col: number,
+): Promise<SymbolRef | null> {
+  return invoke<SymbolRef | null>("symbol_at", { repo, path, line, col });
+}
+
+export function findDefinition(
+  repo: string,
+  symbol: SymbolRef,
+): Promise<XrefResult[]> {
+  return invoke<XrefResult[]>("find_definition", { repo, symbol });
+}
+
+export function findReferences(
+  repo: string,
+  symbol: SymbolRef,
+): Promise<XrefResult[]> {
+  return invoke<XrefResult[]>("find_references", { repo, symbol });
 }
