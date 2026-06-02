@@ -168,14 +168,37 @@ printf 'changed\0bytes\n' > logo.bin                        # binary change
 
 ---
 
-## 4. Regression sanity
-- [ ] App builds: `npm run build` (frontend) and `cd src-tauri && cargo test` (backend, all green).
-- [ ] No console errors in the dev tools during normal use.
-- [ ] Theme/contrast readable; long file paths truncate rather than overflow.
+## 4. M4 — Cross-references (tree-sitter, Java)
+
+> Use the nested Java fixture from §3 (`src/app/B.java` plus the existing
+> `A.java`/`B.java`). For a meatier test, add a class that's used across files,
+> e.g. a `Greeter` class referenced from a `Main` class.
+
+### 4.1 Go to definition
+- [ ] **Steps:** Open a `.java` file in project mode, put the cursor on a type or method name that's defined elsewhere, press `gd` (or `Space` → `g` → `d`).
+- [ ] **Expect:** If there's a single definition, the viewer jumps straight to it (opening the defining file if needed, cursor on the declaration). If multiple, the **Cross-reference** panel lists them; `Enter` navigates. A symbol with no definition shows a "no definition" panel.
+
+### 4.2 Find references
+- [ ] **Steps:** Cursor on a symbol, press `gr` (or `Space` → `g` → `r`).
+- [ ] **Expect:** The panel lists every occurrence as `file:line` + source snippet, with `def`/`ref` badges; same-file results are ranked first. `↑`/`↓`/`j`/`k` move, `Enter` opens the chosen location in the viewer at that line, `Esc` closes.
+
+### 4.3 Index freshness
+- [ ] **Steps:** Open a repo (the index builds in the background). Run `gd`/`gr` — they should work without a manual build step. Add/rename a Java symbol, then `Space` → `r` (refresh).
+- [ ] **Expect:** After refresh, cross-references reflect the updated code.
+
+### 4.4 Non-Java / no symbol
+- [ ] **Steps:** Try `gd` on whitespace, or in a non-`.java` file.
+- [ ] **Expect:** Nothing happens (no symbol resolved) — no crash.
+
+> **Known limitation:** resolution is name+kind based (no full type/scope
+> resolution), so references to same-named symbols in different classes may all
+> appear. This is intended for navigation, not exact semantic analysis.
 
 ---
 
-## Not yet implemented (do not test)
-- **Cross-references** (M4): `gd` / `gr` go-to-definition / find-usages via tree-sitter (Java).
-
-_When M4 lands, add its scenarios under a new section here._
+## 5. Regression sanity
+- [ ] App builds: `npm run build` (frontend) and `cd src-tauri && cargo test` (backend, all green).
+- [ ] No console errors in the dev tools during normal use.
+- [ ] Theme/contrast readable; long file paths truncate rather than overflow.
+- [ ] Cross-buffer flow: open repo → review/flag in diff → `Space f` to a file →
+      `gd`/`gr` to navigate → flag in project mode → all marks persist after restart.
