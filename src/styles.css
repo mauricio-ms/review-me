@@ -310,9 +310,18 @@ kbd {
   cursor: default;
 }
 
+.diff-row.is-section {
+  background: rgba(var(--accent-teal-rgb), 0.06);
+}
+
 .diff-row.is-selected {
   background: rgba(var(--accent-teal-rgb), 0.12);
   box-shadow: inset 3px 0 0 var(--accent-amber);
+}
+
+/* Cursor row inside a highlighted section keeps the stronger wash + amber bar. */
+.diff-row.is-section.is-selected {
+  background: rgba(var(--accent-teal-rgb), 0.12);
 }
 
 .diff-row.is-visual-sel {
@@ -416,7 +425,11 @@ kbd {
 }
 
 .diff-hunk-row {
-  padding: 2px 14px 2px 34px;
+  padding: 2px 14px 2px 22px;
+}
+
+.diff-hunk-row .diff-caret {
+  color: var(--fg-3);
 }
 
 .diff-hunk-header {

@@ -45,13 +45,18 @@ const STATUS_GLYPH: Record<ChangedFile["status"], string> = {
   renamed: "R",
 };
 
-function buildRows(files: ChangedFile[], expanded: Set<string>): Row[] {
+function buildRows(
+  files: ChangedFile[],
+  expanded: Set<string>,
+  collapsedHunks: Set<string>,
+): Row[] {
   const rows: Row[] = [];
   for (const file of files) {
     rows.push({ kind: "file", file });
     if (expanded.has(file.path) && !file.binary) {
       for (const hunk of file.hunks) {
         rows.push({ kind: "hunk", file, hunk });
+        if (collapsedHunks.has(hunk.id)) continue;
         const segments = refineHunk(hunk.lines);
         hunk.lines.forEach((line, li) =>
           rows.push({ kind: "line", file, hunk, line, segments: segments[li] }),
@@ -66,7 +71,9 @@ export default function DiffBuffer() {
   const diff = useRepoStore((s) => s.diff);
   const status = useRepoStore((s) => s.status);
   const expandedFiles = useRepoStore((s) => s.expandedFiles);
+  const collapsedHunks = useRepoStore((s) => s.collapsedHunks);
   const toggleFile = useRepoStore((s) => s.toggleFile);
+  const toggleHunk = useRepoStore((s) => s.toggleHunk);
   const reviewed = useTagsStore((s) => s.reviewed);
   const flags = useTagsStore((s) => s.flags);
   const activeBuffer = useUIStore((s) => s.activeBuffer);
@@ -81,8 +88,8 @@ export default function DiffBuffer() {
 
   const files = useMemo(() => diff?.files ?? [], [diff]);
   const rows = useMemo(
-    () => buildRows(files, expandedFiles),
-    [files, expandedFiles],
+    () => buildRows(files, expandedFiles, collapsedHunks),
+    [files, expandedFiles, collapsedHunks],
   );
 
   useEffect(() => {
@@ -101,6 +108,20 @@ export default function DiffBuffer() {
     visualAnchor == null
       ? [cursor, cursor]
       : [Math.min(visualAnchor, cursor), Math.max(visualAnchor, cursor)];
+
+  // Row-index span of the section the cursor sits in (file → all its rows,
+  // hunk → header + its lines, line → just itself). Drives the section highlight.
+  const sectionRange = (): [number, number] => {
+    const row = rows[cursor];
+    if (!row || row.kind === "line") return [cursor, cursor];
+    let end = cursor + 1;
+    if (row.kind === "file") {
+      while (end < rows.length && rows[end].kind !== "file") end++;
+    } else {
+      while (end < rows.length && rows[end].kind === "line") end++;
+    }
+    return [cursor, end - 1];
+  };
 
   // The new-side line range + scope kind targeted by the current cursor/selection.
   const targetScope = (): Scope | null => {
@@ -181,8 +202,17 @@ export default function DiffBuffer() {
   const toggleAtCursor = () => {
     const row = rows[cursor];
     if (!row) return;
-    toggleFile(row.file.path);
-    const idx = fileRowIndex(row.file.path);
+    if (row.kind === "file") {
+      toggleFile(row.file.path);
+      const idx = fileRowIndex(row.file.path);
+      if (idx >= 0) setCursor(idx);
+      return;
+    }
+    // hunk or line: fold this hunk and land the cursor on its header row.
+    toggleHunk(row.hunk.id);
+    const idx = rows.findIndex(
+      (r) => r.kind === "hunk" && r.hunk.id === row.hunk.id,
+    );
     if (idx >= 0) setCursor(idx);
   };
 
@@ -276,6 +306,7 @@ export default function DiffBuffer() {
   const error = status.kind === "error" ? status.message : null;
   const [selLo, selHi] = selectionRange();
   const visual = visualAnchor != null;
+  const [secLo, secHi] = visual ? [-1, -1] : sectionRange();
 
   return (
     <div
@@ -301,7 +332,10 @@ export default function DiffBuffer() {
         {rows.map((row, idx) => {
           const selected = idx === cursor;
           const inVisual = visual && idx >= selLo && idx <= selHi;
-          const cls = `${selected ? "is-selected" : ""} ${inVisual ? "is-visual-sel" : ""}`;
+          const inSection = !visual && idx >= secLo && idx <= secHi;
+          const cls = `${selected ? "is-selected" : ""} ${
+            inSection ? "is-section" : ""
+          } ${inVisual ? "is-visual-sel" : ""}`;
           const ref = (el: HTMLDivElement | null) => {
             rowRefs.current[idx] = el;
           };
@@ -344,13 +378,16 @@ export default function DiffBuffer() {
           if (row.kind === "hunk") {
             const hunkReviewed = isHunkReviewed(reviewed, row.file.path, row.hunk);
             const hunkFlagged = isHunkFlagged(flags, row.file.path, row.hunk);
+            const open = !collapsedHunks.has(row.hunk.id);
             return (
               <div
                 key={`h:${row.hunk.id}`}
                 ref={ref}
                 className={`diff-row diff-hunk-row ${cls}`}
                 onClick={() => setCursor(idx)}
+                onDoubleClick={toggleAtCursor}
               >
+                <span className="diff-caret">{open ? "▾" : "▸"}</span>
                 <span className="diff-mark">
                   {hunkReviewed && <span className="mark-reviewed">✓</span>}
                   {hunkFlagged && <span className="mark-flagged">⚑</span>}

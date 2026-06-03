@@ -78,9 +78,15 @@ printf 'changed\0bytes\n' > logo.bin                        # binary change
   - `]f` / `[f` jump to next / previous **file** header.
   - `]h` / `[h` jump to next / previous **hunk** header (after expanding).
 
-### 1.7 Expand / collapse hunks
+### 1.7 Expand / collapse files and hunks (magit-style nested folding)
 - [ ] **Steps:** On a file row, press `Tab` (or `Enter`, or double-click).
-- [ ] **Expect:** The file expands to show hunk headers (`@@ … @@`, blue) and unified-diff lines: old/new line-number gutters, `+` lines green, `−` lines red, context muted. `Tab` again collapses.
+- [ ] **Expect:** The file expands to show hunk headers (`@@ … @@`, blue, each with a `▾`/`▸` caret) and unified-diff lines: old/new line-number gutters, `+` lines green, `−` lines red, context muted. `Tab` on the file row again collapses the whole file.
+- [ ] **Steps:** Move the cursor onto a **hunk header** and press `Tab` (or `Enter`, or double-click).
+- [ ] **Expect:** Only that hunk's lines collapse (caret flips to `▸`); sibling hunks stay expanded. `Tab` again re-expands just that hunk. Pressing `Tab` while on a diff **line** also folds the parent hunk and lands the cursor on its header.
+
+### 1.7b Section highlight follows the cursor
+- [ ] **Steps:** With a file expanded, move the cursor onto the **file** header, then a **hunk** header, then a single **line**.
+- [ ] **Expect:** On the file header the whole file section (header + all its hunks/lines) gets a subtle background; on a hunk header only that hunk (header + its lines) is washed; on a line only that line. In every case the exact cursor row keeps the brighter wash + amber left-bar. Entering visual (`v`) replaces the section wash with the violet selection highlight.
 
 ### 1.8 Buffer switching
 - [ ] **Steps:** `Space` → `b` → `p` (project), then `Space` → `b` → `d` (diff). Also try `:project` / `:diff`.
@@ -122,9 +128,9 @@ printf 'changed\0bytes\n' > logo.bin                        # binary change
 - [ ] **Steps:** On a reviewed hunk/file/line, press `u`.
 - [ ] **Expect:** The `✓` / reviewed stripe is removed for that scope. Status bar count decrements.
 
-### 2.5 Flag toggle
+### 2.5 Flag toggle (scope follows the highlighted section)
 - [ ] **Steps:** On a file/hunk/line (or a visual selection), press `f`. Press `f` again on the same scope.
-- [ ] **Expect:** First `f` adds an amber `⚑` (and amber line stripe); status bar `⚑ count` increments. Second `f` removes it (toggle). Flags work on the same scopes as review.
+- [ ] **Expect:** First `f` adds an amber `⚑` (and amber line stripe); status bar `⚑ count` increments. Second `f` removes it (toggle). The flag covers exactly the section currently highlighted — flagging a **hunk** stripes only that hunk's lines (sibling hunks stay unflagged), flagging a **line** stripes only that line. Flags work on the same scopes as review.
 
 ### 2.6 Reviewed + flagged together
 - [ ] **Steps:** Review a line, then flag the same line.

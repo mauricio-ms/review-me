@@ -15,11 +15,14 @@ type RepoState = {
   status: DiffStatus;
   /** Repo-relative paths of files whose diff is expanded in the diff buffer. */
   expandedFiles: Set<string>;
+  /** Ids of hunks whose lines are collapsed (hunks are expanded by default). */
+  collapsedHunks: Set<string>;
 
   setRepo: (repo: RepoInfo, path: string) => void;
   setDiff: (diff: DiffSummary) => void;
   setStatus: (status: DiffStatus) => void;
   toggleFile: (path: string) => void;
+  toggleHunk: (id: string) => void;
   setExpanded: (paths: Set<string>) => void;
   closeRepo: () => void;
 };
@@ -30,6 +33,7 @@ export const useRepoStore = create<RepoState>((set) => ({
   diff: null,
   status: { kind: "idle" },
   expandedFiles: new Set(),
+  collapsedHunks: new Set(),
 
   setRepo: (repo, path) => set({ repo, repoPath: path }),
   setDiff: (diff) => set({ diff, status: { kind: "idle" } }),
@@ -41,6 +45,13 @@ export const useRepoStore = create<RepoState>((set) => ({
       else next.add(path);
       return { expandedFiles: next };
     }),
+  toggleHunk: (id) =>
+    set((s) => {
+      const next = new Set(s.collapsedHunks);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return { collapsedHunks: next };
+    }),
   setExpanded: (paths) => set({ expandedFiles: paths }),
   closeRepo: () =>
     set({
@@ -49,5 +60,6 @@ export const useRepoStore = create<RepoState>((set) => ({
       diff: null,
       status: { kind: "idle" },
       expandedFiles: new Set(),
+      collapsedHunks: new Set(),
     }),
 }));
