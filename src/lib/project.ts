@@ -50,3 +50,10 @@ export async function openFileInProject(path: string): Promise<void> {
   ui.setActiveBuffer("project");
   ui.requestFocus();
 }
+
+/** Leave project mode and return to the diff buffer (its state is preserved). */
+export function backToDiff(): void {
+  const ui = useUIStore.getState();
+  ui.setActiveBuffer("diff");
+  ui.requestFocus();
+}

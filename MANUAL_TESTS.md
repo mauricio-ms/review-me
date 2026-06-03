@@ -79,10 +79,17 @@ printf 'changed\0bytes\n' > logo.bin                        # binary change
   - `]h` / `[h` jump to next / previous **hunk** header (after expanding).
 
 ### 1.7 Expand / collapse files and hunks (magit-style nested folding)
-- [ ] **Steps:** On a file row, press `Tab` (or `Enter`, or double-click).
+- [ ] **Steps:** On a file row, press `Tab` (or double-click).
 - [ ] **Expect:** The file expands to show hunk headers (`@@ … @@`, blue, each with a `▾`/`▸` caret) and unified-diff lines: old/new line-number gutters, `+` lines green, `−` lines red, context muted. `Tab` on the file row again collapses the whole file.
-- [ ] **Steps:** Move the cursor onto a **hunk header** and press `Tab` (or `Enter`, or double-click).
+- [ ] **Steps:** Move the cursor onto a **hunk header** and press `Tab` (or double-click).
 - [ ] **Expect:** Only that hunk's lines collapse (caret flips to `▸`); sibling hunks stay expanded. `Tab` again re-expands just that hunk. Pressing `Tab` while on a diff **line** also folds the parent hunk and lands the cursor on its header.
+- [ ] **Note:** Only `Tab` (and double-click) folds — `Enter` does **not** (see 1.7c).
+
+### 1.7c Enter opens the file in project mode at the cursor position
+- [ ] **Steps:** With the cursor on a diff **line** (an added/context line), press `Enter`.
+- [ ] **Expect:** The project buffer comes to the front showing that file, with the viewer cursor scrolled to and placed on the same line.
+- [ ] **Steps:** Press `Enter` on a **hunk header** / a **file** row instead.
+- [ ] **Expect:** Opens the file at the hunk's start line / the file's first changed line, respectively.
 
 ### 1.7b Section highlight follows the cursor
 - [ ] **Steps:** With a file expanded, move the cursor onto the **file** header, then a **hunk** header, then a single **line**.
@@ -168,12 +175,14 @@ printf 'changed\0bytes\n' > logo.bin                        # binary change
 
 ### 3.2 Project tree navigation
 - [ ] **Steps:** `Space` → `b` → `p` to enter project mode (or open a file via the finder). Focus the left tree.
-- [ ] **Expect:** Repo file tree; `.git` and ignored dirs (`build/`) are hidden. Directories sort first. `j`/`k` move, `l`/`Enter` expands a dir (lazy-loads children) or opens a file, `h` collapses an expanded dir or jumps to the parent, `Tab` toggles the folder under the cursor (expand/collapse; no-op on files), `G` to bottom.
+- [ ] **Expect:** Repo file tree; `.git` and ignored dirs (`build/`) are hidden. Directories sort first. `j`/`k` move, `l`/`Enter` expands a dir (lazy-loads children) or opens a file, `h` collapses an expanded dir or jumps to the parent, `Tab` toggles the folder under the cursor (expand/collapse; no-op on files), `G` to bottom, `q` returns to the diff buffer.
 - [ ] **Expect:** Directories show a blue folder icon that switches between closed/open as they expand; files show a colored type icon (Java, Rust, TS, JSON, Markdown, …) matching their extension.
 
 ### 3.3 File viewer
 - [ ] **Steps:** Open a `.java` file. Move the cursor into the viewer (open a file via `Enter`, or `Ctrl-h` toggles back to the tree).
-- [ ] **Expect:** Java syntax highlighting, line numbers, **vim motions** (`j/k`, `gg`/`G`, `/search`, `w/b`). The file is **read-only** (insert keys don't change it). `Ctrl-h` returns focus to the tree. `Space`/`:` still open the palette/command line from normal mode.
+- [ ] **Expect:** Java syntax highlighting, line numbers, **vim motions** (`j/k`, `gg`/`G`, `/search`, `w/b`). The file is **read-only** (insert keys don't change it). `Ctrl-h` returns focus to the tree; `q` (vim normal mode) returns to the diff buffer at its previous position. `Space`/`:` still open the palette/command line from normal mode.
+- [ ] **Steps:** With the viewer focused, press `/` to start a search and type a query containing the letter `q`.
+- [ ] **Expect:** The `q` is typed into the search field — it does **not** leave the buffer (the `q→diff` mapping is normal-mode only).
 - [ ] **Steps:** Open files of other types (e.g. `.ts`, `.rs`, `.py`, `.json`, `.md`, `Cargo.toml`).
 - [ ] **Expect:** Each gets language-appropriate syntax highlighting (the grammar lazy-loads by file name on first open). Unknown/plain extensions (e.g. `.txt`, `logo.bin`) render as uncolored text — no error.
 

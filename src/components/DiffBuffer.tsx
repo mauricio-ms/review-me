@@ -10,6 +10,8 @@ import {
   isLineFlagged,
   isLineReviewed,
 } from "../lib/coverage";
+import { openFileInProject } from "../lib/project";
+import { setProjectCursor } from "../lib/project-view";
 import {
   addFlag,
   removeFlags,
@@ -216,6 +218,20 @@ export default function DiffBuffer() {
     if (idx >= 0) setCursor(idx);
   };
 
+  // Open the file under the cursor in project mode, positioned at the new-side
+  // line the cursor maps to (line → that line, hunk → its start, file → first change).
+  const openAtCursor = () => {
+    const row = rows[cursor];
+    if (!row) return;
+    const scope = cursorScope();
+    const line = scope ? scope.lo : 1;
+    void openFileInProject(row.file.path).then(() => {
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => setProjectCursor(line)),
+      );
+    });
+  };
+
   const jumpTo = (predicate: (r: Row) => boolean, dir: 1 | -1) => {
     for (let i = cursor + dir; i >= 0 && i < rows.length; i += dir) {
       if (predicate(rows[i])) {
@@ -272,9 +288,12 @@ export default function DiffBuffer() {
         pending.current = key;
         break;
       case "Tab":
-      case "Enter":
         e.preventDefault();
         toggleAtCursor();
+        break;
+      case "Enter":
+        e.preventDefault();
+        openAtCursor();
         break;
       case "v":
       case "V":

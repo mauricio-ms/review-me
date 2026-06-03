@@ -9,10 +9,11 @@ import CodeMirror from "@uiw/react-codemirror";
 
 import { leaderKeymap, vimEscapeKeymap } from "../editor/cm-shared";
 import { flagDecorations, setFlagLines } from "../editor/flag-decorations";
+import { defineNavVim } from "../editor/vim-nav";
 import { defineXrefVim } from "../editor/vim-xref";
 import { xrefClick } from "../editor/xref-click";
 import { fileIcon } from "../lib/file-icons";
-import { openProjectFile, loadDir, toggleDir } from "../lib/project";
+import { backToDiff, openProjectFile, loadDir, toggleDir } from "../lib/project";
 import { setProjectView } from "../lib/project-view";
 import { useProjectStore } from "../state/project";
 import { useTagsStore } from "../state/tags";
@@ -61,9 +62,10 @@ export default function ProjectBuffer() {
 
   const nodes = useMemo(() => buildVisible(dirs, expanded), [dirs, expanded]);
 
-  // Register gd/gr vim mappings once.
+  // Register the project viewer's vim mappings once (gd/gr, q→diff).
   useEffect(() => {
     defineXrefVim();
+    defineNavVim();
   }, []);
 
   // Load the repo root the first time project mode is shown.
@@ -192,6 +194,10 @@ export default function ProjectBuffer() {
         e.preventDefault();
         collapseOrParent(nodes[cursor]);
         break;
+      case "q":
+        e.preventDefault();
+        backToDiff();
+        break;
     }
   };
 
@@ -250,7 +256,8 @@ export default function ProjectBuffer() {
             <div className="empty-title">no file open</div>
             <div className="empty-hint">
               Select a file in the tree, or press <kbd>Space</kbd> <kbd>f</kbd> to
-              fuzzy-find. <kbd>Ctrl</kbd>+<kbd>h</kbd> returns to the tree.
+              fuzzy-find. <kbd>Ctrl</kbd>+<kbd>h</kbd> returns to the tree;{" "}
+              <kbd>q</kbd> returns to the diff.
             </div>
           </div>
         ) : (
