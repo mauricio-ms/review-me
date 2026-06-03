@@ -1073,3 +1073,123 @@ kbd {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ---------- diff clean state (fake terminal) ---------- */
+
+.diff-clean {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  padding: 24px;
+  overflow: hidden;
+  font-family: var(--mono);
+  user-select: none;
+  background:
+    radial-gradient(
+      circle at 50% 30%,
+      rgba(var(--accent-green-rgb), 0.08),
+      transparent 46%
+    ),
+    radial-gradient(
+      circle at 82% 84%,
+      rgba(var(--accent-teal-rgb), 0.06),
+      transparent 40%
+    ),
+    linear-gradient(160deg, var(--bg-0) 0%, var(--bg-1) 100%);
+}
+
+.diff-clean-term {
+  width: min(560px, 86%);
+  background: var(--bg-deep);
+  border: 1px solid var(--bg-3);
+  border-radius: 8px;
+  box-shadow: 0 14px 44px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+.diff-clean-term-title {
+  padding: 7px 14px;
+  border-bottom: 1px solid var(--bg-3);
+  background: rgba(var(--bg-1-rgb), 0.6);
+  color: var(--fg-3);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+}
+
+.diff-clean-body {
+  padding: 14px 16px 16px;
+  min-height: 188px;
+}
+
+.diff-clean-line {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.diff-clean-line.is-cmd:not(:first-child) {
+  margin-top: 0.7em;
+}
+
+.diff-clean-prompt {
+  color: var(--accent-green);
+  margin-right: 0.7ch;
+}
+
+.diff-clean-cmd {
+  color: var(--fg-0);
+}
+
+.diff-clean-out {
+  color: var(--fg-2);
+}
+
+.diff-clean-out.is-ok {
+  color: var(--accent-green);
+  text-shadow: 0 0 12px rgba(var(--accent-green-rgb), 0.35);
+}
+
+.diff-clean-cursor {
+  color: var(--accent-green);
+  margin-left: 0.5ch;
+  animation: diffCleanBlink 1.05s steps(1) infinite;
+}
+
+.diff-clean-hints {
+  display: flex;
+  gap: 22px;
+  color: var(--fg-3);
+  font-size: 12px;
+  animation: diffCleanFadeIn 0.4s both;
+}
+
+@keyframes diffCleanBlink {
+  50% {
+    opacity: 0;
+  }
+}
+
+@keyframes diffCleanFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .diff-clean-cursor {
+    animation: none;
+  }
+  .diff-clean-hints {
+    animation: none;
+  }
+}

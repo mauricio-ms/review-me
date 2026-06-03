@@ -23,6 +23,7 @@ import {
   unreviewLines,
 } from "../lib/review-actions";
 import { refineHunk, type WordSeg } from "../lib/word-diff";
+import DiffCleanState from "./DiffCleanState";
 import { useRepoStore } from "../state/repo";
 import { useTagsStore } from "../state/tags";
 import { useUIStore } from "../state/ui";
@@ -420,6 +421,7 @@ export default function DiffBuffer() {
 
   const loading = status.kind === "loading";
   const error = status.kind === "error" ? status.message : null;
+  const isClean = diff != null && files.length === 0 && error == null;
   const [selLo, selHi] = selectionRange();
   const visual = visualAnchor != null;
   const [secLo, secHi] = visual ? [-1, -1] : sectionRange();
@@ -444,6 +446,9 @@ export default function DiffBuffer() {
         {error && <span className="diff-header-error">{error}</span>}
       </div>
 
+      {isClean ? (
+        <DiffCleanState />
+      ) : (
       <div className="diff-list">
         {rows.map((row, idx) => {
           const selected = idx === cursor;
@@ -564,6 +569,7 @@ export default function DiffBuffer() {
           );
         })}
       </div>
+      )}
     </div>
   );
 }

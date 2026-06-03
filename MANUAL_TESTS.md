@@ -111,6 +111,11 @@ printf 'changed\0bytes\n' > logo.bin                        # binary change
 - [ ] **Steps:** Edit a file in the fixture externally, then `Space` → `r` (refresh). Then `Space` → `c` (close).
 - [ ] **Expect:** Refresh recomputes the diff to match the new working-tree state. Close returns to the startup dashboard.
 
+### 1.9b Clean working tree — fake terminal
+- [ ] **Steps:** Make the working tree clean (e.g. `git stash` or commit all changes in the fixture), then `Space` → `r` (refresh).
+- [ ] **Expect:** Instead of an empty list, the diff buffer shows a fake terminal window that *types* `git status` and prints "nothing to commit, working tree clean" (last clause green), then `git rev-parse --short HEAD` and `ai-review status`. The branch, short HEAD sha, and reviewed/flagged counts are **real** (match the fixture). A green block cursor blinks at a trailing `❯` prompt, and a `r refresh · b p project · o p open repo` hint row fades in below. Editing a file + `r` returns to the normal diff list; making it clean again replays the type-out.
+- [ ] **Reduced motion:** With OS "reduce motion" enabled, the whole transcript renders immediately and static (no typewriter, no blink).
+
 ### 1.10 Leader keys & focus
 - [ ] **Expect:** `Space` always opens the palette, `:` the command line, from any buffer. `Esc` dismisses overlays. Typing in the command-line input does **not** trigger leader keys.
 
