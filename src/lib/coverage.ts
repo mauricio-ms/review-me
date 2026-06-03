@@ -106,6 +106,26 @@ export function isHunkFlagged(flags: FlagTag[], file: string, hunk: Hunk): boole
   return overlaps(flags, file, r.lo, r.hi);
 }
 
+/** The three magit-style sections of the diff buffer, in display order. */
+export type ReviewSection = "toReview" | "flagged" | "reviewed";
+
+/** Section a single reviewable hunk belongs in (flagged > reviewed > to-review). */
+export function sectionForHunk(
+  reviewed: ReviewedTag[],
+  flags: FlagTag[],
+  file: string,
+  hunk: Hunk,
+): ReviewSection {
+  if (isHunkFlagged(flags, file, hunk)) return "flagged";
+  if (isHunkReviewed(reviewed, file, hunk)) return "reviewed";
+  return "toReview";
+}
+
+/** Section for a hunkless/binary file, which can only be flagged at file scope. */
+export function sectionForFile(flags: FlagTag[], file: string): ReviewSection {
+  return flags.some((t) => t.anchor.file === file) ? "flagged" : "toReview";
+}
+
 /** Flag tags in `file` whose range overlaps `[lo, hi]` (used to toggle flags off). */
 export function flagsOverlapping(
   flags: FlagTag[],

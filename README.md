@@ -25,9 +25,12 @@ Reviewing agent-generated code has a different shape than reviewing a human PR:
 
 `ai-review` is built around those needs:
 
-- **Diff mode** — a magit-style view of the working tree vs `HEAD`. Expand files into
-  hunks and lines, navigate entirely from the keyboard, with intra-line word-diff
-  highlighting so you see exactly what changed within an edited line.
+- **Diff mode** — a magit-style view of the working tree vs `HEAD`, grouped into three
+  sections — **To review**, **Flagged**, and **Reviewed** — just as magit splits
+  untracked / unstaged / staged. Tagging a hunk moves it between sections so "what's
+  left" is always front and center (empty sections are hidden). Expand files into hunks
+  and lines, navigate entirely from the keyboard, with intra-line word-diff highlighting
+  so you see exactly what changed within an edited line.
 - **Review / flag tagging** — tag a whole file, a single hunk, or an arbitrary line range
   as **reviewed** (`✓`, "I've checked this") or **flagged** (`⚑`, "come back to this").
   Tags persist across restarts and *re-anchor* to the code as it moves.
@@ -135,7 +138,9 @@ chase a definition.
 | `gg` / `G` | Jump to top / bottom |
 | `]f` / `[f` | Next / previous **file** |
 | `]h` / `[h` | Next / previous **hunk** |
-| `Tab` / `Enter` | Expand / collapse the file (or hunk) under the cursor |
+| `]s` / `[s` | Next / previous **section** |
+| `Tab` | Fold / unfold the section, file, or hunk under the cursor |
+| `Enter` | Open the file under the cursor in project mode at that line |
 | `v` / `V` | Start/clear a visual line selection (extend with `j`/`k`) |
 | `r` | Mark the file / hunk / selection **reviewed** (`✓`) |
 | `u` | Un-review |

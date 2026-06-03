@@ -332,6 +332,41 @@ kbd {
   background: rgba(var(--accent-violet-rgb), 0.24);
 }
 
+/* Magit-style top-level section header (To review / Flagged / Reviewed). */
+.diff-section-header {
+  padding: 6px 14px 4px;
+  margin-top: 10px;
+  border-top: 1px solid var(--bg-3);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--fg-2);
+}
+
+.diff-section-header:first-child {
+  margin-top: 0;
+  border-top: none;
+}
+
+.diff-section-header.section-flagged {
+  color: var(--accent-amber);
+}
+
+.diff-section-header.section-reviewed {
+  color: var(--accent-green);
+}
+
+.diff-section-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.diff-section-count {
+  color: var(--fg-3);
+  font-weight: 600;
+}
+
 /* Review/flag indicator column shared by file/hunk/line rows. */
 .diff-mark {
   display: inline-flex;

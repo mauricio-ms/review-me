@@ -9,6 +9,9 @@ import {
   isHunkReviewed,
   isLineFlagged,
   isLineReviewed,
+  sectionForFile,
+  sectionForHunk,
+  type ReviewSection,
 } from "../lib/coverage";
 import { openFileInProject } from "../lib/project";
 import { setProjectCursor } from "../lib/project-view";
@@ -24,13 +27,15 @@ import { useRepoStore } from "../state/repo";
 import { useTagsStore } from "../state/tags";
 import { useUIStore } from "../state/ui";
 import type { ChangedFile, DiffLine, Hunk } from "../types/diff";
-import type { AnchorKind } from "../types/tags";
+import type { AnchorKind, FlagTag, ReviewedTag } from "../types/tags";
 
 type Row =
-  | { kind: "file"; file: ChangedFile }
-  | { kind: "hunk"; file: ChangedFile; hunk: Hunk }
+  | { kind: "section"; section: ReviewSection; count: number }
+  | { kind: "file"; section: ReviewSection; file: ChangedFile }
+  | { kind: "hunk"; section: ReviewSection; file: ChangedFile; hunk: Hunk }
   | {
       kind: "line";
+      section: ReviewSection;
       file: ChangedFile;
       hunk: Hunk;
       line: DiffLine;
@@ -47,22 +52,84 @@ const STATUS_GLYPH: Record<ChangedFile["status"], string> = {
   renamed: "R",
 };
 
+/** Top-level sections, in fixed display order (magit untracked/unstaged/staged style). */
+const SECTION_ORDER: ReviewSection[] = ["toReview", "flagged", "reviewed"];
+const SECTION_LABEL: Record<ReviewSection, string> = {
+  toReview: "To review",
+  flagged: "Flagged",
+  reviewed: "Reviewed",
+};
+
 function buildRows(
   files: ChangedFile[],
   expanded: Set<string>,
   collapsedHunks: Set<string>,
+  collapsedSections: Set<ReviewSection>,
+  reviewed: ReviewedTag[],
+  flags: FlagTag[],
 ): Row[] {
-  const rows: Row[] = [];
+  // Bucket each file's hunks (or the whole file, when hunkless) into sections,
+  // preserving file order within a section and hunk order within a file. A hunk
+  // lands in exactly one section; a file recurs once per section it has hunks in.
+  type Entry = { file: ChangedFile; hunks: Hunk[] };
+  const buckets: Record<ReviewSection, Entry[]> = {
+    toReview: [],
+    flagged: [],
+    reviewed: [],
+  };
+
   for (const file of files) {
-    rows.push({ kind: "file", file });
-    if (expanded.has(file.path) && !file.binary) {
-      for (const hunk of file.hunks) {
-        rows.push({ kind: "hunk", file, hunk });
-        if (collapsedHunks.has(hunk.id)) continue;
-        const segments = refineHunk(hunk.lines);
-        hunk.lines.forEach((line, li) =>
-          rows.push({ kind: "line", file, hunk, line, segments: segments[li] }),
-        );
+    const reviewable = file.hunks.some((h) => hunkNewRange(h) != null);
+    if (file.binary || !reviewable) {
+      // Binary / pure-deletion files can't be hunk-reviewed; classify the file.
+      buckets[sectionForFile(flags, file.path)].push({ file, hunks: [] });
+      continue;
+    }
+    const perSection: Record<ReviewSection, Hunk[]> = {
+      toReview: [],
+      flagged: [],
+      reviewed: [],
+    };
+    for (const hunk of file.hunks) {
+      // Pure-deletion hunks have no new-side lines to tag → To review.
+      const sec = hunkNewRange(hunk)
+        ? sectionForHunk(reviewed, flags, file.path, hunk)
+        : "toReview";
+      perSection[sec].push(hunk);
+    }
+    for (const sec of SECTION_ORDER) {
+      if (perSection[sec].length > 0) {
+        buckets[sec].push({ file, hunks: perSection[sec] });
+      }
+    }
+  }
+
+  const rows: Row[] = [];
+  for (const section of SECTION_ORDER) {
+    const entries = buckets[section];
+    if (entries.length === 0) continue; // hide empty sections (magit-style)
+    // Count reviewable units: hunks, or the file itself when it has none.
+    const count = entries.reduce((n, e) => n + (e.hunks.length || 1), 0);
+    rows.push({ kind: "section", section, count });
+    if (collapsedSections.has(section)) continue;
+    for (const { file, hunks } of entries) {
+      rows.push({ kind: "file", section, file });
+      if (expanded.has(file.path) && !file.binary) {
+        for (const hunk of hunks) {
+          rows.push({ kind: "hunk", section, file, hunk });
+          if (collapsedHunks.has(hunk.id)) continue;
+          const segments = refineHunk(hunk.lines);
+          hunk.lines.forEach((line, li) =>
+            rows.push({
+              kind: "line",
+              section,
+              file,
+              hunk,
+              line,
+              segments: segments[li],
+            }),
+          );
+        }
       }
     }
   }
@@ -74,8 +141,10 @@ export default function DiffBuffer() {
   const status = useRepoStore((s) => s.status);
   const expandedFiles = useRepoStore((s) => s.expandedFiles);
   const collapsedHunks = useRepoStore((s) => s.collapsedHunks);
+  const collapsedSections = useRepoStore((s) => s.collapsedSections);
   const toggleFile = useRepoStore((s) => s.toggleFile);
   const toggleHunk = useRepoStore((s) => s.toggleHunk);
+  const toggleSection = useRepoStore((s) => s.toggleSection);
   const reviewed = useTagsStore((s) => s.reviewed);
   const flags = useTagsStore((s) => s.flags);
   const activeBuffer = useUIStore((s) => s.activeBuffer);
@@ -90,8 +159,16 @@ export default function DiffBuffer() {
 
   const files = useMemo(() => diff?.files ?? [], [diff]);
   const rows = useMemo(
-    () => buildRows(files, expandedFiles, collapsedHunks),
-    [files, expandedFiles, collapsedHunks],
+    () =>
+      buildRows(
+        files,
+        expandedFiles,
+        collapsedHunks,
+        collapsedSections,
+        reviewed,
+        flags,
+      ),
+    [files, expandedFiles, collapsedHunks, collapsedSections, reviewed, flags],
   );
 
   useEffect(() => {
@@ -111,14 +188,22 @@ export default function DiffBuffer() {
       ? [cursor, cursor]
       : [Math.min(visualAnchor, cursor), Math.max(visualAnchor, cursor)];
 
-  // Row-index span of the section the cursor sits in (file → all its rows,
-  // hunk → header + its lines, line → just itself). Drives the section highlight.
+  // Row-index span of the section the cursor sits in (section → all its rows,
+  // file → all its rows, hunk → header + its lines, line → just itself).
+  // Drives the cursor-follows highlight.
   const sectionRange = (): [number, number] => {
     const row = rows[cursor];
     if (!row || row.kind === "line") return [cursor, cursor];
     let end = cursor + 1;
-    if (row.kind === "file") {
-      while (end < rows.length && rows[end].kind !== "file") end++;
+    if (row.kind === "section") {
+      while (end < rows.length && rows[end].kind !== "section") end++;
+    } else if (row.kind === "file") {
+      while (
+        end < rows.length &&
+        rows[end].kind !== "file" &&
+        rows[end].kind !== "section"
+      )
+        end++;
     } else {
       while (end < rows.length && rows[end].kind === "line") end++;
     }
@@ -129,7 +214,8 @@ export default function DiffBuffer() {
   const targetScope = (): Scope | null => {
     if (visualAnchor != null) {
       const [a, b] = selectionRange();
-      const file = rows[cursor]?.file;
+      const anchor = rows[cursor];
+      const file = anchor && anchor.kind !== "section" ? anchor.file : null;
       if (!file) return null;
       let lo = Infinity;
       let hi = -Infinity;
@@ -148,7 +234,7 @@ export default function DiffBuffer() {
 
   const cursorScope = (): Scope | null => {
     const row = rows[cursor];
-    if (!row) return null;
+    if (!row || row.kind === "section") return null;
     if (row.kind === "file") {
       const r = fileNewRange(row.file);
       if (!r) return null;
@@ -198,15 +284,23 @@ export default function DiffBuffer() {
     exitVisual();
   };
 
-  const fileRowIndex = (path: string) =>
-    rows.findIndex((r) => r.kind === "file" && r.file.path === path);
+  // A path can now recur across sections, so re-find the file row by (section, path).
+  const fileRowIndex = (section: ReviewSection, path: string) =>
+    rows.findIndex(
+      (r) => r.kind === "file" && r.section === section && r.file.path === path,
+    );
 
   const toggleAtCursor = () => {
     const row = rows[cursor];
     if (!row) return;
+    if (row.kind === "section") {
+      // Fold the whole section; the header stays put, so keep the cursor on it.
+      toggleSection(row.section);
+      return;
+    }
     if (row.kind === "file") {
       toggleFile(row.file.path);
-      const idx = fileRowIndex(row.file.path);
+      const idx = fileRowIndex(row.section, row.file.path);
       if (idx >= 0) setCursor(idx);
       return;
     }
@@ -222,7 +316,7 @@ export default function DiffBuffer() {
   // line the cursor maps to (line → that line, hunk → its start, file → first change).
   const openAtCursor = () => {
     const row = rows[cursor];
-    if (!row) return;
+    if (!row || row.kind === "section") return;
     const scope = cursorScope();
     const line = scope ? scope.lo : 1;
     void openFileInProject(row.file.path).then(() => {
@@ -262,6 +356,9 @@ export default function DiffBuffer() {
       } else if (key === "f") {
         e.preventDefault();
         jumpTo((r) => r.kind === "file", dir);
+      } else if (key === "s") {
+        e.preventDefault();
+        jumpTo((r) => r.kind === "section", dir);
       }
       return;
     }
@@ -358,6 +455,22 @@ export default function DiffBuffer() {
           const ref = (el: HTMLDivElement | null) => {
             rowRefs.current[idx] = el;
           };
+          if (row.kind === "section") {
+            const collapsed = collapsedSections.has(row.section);
+            return (
+              <div
+                key={`s:${row.section}`}
+                ref={ref}
+                className={`diff-row diff-section-header section-${row.section} ${cls}`}
+                onClick={() => setCursor(idx)}
+                onDoubleClick={toggleAtCursor}
+              >
+                <span className="diff-caret">{collapsed ? "▸" : "▾"}</span>
+                <span className="diff-section-label">{SECTION_LABEL[row.section]}</span>
+                <span className="diff-section-count">{row.count}</span>
+              </div>
+            );
+          }
           if (row.kind === "file") {
             const f = row.file;
             const open = expandedFiles.has(f.path) && !f.binary;
@@ -365,7 +478,7 @@ export default function DiffBuffer() {
             const fileFlagged = flags.some((t) => t.anchor.file === f.path);
             return (
               <div
-                key={`f:${f.path}`}
+                key={`f:${row.section}:${f.path}`}
                 ref={ref}
                 className={`diff-row diff-file-row status-${f.status} ${cls}`}
                 onClick={() => setCursor(idx)}

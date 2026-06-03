@@ -70,6 +70,11 @@ printf 'changed\0bytes\n' > logo.bin                        # binary change
 - [ ] **Expect:** Every changed file appears with the right status glyph (`A`/`M`/`D`/`R`), `+adds −dels` counts, and a green staged dot `●` on files with staged changes (e.g. `A.java`). `fresh.txt` shows as `A`. `logo.bin` shows as **binary** (no expandable diff).
 - [ ] **Expect:** Renamed files (if you did `git mv`) show `old → new` with the `R` glyph.
 
+### 1.5b Three review sections (To review / Flagged / Reviewed)
+- [ ] **Expect:** The diff list is grouped into up to three magit-style sections, always in this order: **TO REVIEW**, **FLAGGED**, **REVIEWED** (uppercase headers with a `▾` caret and an item count). With nothing tagged yet, every changed file sits under **TO REVIEW** and the other two headers are **hidden** (empty sections never render).
+- [ ] **Steps:** Press `Tab` (or double-click) on a section header.
+- [ ] **Expect:** The whole section folds (caret flips to `▸`, its files/hunks/lines hide); `Tab` again unfolds it.
+
 ### 1.6 Vim navigation
 - [ ] **Steps:** With the diff buffer focused, use the keys below.
 - [ ] **Expect:**
@@ -77,6 +82,7 @@ printf 'changed\0bytes\n' > logo.bin                        # binary change
   - `gg` jumps to the top, `G` to the bottom.
   - `]f` / `[f` jump to next / previous **file** header.
   - `]h` / `[h` jump to next / previous **hunk** header (after expanding).
+  - `]s` / `[s` jump to next / previous **section** header.
 
 ### 1.7 Expand / collapse files and hunks (magit-style nested folding)
 - [ ] **Steps:** On a file row, press `Tab` (or double-click).
@@ -93,7 +99,7 @@ printf 'changed\0bytes\n' > logo.bin                        # binary change
 
 ### 1.7b Section highlight follows the cursor
 - [ ] **Steps:** With a file expanded, move the cursor onto the **file** header, then a **hunk** header, then a single **line**.
-- [ ] **Expect:** On the file header the whole file section (header + all its hunks/lines) gets a subtle background; on a hunk header only that hunk (header + its lines) is washed; on a line only that line. In every case the exact cursor row keeps the brighter wash + amber left-bar. Entering visual (`v`) replaces the section wash with the violet selection highlight.
+- [ ] **Expect:** On the file header the whole file (header + all its hunks/lines) gets a subtle background; on a hunk header only that hunk (header + its lines) is washed; on a line only that line. On a top-level **section header** the entire section is washed. In every case the exact cursor row keeps the brighter wash + amber left-bar. Entering visual (`v`) replaces the wash with the violet selection highlight.
 
 ### 1.8 Buffer switching
 - [ ] **Steps:** `Space` → `b` → `p` (project), then `Space` → `b` → `d` (diff). Also try `:project` / `:diff`.
@@ -118,14 +124,21 @@ printf 'changed\0bytes\n' > logo.bin                        # binary change
 
 > All tagging happens in the diff buffer. Reviewed = "I've checked this".
 > Flag = "come back and scrutinize this later".
+> Tagging **moves** items between the three sections (§1.5b): reviewing pulls a hunk
+> into **REVIEWED**, flagging into **FLAGGED**, `u`/un-flag returns it to **TO REVIEW**.
+> Classification is per-hunk with precedence **flagged > reviewed > to-review**.
 
 ### 2.1 Review a hunk
 - [ ] **Steps:** Expand a file, move the cursor onto a **hunk header**, press `r`.
-- [ ] **Expect:** A green `✓` appears on that hunk row. Status bar `✓ done/total hunks` increments.
+- [ ] **Expect:** The hunk leaves **TO REVIEW** and reappears under **REVIEWED** with a green `✓`. Status bar `✓ done/total hunks` increments. If it was the file's last hunk in To review, the file header leaves that section too.
 
 ### 2.2 Review a whole file
 - [ ] **Steps:** Move to a **file row**, press `r`.
-- [ ] **Expect:** All of that file's hunks become `✓`; the file row shows `✓`. Pressing `u` on the file row clears them.
+- [ ] **Expect:** All of that file's hunks become `✓` and move under **REVIEWED**; the file header now appears under Reviewed (and is gone from To review). Pressing `u` on that file row moves it back to **TO REVIEW**.
+
+### 2.2b Partial review splits a file across sections
+- [ ] **Steps:** Expand a file with **two or more** hunks. Review just one hunk (`r` on its header).
+- [ ] **Expect:** The file header appears **twice** — once under **TO REVIEW** (listing only the still-unreviewed hunks) and once under **REVIEWED** (listing only the reviewed hunk) — exactly like magit repeats a file across Unstaged/Staged.
 
 ### 2.3 Review a sub-range (visual selection)
 - [ ] **Steps:** Expand a hunk, move onto a diff line, press `v`, extend with `j`/`k` over a few lines, press `r`.
@@ -135,13 +148,13 @@ printf 'changed\0bytes\n' > logo.bin                        # binary change
 - [ ] **Steps:** On a reviewed hunk/file/line, press `u`.
 - [ ] **Expect:** The `✓` / reviewed stripe is removed for that scope. Status bar count decrements.
 
-### 2.5 Flag toggle (scope follows the highlighted section)
+### 2.5 Flag toggle (scope follows the highlighted selection)
 - [ ] **Steps:** On a file/hunk/line (or a visual selection), press `f`. Press `f` again on the same scope.
-- [ ] **Expect:** First `f` adds an amber `⚑` (and amber line stripe); status bar `⚑ count` increments. Second `f` removes it (toggle). The flag covers exactly the section currently highlighted — flagging a **hunk** stripes only that hunk's lines (sibling hunks stay unflagged), flagging a **line** stripes only that line. Flags work on the same scopes as review.
+- [ ] **Expect:** First `f` adds an amber `⚑` (and amber line stripe) and moves the hunk under **FLAGGED**; status bar `⚑ count` increments. Second `f` removes it (toggle) and the hunk returns to its prior section. The flag covers exactly the scope currently highlighted — flagging a **hunk** stripes only that hunk's lines (sibling hunks stay unflagged), flagging a **line** stripes only that line.
 
-### 2.6 Reviewed + flagged together
-- [ ] **Steps:** Review a line, then flag the same line.
-- [ ] **Expect:** The line shows both a green and an amber edge stripe; file/hunk rows can show both `✓` and `⚑`.
+### 2.6 Reviewed + flagged together (flag precedence)
+- [ ] **Steps:** Review a hunk (it moves to **REVIEWED**), then flag a line inside it.
+- [ ] **Expect:** The hunk moves to **FLAGGED** (flag wins over reviewed); the line shows both a green and an amber edge stripe, and the hunk row can show both `✓` and `⚑`. Removing the flag drops it back into **REVIEWED**.
 
 ### 2.7 Persistence across restart
 - [ ] **Steps:** Tag several hunks/lines (review + flag). Fully quit the app and relaunch. Reopen the same repo.
