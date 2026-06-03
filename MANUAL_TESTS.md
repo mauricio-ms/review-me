@@ -51,9 +51,11 @@ printf 'changed\0bytes\n' > logo.bin                        # binary change
 - [ ] **Steps:** Launch the app with no repo open.
 - [ ] **Expect:** Centered `ai-review` logo, tagline, and a key menu (`Space`, `o p`, `o r`, `:`). Dark theme.
 
-### 1.2 Open via directory browser
-- [ ] **Steps:** Press `Space` → `o` → `p`. Navigate with `j`/`k`, descend with `Enter`/`l`/`→`, go up with `Backspace`/`h`/`←` until you reach `/tmp/air-fixture`.
-- [ ] **Expect:** Directory entries listed (dirs only), git repos marked `git` in amber. A top row **"open this repository"** appears when the current dir is itself a repo. `Esc` cancels.
+### 1.2 Open via directory browser (path navigator)
+- [ ] **Steps:** Press `Space` → `o` → `p`. The prompt is a **colored path** (`~`-abbreviated): ancestors dim teal, the **current level** highlighted bright teal, then your typed filter. **Type to filter** the current directory; navigate rows with `↑`/`↓` (or `Ctrl-n`/`Ctrl-p`). **`Tab` descends** into the highlighted directory; **`Enter` opens** the highlighted directory as a repo (a non-repo folder descends instead). Walk down to `/tmp/air-fixture` with `Tab`.
+- [ ] **Expect:** Selection lands on the **first matching directory** (not the `..` / "open this repository" rows). Directory entries listed (dirs only) with **colored folder icons**; git repos tinted git-red and marked `git` in amber. A top row **"open this repository"** appears when the current dir is itself a repo (`Enter` opens it).
+- [ ] **Steps:** With the filter empty, press `Backspace` repeatedly.
+- [ ] **Expect:** When the filter has text, `Backspace` deletes a character; once empty, `Backspace` removes the **whole last path segment** (climbs to the parent) and the listing updates. `Enter` on the fixture repo opens it; `Esc` cancels.
 - [ ] **Steps:** Select the fixture repo and open it.
 - [ ] **Expect:** Switches to the diff buffer; status bar appears.
 
@@ -63,7 +65,7 @@ printf 'changed\0bytes\n' > logo.bin                        # binary change
 
 ### 1.4 Recent repositories
 - [ ] **Steps:** After opening once, press `Space` → `o` → `r`.
-- [ ] **Expect:** The fixture repo is listed (most-recent first). `Enter` reopens it. `d` forgets the selected entry (it disappears).
+- [ ] **Expect:** The fixture repo is listed (most-recent first) with a git-tinted folder icon. **Type to filter** by name/path (substring). `↑`/`↓` (or `Ctrl-n`/`Ctrl-p`) move, `Enter` reopens the selected repo. `Ctrl-d` forgets the selected entry (it disappears).
 
 ### 1.5 Changed-file list correctness
 - [ ] **Steps:** Compare the diff buffer against `git status` / `git diff HEAD` in the fixture.

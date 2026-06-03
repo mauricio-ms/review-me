@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { fileIcon } from "../lib/file-icons";
 import { openFileInProject } from "../lib/project";
@@ -6,7 +6,7 @@ import { fuzzyFiles } from "../lib/tauri";
 import { useRepoStore } from "../state/repo";
 import { useUIStore } from "../state/ui";
 import type { FileMatch } from "../types/repo";
-import { useModalFocus } from "./useModalFocus";
+import NeoPicker from "./NeoPicker";
 
 const LIMIT = 60;
 
@@ -31,24 +31,16 @@ export default function FuzzyFinderHost() {
   const requestFocus = useUIStore((s) => s.requestFocus);
   const repoPath = useRepoStore((s) => s.repoPath);
 
-  const inputRef = useRef<HTMLInputElement | null>(null);
-  const modalRef = useRef<HTMLDivElement | null>(null);
-  useModalFocus({ open, rootRef: modalRef, initialFocusRef: inputRef });
-
   const [query, setQuery] = useState("");
   const [rows, setRows] = useState<FileMatch[]>([]);
-  const [selected, setSelected] = useState(0);
 
-  // Debounced fuzzy query against the backend.
+  // Debounced fuzzy query against the backend (the "content filter differs" case).
   useEffect(() => {
     if (!open || !repoPath) return;
     let cancelled = false;
     const handle = window.setTimeout(() => {
       void fuzzyFiles(repoPath, query, LIMIT).then((matches) => {
-        if (!cancelled) {
-          setRows(matches);
-          setSelected(0);
-        }
+        if (!cancelled) setRows(matches);
       });
     }, 70);
     return () => {
@@ -68,88 +60,42 @@ export default function FuzzyFinderHost() {
   }, [closePicker, requestFocus]);
 
   const openSelected = useCallback(
-    (row: FileMatch | undefined) => {
-      if (!row) return;
+    (row: FileMatch) => {
       void openFileInProject(row.path);
       closePicker();
     },
     [closePicker],
   );
 
-  const move = (delta: number) => {
-    if (rows.length === 0) return;
-    setSelected((c) => (c + delta + rows.length) % rows.length);
-  };
-
   if (!open) return null;
 
-  const count = rows.length === 0 ? "0" : `${selected + 1}/${rows.length}`;
-
   return (
-    <div className="asset-picker-backdrop">
-      <div
-        ref={modalRef}
-        className="asset-picker neo-picker fuzzy-finder"
-        role="dialog"
-        aria-modal="true"
-        tabIndex={-1}
-        onKeyDown={(e) => {
-          if (e.key === "Escape") {
-            e.preventDefault();
-            close();
-          } else if (e.key === "ArrowDown" || (e.ctrlKey && e.key === "n")) {
-            e.preventDefault();
-            move(1);
-          } else if (e.key === "ArrowUp" || (e.ctrlKey && e.key === "p")) {
-            e.preventDefault();
-            move(-1);
-          } else if (e.key === "Enter") {
-            e.preventDefault();
-            openSelected(rows[selected]);
-          }
-        }}
-      >
-        <div className="neo-title">Find file</div>
-        <div className="neo-count">{count}</div>
-        <div className="neo-prompt">
-          <span>›</span>
-          <input
-            ref={inputRef}
-            value={query}
-            spellCheck={false}
-            autoComplete="off"
-            placeholder="fuzzy file name…"
-            onChange={(e) => setQuery(e.target.value)}
-            aria-label="Find file"
-          />
-        </div>
-        <div className="neo-separator" />
-        <div className="neo-list">
-          {rows.length === 0 ? (
-            <div className="neo-empty">no matching files</div>
-          ) : (
-            rows.map((row, idx) => {
-              const icon = fileIcon(row.path.split("/").pop() ?? row.path, false);
-              return (
-                <div
-                  key={row.path}
-                  className={`neo-row fz-row ${idx === selected ? "is-selected" : ""}`}
-                  onMouseEnter={() => setSelected(idx)}
-                  onClick={() => openSelected(row)}
-                >
-                  <span className="neo-icon" style={{ color: icon.color }}>
-                    {icon.glyph}
-                  </span>
-                  <span className="fz-path">{highlight(row.path, row.indices)}</span>
-                </div>
-              );
-            })
-          )}
-        </div>
-        <div className="neo-footer">
-          <span>↑↓ move · ↵ open · Esc cancel</span>
-        </div>
-      </div>
-    </div>
+    <NeoPicker<FileMatch>
+      open={open}
+      title="Find file"
+      className="fuzzy-finder"
+      query={query}
+      onQueryChange={setQuery}
+      placeholder="fuzzy file name…"
+      rows={rows}
+      rowKey={(row) => row.path}
+      rowClassName={() => "fz-row"}
+      onActivate={(row) => openSelected(row)}
+      onClose={close}
+      renderCount={(s, t) => (t === 0 ? "0" : `${s + 1}/${t}`)}
+      footer="↑↓ move · ↵ open · Esc cancel"
+      emptyText="no matching files"
+      renderRow={(row) => {
+        const icon = fileIcon(row.path.split("/").pop() ?? row.path, false);
+        return (
+          <>
+            <span className="neo-icon" style={{ color: icon.color }}>
+              {icon.glyph}
+            </span>
+            <span className="fz-path">{highlight(row.path, row.indices)}</span>
+          </>
+        );
+      }}
+    />
   );
 }

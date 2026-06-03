@@ -903,6 +903,14 @@ kbd {
   font-size: 30px;
 }
 
+.neo-prompt-field {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+}
+
 .neo-prompt input {
   flex: 1;
   min-width: 0;
@@ -914,6 +922,31 @@ kbd {
   font: inherit;
   font-size: 22px;
   padding: 0 0 0 12px;
+}
+
+/* Open-repo path navigator: the prompt is a colored path, so the typed filter
+   sits flush against it (no separator border) instead of in its own field. */
+.open-repo .neo-prompt input {
+  border-left: none;
+  padding-left: 0;
+}
+
+.neo-path-base {
+  white-space: nowrap;
+  font-size: 22px;
+}
+
+.neo-path-anc {
+  color: rgba(var(--accent-teal-rgb), 0.55);
+}
+
+.neo-path-cur {
+  color: var(--accent-teal);
+  font-weight: 700;
+}
+
+.neo-path-sep {
+  color: rgba(var(--accent-teal-rgb), 0.55);
 }
 
 .neo-prompt input:focus {
@@ -1032,4 +1065,11 @@ kbd {
   background: rgba(var(--bg-0-rgb), 0.72);
   color: var(--accent-teal);
   font-size: 16px;
+}
+
+.neo-footer span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
