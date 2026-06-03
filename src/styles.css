@@ -738,6 +738,27 @@ kbd {
   min-height: 360px;
 }
 
+.asset-picker.confirm-dialog {
+  width: min(520px, 92vw);
+  height: auto;
+  min-height: 0;
+}
+
+/* The notched title sits on the top border, so keep it to a single line —
+   the narrow dialog would otherwise shrink-wrap it and overlap the body. */
+.confirm-dialog .neo-title {
+  white-space: nowrap;
+  font-size: 20px;
+}
+
+.confirm-body {
+  flex: 1;
+  padding: 28px 24px 22px;
+  color: var(--fg-1);
+  font-size: 19px;
+  line-height: 30px;
+}
+
 .transient-prompt-text {
   flex: 1;
   min-width: 0;

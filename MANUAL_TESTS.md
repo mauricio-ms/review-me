@@ -172,6 +172,16 @@ printf 'changed\0bytes\n' > logo.bin                        # binary change
 - [ ] **Steps:** With tags present, make an unrelated change elsewhere and `Space` → `r`.
 - [ ] **Expect:** Existing tags remain attached to their code; new changes appear unreviewed.
 
+### 2.11 Clear all tags (`:clear`)
+- [ ] **Steps:** Review a couple of hunks and flag a line, then press `:`, type `clear`, `Enter`.
+- [ ] **Expect:** A small centered confirm modal "Clear all tags?" appears, reading e.g. "Removes 2 reviewed + 1 flagged tags. This can't be undone." with footer `y confirm · n / Esc cancel`.
+- [ ] **Steps:** Press `Esc` (or `n`).
+- [ ] **Expect:** The modal closes and every `✓`/`⚑` is untouched.
+- [ ] **Steps:** Run `:clear` again and press `y` (or `Enter`).
+- [ ] **Expect:** All three sections reset — every file returns to **TO REVIEW**, FLAGGED/REVIEWED headers disappear, and `/tmp/air-fixture/.ai-review/tags.json` now has empty `reviewed` and `flags` arrays.
+- [ ] **Steps:** Press `Space` and scan the palette; also try `:clear` with no tags present.
+- [ ] **Expect:** There is **no** chord/shortcut for clear anywhere in the `Space` palette (command-line only). With nothing tagged, the modal reads "No tags to clear." and `y` is a harmless no-op.
+
 ---
 
 ## 3. M3 — Fuzzy finder & project mode

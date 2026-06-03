@@ -151,6 +151,16 @@ pub fn remove(root: &Path, id: &str) -> AppResult<TagStore> {
     load(root)
 }
 
+/// Drop every reviewed and flag tag, persisting an empty store. Clearing in place
+/// preserves the store `version`.
+pub fn clear_all(root: &Path) -> AppResult<TagStore> {
+    let mut store = read(root)?;
+    store.reviewed.clear();
+    store.flags.clear();
+    write(root, &store)?;
+    load(root)
+}
+
 /// Remove every reviewed tag in `file` whose range overlaps `[start, end]`. This is
 /// the `u` (unmark) action: unreviewing a hunk clears any reviewed tag covering it.
 pub fn unreview_range(
@@ -381,5 +391,21 @@ mod tests {
         let id = store.flags[0].id.clone();
         let after = remove(root, &id).unwrap();
         assert!(after.flags.is_empty());
+    }
+
+    #[test]
+    fn clear_all_removes_everything() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        write_lines(&root.join("a.txt"), &["one", "two", "three", "four", "five"]);
+        add_reviewed(root, "a.txt", 2, 3, AnchorKind::Hunk).unwrap();
+        add_flag(root, "a.txt", 1, 1, AnchorKind::Range, None, None).unwrap();
+
+        let after = clear_all(root).unwrap();
+        assert!(after.reviewed.is_empty());
+        assert!(after.flags.is_empty());
+        // Reloading confirms the empty state was persisted.
+        let reloaded = load(root).unwrap();
+        assert!(reloaded.reviewed.is_empty() && reloaded.flags.is_empty());
     }
 }

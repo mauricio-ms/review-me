@@ -96,6 +96,11 @@ export function useCommands(rawClose: CommandClose): {
     openPicker("fuzzyFiles");
   }, [close, openPicker]);
 
+  const handleClearTags = useCallback(() => {
+    close({ restoreFocus: false });
+    openPicker("clearTags");
+  }, [close, openPicker]);
+
   const handleToggleDiffMode = useCallback(() => {
     toggleDiffHighlight();
     close();
@@ -235,6 +240,18 @@ export function useCommands(rawClose: CommandClose): {
       key: "c",
       enabled: !!repo,
       run: handleCloseRepo,
+    },
+    {
+      id: "clear",
+      name: "clear",
+      aliases: ["clear-tags", "reset-tags"],
+      label: "clear all review & flag tags",
+      group: "tag",
+      // Command-line only — no Space chord for this destructive action.
+      prefix: null,
+      key: "x",
+      enabled: !!repo,
+      run: handleClearTags,
     },
     {
       id: "diff",

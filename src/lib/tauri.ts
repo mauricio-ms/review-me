@@ -91,6 +91,10 @@ export function removeTag(repo: string, id: string): Promise<TagStore> {
   return invoke<TagStore>("remove_tag", { repo, id });
 }
 
+export function clearTags(repo: string): Promise<TagStore> {
+  return invoke<TagStore>("clear_tags", { repo });
+}
+
 export function unreviewRange(
   repo: string,
   file: string,

@@ -106,6 +106,12 @@ pub fn remove_tag(repo: String, id: String) -> AppResult<TagStore> {
     tags::remove(&repo_root(repo)?, &id)
 }
 
+/// Remove every reviewed and flag tag in the repo.
+#[tauri::command]
+pub fn clear_tags(repo: String) -> AppResult<TagStore> {
+    tags::clear_all(&repo_root(repo)?)
+}
+
 /// Fuzzy-rank repo files for the file finder.
 #[tauri::command]
 pub fn fuzzy_files(repo: String, query: String, limit: u32) -> AppResult<Vec<FileMatch>> {

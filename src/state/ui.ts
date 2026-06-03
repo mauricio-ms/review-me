@@ -6,7 +6,12 @@ export type VimMode = "normal" | "insert" | "visual" | "replace";
 export type DiffHighlightMode = "word" | "line";
 
 /** Which full-screen modal picker (if any) is open. */
-export type PickerKind = null | "openRepo" | "recentRepos" | "fuzzyFiles";
+export type PickerKind =
+  | null
+  | "openRepo"
+  | "recentRepos"
+  | "fuzzyFiles"
+  | "clearTags";
 
 type UIState = {
   activeBuffer: BufferName;

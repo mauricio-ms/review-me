@@ -25,6 +25,7 @@ pub fn run() {
             commands::add_reviewed_tag,
             commands::add_flag_tag,
             commands::remove_tag,
+            commands::clear_tags,
             commands::unreview_range,
             commands::fuzzy_files,
             commands::list_repo_dir,

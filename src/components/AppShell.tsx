@@ -5,6 +5,7 @@ import { useUIStore } from "../state/ui";
 import BufferStatusBar from "./BufferStatusBar";
 import CommandLine from "./CommandLine";
 import CommandTransient from "./CommandTransient";
+import ConfirmClearHost from "./ConfirmClearHost";
 import DiffBuffer from "./DiffBuffer";
 import FuzzyFinderHost from "./FuzzyFinderHost";
 import OpenRepoHost from "./OpenRepoHost";
@@ -98,6 +99,7 @@ export default function AppShell() {
       <OpenRepoHost />
       <RecentReposHost />
       <FuzzyFinderHost />
+      <ConfirmClearHost />
       <XrefHost />
       {transientOpen && <CommandTransient />}
       {commandLineOpen && <CommandLine />}

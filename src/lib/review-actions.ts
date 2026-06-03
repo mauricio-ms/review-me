@@ -5,6 +5,7 @@ import type { AnchorKind, TagStore } from "../types/tags";
 import {
   addFlagTag,
   addReviewedTag,
+  clearTags,
   removeTag,
   unreviewRange,
 } from "./tauri";
@@ -70,4 +71,11 @@ export async function removeFlags(ids: string[]): Promise<void> {
   let store: TagStore | null = null;
   for (const id of ids) store = await removeTag(repo, id);
   if (store) apply(store);
+}
+
+/** Drop every reviewed and flag tag in the repo. */
+export async function clearAllTags(): Promise<void> {
+  const repo = repoPath();
+  if (!repo) return;
+  apply(await clearTags(repo));
 }
