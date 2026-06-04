@@ -9,6 +9,7 @@ import CodeMirror from "@uiw/react-codemirror";
 
 import { leaderKeymap, vimEscapeKeymap } from "../editor/cm-shared";
 import { flagDecorations, setFlagLines } from "../editor/flag-decorations";
+import { gruberDarkerTheme } from "../editor/gruber-darker";
 import { defineNavVim } from "../editor/vim-nav";
 import { defineXrefVim } from "../editor/vim-xref";
 import { xrefClick } from "../editor/xref-click";
@@ -95,8 +96,8 @@ export default function ProjectBuffer() {
   }, [flags, openPath, content]);
 
   // Lazily load the CodeMirror language for the open file, dispatched by file
-  // name (extension, plus special names like Dockerfile). The highlight colors
-  // come from the existing `theme="dark"`; this just supplies the grammar.
+  // name (extension, plus special names like Dockerfile). The Gruber Darker
+  // theme supplies colors; this just supplies the grammar.
   useEffect(() => {
     setLangExt(null);
     if (!openPath) return;
@@ -266,7 +267,7 @@ export default function ProjectBuffer() {
             <CodeMirror
               value={content}
               extensions={extensions}
-              theme="dark"
+              theme={gruberDarkerTheme}
               height="100%"
               onCreateEditor={onCreateEditor}
               basicSetup={{
