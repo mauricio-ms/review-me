@@ -4,16 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-**ai-review** is a Tauri v2 desktop tool for reviewing code produced by LLM agents:
+**review-me** is a Tauri v2 desktop tool for reviewing code produced by LLM agents:
 a magit-style, vim-driven UI over a git working-tree-vs-HEAD diff, with reviewed/flag
 tagging, a fuzzy file finder, an IDE-like project mode, and tree-sitter cross-references.
 The stack and UX deliberately mirror the sibling app at
 `/home/mms/development/projects/video-studio` (buffer model, command palette, neo-picker
 modals, Zustand) — consult it when a pattern here looks unfamiliar.
-
-> The app/crate/package is named **ai-review**; the on-disk folder is `diff-checker`
-> (it's a sandbox bind-mount that can't be renamed from inside the session). Nothing in
-> the code depends on the folder name.
 
 ## Commands
 
@@ -74,7 +70,7 @@ highlighting lazy-loaded by extension via `@codemirror/language-data`).
 
 ### Tagging & anchoring (the subtle part)
 
-Reviewed/flag tags live in `<repo>/.ai-review/tags.json`, anchored to a file's *current*
+Reviewed/flag tags live in `<repo>/.review-me/tags.json`, anchored to a file's *current*
 content by `[startLine,endLine]` + sha256 of those lines + context lines. `tags::load`
 **re-anchors** every tag: exact hash at the stored position → else a ±200-line search →
 else `stale: true`. The frontend sends only `(file, startLine, endLine, kind)`; the

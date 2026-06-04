@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "ai-review",
+  "productName": "review-me",
   "version": "0.1.0",
-  "identifier": "dev.mms.aireview",
+  "identifier": "dev.mms.reviewme",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "ai-review",
+        "title": "review-me",
         "width": 1600,
         "height": 900,
         "minWidth": 1024,

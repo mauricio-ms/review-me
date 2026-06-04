@@ -1,12 +1,12 @@
 [package]
-name = "ai-review"
+name = "review-me"
 version = "0.1.0"
 description = "Magit-style code-review tool for LLM-agent diffs"
 edition = "2021"
 rust-version = "1.78"
 
 [lib]
-name = "ai_review_lib"
+name = "review_me_lib"
 crate-type = ["lib", "cdylib", "staticlib"]
 
 [build-dependencies]

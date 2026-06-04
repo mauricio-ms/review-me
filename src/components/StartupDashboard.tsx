@@ -2,7 +2,7 @@ export default function StartupDashboard() {
   return (
     <div className="startup-dashboard" tabIndex={-1}>
       <div className="startup-inner">
-        <div className="startup-logo">ai-review</div>
+        <div className="startup-logo">review-me</div>
         <div className="startup-tagline">review what the agent changed</div>
         <div className="startup-menu">
           <div className="startup-menu-row">

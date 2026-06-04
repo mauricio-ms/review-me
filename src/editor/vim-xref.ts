@@ -18,8 +18,8 @@ export function defineXrefVim(): void {
       extra: object,
     ) => void;
   };
-  v.defineAction("aiReviewGotoDef", () => void gotoDefinition());
-  v.defineAction("aiReviewFindRefs", () => void findUsages());
-  v.mapCommand("gd", "action", "aiReviewGotoDef", {}, { context: "normal" });
-  v.mapCommand("gr", "action", "aiReviewFindRefs", {}, { context: "normal" });
+  v.defineAction("reviewMeGotoDef", () => void gotoDefinition());
+  v.defineAction("reviewMeFindRefs", () => void findUsages());
+  v.mapCommand("gd", "action", "reviewMeGotoDef", {}, { context: "normal" });
+  v.mapCommand("gr", "action", "reviewMeFindRefs", {}, { context: "normal" });
 }

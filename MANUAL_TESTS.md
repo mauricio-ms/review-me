@@ -1,4 +1,4 @@
-# ai-review — Manual Test Plan
+# review-me — Manual Test Plan
 
 Manual QA scenarios for features that can't be (fully) covered by automated tests —
 mostly the keyboard/vim interaction, the magit-style UI, and end-to-end persistence.
@@ -49,7 +49,7 @@ printf 'changed\0bytes\n' > logo.bin                        # binary change
 
 ### 1.1 Startup dashboard
 - [ ] **Steps:** Launch the app with no repo open.
-- [ ] **Expect:** Centered `ai-review` logo, tagline, and a key menu (`Space`, `o p`, `o r`, `:`). Dark theme.
+- [ ] **Expect:** Centered `review-me` logo, tagline, and a key menu (`Space`, `o p`, `o r`, `:`). Dark theme.
 
 ### 1.2 Open via directory browser (path navigator)
 - [ ] **Steps:** Press `Space` → `o` → `p`. The prompt is a **colored path** (`~`-abbreviated): ancestors dim teal, the **current level** highlighted bright teal, then your typed filter. **Type to filter** the current directory; navigate rows with `↑`/`↓` (or `Ctrl-n`/`Ctrl-p`). **`Tab` descends** into the highlighted directory; **`Enter` opens** the highlighted directory as a repo (a non-repo folder descends instead). Walk down to `/tmp/air-fixture` with `Tab`.
@@ -113,7 +113,7 @@ printf 'changed\0bytes\n' > logo.bin                        # binary change
 
 ### 1.9b Clean working tree — fake terminal
 - [ ] **Steps:** Make the working tree clean (e.g. `git stash` or commit all changes in the fixture), then `Space` → `r` (refresh).
-- [ ] **Expect:** Instead of an empty list, the diff buffer shows a fake terminal window that *types* `git status` and prints "nothing to commit, working tree clean" (last clause green), then `git rev-parse --short HEAD` and `ai-review status`. The branch, short HEAD sha, and reviewed/flagged counts are **real** (match the fixture). A green block cursor blinks at a trailing `❯` prompt, and a `r refresh · b p project · o p open repo` hint row fades in below. Editing a file + `r` returns to the normal diff list; making it clean again replays the type-out.
+- [ ] **Expect:** Instead of an empty list, the diff buffer shows a fake terminal window that *types* `git status` and prints "nothing to commit, working tree clean" (last clause green), then `git rev-parse --short HEAD` and `review-me status`. The branch, short HEAD sha, and reviewed/flagged counts are **real** (match the fixture). A green block cursor blinks at a trailing `❯` prompt, and a `r refresh · b p project · o p open repo` hint row fades in below. Editing a file + `r` returns to the normal diff list; making it clean again replays the type-out.
 - [ ] **Reduced motion:** With OS "reduce motion" enabled, the whole transcript renders immediately and static (no typewriter, no blink).
 
 ### 1.10 Leader keys & focus
@@ -165,7 +165,7 @@ printf 'changed\0bytes\n' > logo.bin                        # binary change
 
 ### 2.7 Persistence across restart
 - [ ] **Steps:** Tag several hunks/lines (review + flag). Fully quit the app and relaunch. Reopen the same repo.
-- [ ] **Expect:** All `✓` and `⚑` marks reload exactly. Inspect `/tmp/air-fixture/.ai-review/tags.json` — it contains the `reviewed` and `flags` arrays with anchors.
+- [ ] **Expect:** All `✓` and `⚑` marks reload exactly. Inspect `/tmp/air-fixture/.review-me/tags.json` — it contains the `reviewed` and `flags` arrays with anchors.
 
 ### 2.8 Anchoring survives small edits
 - [ ] **Steps:** Review a hunk. In the fixture, insert 2–3 new lines **above** that hunk's region in the file (external editor). `Space` → `r` to refresh.
@@ -185,7 +185,7 @@ printf 'changed\0bytes\n' > logo.bin                        # binary change
 - [ ] **Steps:** Press `Esc` (or `n`).
 - [ ] **Expect:** The modal closes and every `✓`/`⚑` is untouched.
 - [ ] **Steps:** Run `:clear` again and press `y` (or `Enter`).
-- [ ] **Expect:** All three sections reset — every file returns to **TO REVIEW**, FLAGGED/REVIEWED headers disappear, and `/tmp/air-fixture/.ai-review/tags.json` now has empty `reviewed` and `flags` arrays.
+- [ ] **Expect:** All three sections reset — every file returns to **TO REVIEW**, FLAGGED/REVIEWED headers disappear, and `/tmp/air-fixture/.review-me/tags.json` now has empty `reviewed` and `flags` arrays.
 - [ ] **Steps:** Press `Space` and scan the palette; also try `:clear` with no tags present.
 - [ ] **Expect:** There is **no** chord/shortcut for clear anywhere in the `Space` palette (command-line only). With nothing tagged, the modal reads "No tags to clear." and `y` is a harmless no-op.
 
@@ -218,7 +218,7 @@ printf 'changed\0bytes\n' > logo.bin                        # binary change
 
 ### 3.4 Flag in project mode
 - [ ] **Steps:** In the viewer, visually select a few lines (`v` + `j`), then `Space` → `t` → `f`.
-- [ ] **Expect:** Those lines get an amber flag highlight; status-bar `⚑` count increments. Switch buffers / reopen the file → the flag highlight persists (and is in `.ai-review/tags.json`).
+- [ ] **Expect:** Those lines get an amber flag highlight; status-bar `⚑` count increments. Switch buffers / reopen the file → the flag highlight persists (and is in `.review-me/tags.json`).
 - [ ] **Expect:** There is **no** "reviewed" action in project mode (reviewing is diff-only); only flagging is available here.
 
 ---

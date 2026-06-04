@@ -108,7 +108,7 @@ export default function DiffCleanState() {
       list.push({ kind: "cmd", text: "git rev-parse --short HEAD" });
       list.push({ kind: "out", text: head });
     }
-    list.push({ kind: "cmd", text: "ai-review status" });
+    list.push({ kind: "cmd", text: "review-me status" });
     list.push({
       kind: "out",
       text: `✓ 0 changes to review · ${reviewed.length} reviewed · ${flags.length} flagged`,

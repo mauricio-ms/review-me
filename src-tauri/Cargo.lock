@@ -18,24 +18,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ai-review"
-version = "0.1.0"
-dependencies = [
- "git2",
- "nucleo-matcher",
- "serde",
- "serde_json",
- "sha2",
- "streaming-iterator",
- "tauri",
- "tauri-build",
- "tempfile",
- "thiserror 2.0.18",
- "tree-sitter",
- "tree-sitter-java",
-]
-
-[[package]]
 name = "alloc-no-stdlib"
 version = "2.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2564,6 +2546,24 @@ dependencies = [
  "wasm-bindgen-futures",
  "wasm-streams",
  "web-sys",
+]
+
+[[package]]
+name = "review-me"
+version = "0.1.0"
+dependencies = [
+ "git2",
+ "nucleo-matcher",
+ "serde",
+ "serde_json",
+ "sha2",
+ "streaming-iterator",
+ "tauri",
+ "tauri-build",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tree-sitter",
+ "tree-sitter-java",
 ]
 
 [[package]]

@@ -1,15 +1,12 @@
-# ai-review
+# review-me
 
 A magit-style, vim-driven desktop tool for **reviewing code produced by LLM agents**.
 
 When an AI agent rewrites half your project in one shot, the hard part isn't reading
-the diff — it's *keeping track of what you've actually checked*. `ai-review` gives you a
+the diff — it's *keeping track of what you've actually checked*. `review-me` gives you a
 keyboard-first diff viewer where every changed region can be marked **reviewed** or
 **flagged for a closer look later**, plus an IDE-like project mode with cross-reference
 navigation so you can verify how a changed symbol is used across the codebase.
-
-> The app, crate, and npm package are all named **ai-review**. The on-disk folder is
-> `diff-checker` for historical reasons — nothing depends on the folder name.
 
 ---
 
@@ -23,7 +20,7 @@ Reviewing agent-generated code has a different shape than reviewing a human PR:
 - Understanding a change often means jumping *out* of the diff to see where a function or
   class is used, even in files the agent didn't touch.
 
-`ai-review` is built around those needs:
+`review-me` is built around those needs:
 
 - **Diff mode** — a magit-style view of the working tree vs `HEAD`, grouped into three
   sections — **To review**, **Flagged**, and **Reviewed** — just as magit splits
@@ -64,7 +61,7 @@ Both stay mounted; you toggle between them and keep your cursor/scroll position.
 - **Flag (`⚑`)** — "Scrutinize this later." Works on the same scopes (file / hunk / line
   range), and is available in *both* buffers.
 
-Tags are stored in `<repo>/.ai-review/tags.json` and **anchored** to the file's current
+Tags are stored in `<repo>/.review-me/tags.json` and **anchored** to the file's current
 content (line range + a hash of those lines + surrounding context). On reload they
 re-anchor: exact match at the stored position, else a nearby search, else marked *stale* —
 so small edits above a tagged region don't lose the tag, and a fully rewritten region

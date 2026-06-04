@@ -18,6 +18,6 @@ export function defineNavVim(): void {
       extra: object,
     ) => void;
   };
-  v.defineAction("aiReviewBackToDiff", () => backToDiff());
-  v.mapCommand("q", "action", "aiReviewBackToDiff", {}, { context: "normal" });
+  v.defineAction("reviewMeBackToDiff", () => backToDiff());
+  v.mapCommand("q", "action", "reviewMeBackToDiff", {}, { context: "normal" });
 }

@@ -6,7 +6,7 @@ use sha2::{Digest, Sha256};
 
 use crate::error::AppResult;
 
-const TAGS_DIR: &str = ".ai-review";
+const TAGS_DIR: &str = ".review-me";
 const TAGS_FILE: &str = "tags.json";
 const CONTEXT_LINES: usize = 3;
 /// How far (in lines) to search around the original position when a tag's content
