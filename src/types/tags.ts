@@ -28,14 +28,23 @@ export interface FlagTag {
   severity: string | null;
 }
 
+export interface IgnoredTag {
+  id: string;
+  anchor: Anchor;
+  createdAt: number;
+  note: string | null;
+}
+
 export interface TagStore {
   version: number;
   reviewed: ReviewedTag[];
   flags: FlagTag[];
+  ignored: IgnoredTag[];
 }
 
 export const EMPTY_TAG_STORE: TagStore = {
   version: 1,
   reviewed: [],
   flags: [],
+  ignored: [],
 };

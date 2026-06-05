@@ -24,6 +24,7 @@ pub fn run() {
             commands::save_tags,
             commands::add_reviewed_tag,
             commands::add_flag_tag,
+            commands::add_ignored_tag,
             commands::remove_tag,
             commands::clear_tags,
             commands::unreview_range,

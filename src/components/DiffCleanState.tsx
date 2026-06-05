@@ -87,6 +87,7 @@ export default function DiffCleanState() {
   const diff = useRepoStore((s) => s.diff);
   const reviewed = useTagsStore((s) => s.reviewed);
   const flags = useTagsStore((s) => s.flags);
+  const ignored = useTagsStore((s) => s.ignored);
 
   const branch = diff?.branch || "(unknown)";
   const head = diff?.head ?? "";
@@ -111,11 +112,11 @@ export default function DiffCleanState() {
     list.push({ kind: "cmd", text: "review-me status" });
     list.push({
       kind: "out",
-      text: `✓ 0 changes to review · ${reviewed.length} reviewed · ${flags.length} flagged`,
+      text: `✓ 0 changes to review · ${reviewed.length} reviewed · ${flags.length} flagged · ${ignored.length} ignored`,
       tone: "ok",
     });
     return list;
-  }, [branch, head, reviewed.length, flags.length]);
+  }, [branch, head, reviewed.length, flags.length, ignored.length]);
 
   const reduced = useMemo(prefersReducedMotion, []);
   const { shown, done } = useTerminalReveal(segs, !reduced);

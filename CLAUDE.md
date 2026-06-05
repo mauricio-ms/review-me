@@ -70,13 +70,17 @@ highlighting lazy-loaded by extension via `@codemirror/language-data`).
 
 ### Tagging & anchoring (the subtle part)
 
-Reviewed/flag tags live in `<repo>/.review-me/tags.json`, anchored to a file's *current*
+Reviewed/flag/ignore tags live in `<repo>/.review-me/tags.json` (three parallel arrays:
+`reviewed`, `flags`, `ignored`), anchored to a file's *current*
 content by `[startLine,endLine]` + sha256 of those lines + context lines. `tags::load`
 **re-anchors** every tag: exact hash at the stored position → else a ±200-line search →
 else `stale: true`. The frontend sends only `(file, startLine, endLine, kind)`; the
 backend computes the hash/context so add and re-anchor stay consistent. "Reviewed" is
 fundamentally per-hunk; file/line coverage is **derived** in `src/lib/coverage.ts`
-(`isHunkReviewed`/`isFileReviewed`), not stored.
+(`isHunkReviewed`/`isFileReviewed`), not stored. The diff buffer buckets each hunk into
+one of four sections — To review / Flagged / Reviewed / Ignored — by precedence
+**flagged > ignored > reviewed > to-review** (`sectionForHunk`); `r` reviews, `f` flags,
+`i` ignores (flag/ignore are toggles).
 
 ### Cross-references
 

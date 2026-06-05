@@ -87,6 +87,22 @@ export function addFlagTag(
   });
 }
 
+export function addIgnoredTag(
+  repo: string,
+  file: string,
+  startLine: number,
+  endLine: number,
+  kind: AnchorKind,
+): Promise<TagStore> {
+  return invoke<TagStore>("add_ignored_tag", {
+    repo,
+    file,
+    startLine,
+    endLine,
+    kind,
+  });
+}
+
 export function removeTag(repo: string, id: string): Promise<TagStore> {
   return invoke<TagStore>("remove_tag", { repo, id });
 }

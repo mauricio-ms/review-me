@@ -4,10 +4,13 @@ import {
   fileNewRange,
   flagsOverlapping,
   hunkNewRange,
+  ignoresOverlapping,
   isFileReviewed,
   isHunkFlagged,
+  isHunkIgnored,
   isHunkReviewed,
   isLineFlagged,
+  isLineIgnored,
   isLineReviewed,
   sectionForFile,
   sectionForHunk,
@@ -17,7 +20,9 @@ import { openFileInProject } from "../lib/project";
 import { setProjectCursor } from "../lib/project-view";
 import {
   addFlag,
+  addIgnore,
   removeFlags,
+  removeIgnores,
   reviewLines,
   reviewWholeFile,
   unreviewLines,
@@ -28,7 +33,7 @@ import { useRepoStore } from "../state/repo";
 import { useTagsStore } from "../state/tags";
 import { useUIStore } from "../state/ui";
 import type { ChangedFile, DiffLine, Hunk } from "../types/diff";
-import type { AnchorKind, FlagTag, ReviewedTag } from "../types/tags";
+import type { AnchorKind, FlagTag, IgnoredTag, ReviewedTag } from "../types/tags";
 
 type Row =
   | { kind: "section"; section: ReviewSection; count: number }
@@ -54,11 +59,12 @@ const STATUS_GLYPH: Record<ChangedFile["status"], string> = {
 };
 
 /** Top-level sections, in fixed display order (magit untracked/unstaged/staged style). */
-const SECTION_ORDER: ReviewSection[] = ["toReview", "flagged", "reviewed"];
+const SECTION_ORDER: ReviewSection[] = ["toReview", "flagged", "reviewed", "ignored"];
 const SECTION_LABEL: Record<ReviewSection, string> = {
   toReview: "To review",
   flagged: "Flagged",
   reviewed: "Reviewed",
+  ignored: "Ignored",
 };
 
 function buildRows(
@@ -68,6 +74,7 @@ function buildRows(
   collapsedSections: Set<ReviewSection>,
   reviewed: ReviewedTag[],
   flags: FlagTag[],
+  ignored: IgnoredTag[],
 ): Row[] {
   // Bucket each file's hunks (or the whole file, when hunkless) into sections,
   // preserving file order within a section and hunk order within a file. A hunk
@@ -77,24 +84,26 @@ function buildRows(
     toReview: [],
     flagged: [],
     reviewed: [],
+    ignored: [],
   };
 
   for (const file of files) {
     const reviewable = file.hunks.some((h) => hunkNewRange(h) != null);
     if (file.binary || !reviewable) {
       // Binary / pure-deletion files can't be hunk-reviewed; classify the file.
-      buckets[sectionForFile(flags, file.path)].push({ file, hunks: [] });
+      buckets[sectionForFile(flags, ignored, file.path)].push({ file, hunks: [] });
       continue;
     }
     const perSection: Record<ReviewSection, Hunk[]> = {
       toReview: [],
       flagged: [],
       reviewed: [],
+      ignored: [],
     };
     for (const hunk of file.hunks) {
       // Pure-deletion hunks have no new-side lines to tag → To review.
       const sec = hunkNewRange(hunk)
-        ? sectionForHunk(reviewed, flags, file.path, hunk)
+        ? sectionForHunk(reviewed, flags, ignored, file.path, hunk)
         : "toReview";
       perSection[sec].push(hunk);
     }
@@ -148,6 +157,7 @@ export default function DiffBuffer() {
   const toggleSection = useRepoStore((s) => s.toggleSection);
   const reviewed = useTagsStore((s) => s.reviewed);
   const flags = useTagsStore((s) => s.flags);
+  const ignored = useTagsStore((s) => s.ignored);
   const activeBuffer = useUIStore((s) => s.activeBuffer);
   const focusRequest = useUIStore((s) => s.focusRequest);
   const diffHighlight = useUIStore((s) => s.diffHighlight);
@@ -168,8 +178,9 @@ export default function DiffBuffer() {
         collapsedSections,
         reviewed,
         flags,
+        ignored,
       ),
-    [files, expandedFiles, collapsedHunks, collapsedSections, reviewed, flags],
+    [files, expandedFiles, collapsedHunks, collapsedSections, reviewed, flags, ignored],
   );
 
   useEffect(() => {
@@ -281,6 +292,18 @@ export default function DiffBuffer() {
       void removeFlags(overlapping.map((t) => t.id));
     } else {
       void addFlag(scope.file.path, scope.lo, scope.hi, scope.kind);
+    }
+    exitVisual();
+  };
+
+  const doIgnore = () => {
+    const scope = targetScope();
+    if (!scope) return;
+    const overlapping = ignoresOverlapping(ignored, scope.file.path, scope.lo, scope.hi);
+    if (overlapping.length > 0) {
+      void removeIgnores(overlapping.map((t) => t.id));
+    } else {
+      void addIgnore(scope.file.path, scope.lo, scope.hi, scope.kind);
     }
     exitVisual();
   };
@@ -416,6 +439,10 @@ export default function DiffBuffer() {
         e.preventDefault();
         doFlag();
         break;
+      case "i":
+        e.preventDefault();
+        doIgnore();
+        break;
     }
   };
 
@@ -481,6 +508,7 @@ export default function DiffBuffer() {
             const open = expandedFiles.has(f.path) && !f.binary;
             const fileReviewed = isFileReviewed(reviewed, f);
             const fileFlagged = flags.some((t) => t.anchor.file === f.path);
+            const fileIgnored = ignored.some((t) => t.anchor.file === f.path);
             return (
               <div
                 key={`f:${row.section}:${f.path}`}
@@ -493,6 +521,7 @@ export default function DiffBuffer() {
                 <span className="diff-mark">
                   {fileReviewed && <span className="mark-reviewed">✓</span>}
                   {fileFlagged && <span className="mark-flagged">⚑</span>}
+                  {fileIgnored && <span className="mark-ignored">⊘</span>}
                 </span>
                 <span className="diff-status-glyph">{STATUS_GLYPH[f.status]}</span>
                 <span className="diff-file-path">
@@ -515,6 +544,7 @@ export default function DiffBuffer() {
           if (row.kind === "hunk") {
             const hunkReviewed = isHunkReviewed(reviewed, row.file.path, row.hunk);
             const hunkFlagged = isHunkFlagged(flags, row.file.path, row.hunk);
+            const hunkIgnored = isHunkIgnored(ignored, row.file.path, row.hunk);
             const open = !collapsedHunks.has(row.hunk.id);
             return (
               <div
@@ -528,6 +558,7 @@ export default function DiffBuffer() {
                 <span className="diff-mark">
                   {hunkReviewed && <span className="mark-reviewed">✓</span>}
                   {hunkFlagged && <span className="mark-flagged">⚑</span>}
+                  {hunkIgnored && <span className="mark-ignored">⊘</span>}
                 </span>
                 <span className="diff-hunk-header">{row.hunk.header}</span>
               </div>
@@ -538,13 +569,17 @@ export default function DiffBuffer() {
             line.newLine != null && isLineReviewed(reviewed, row.file.path, line.newLine);
           const lineFlagged =
             line.newLine != null && isLineFlagged(flags, row.file.path, line.newLine);
+          const lineIgnored =
+            line.newLine != null && isLineIgnored(ignored, row.file.path, line.newLine);
           return (
             <div
               key={`l:${row.hunk.id}:${idx}`}
               ref={ref}
               className={`diff-row diff-line-row line-${line.kind} ${
                 lineReviewed ? "is-reviewed" : ""
-              } ${lineFlagged ? "is-flagged" : ""} ${cls}`}
+              } ${lineFlagged ? "is-flagged" : ""} ${
+                lineIgnored ? "is-ignored" : ""
+              } ${cls}`}
               onClick={() => setCursor(idx)}
             >
               <span className="diff-gutter">{line.oldLine ?? ""}</span>

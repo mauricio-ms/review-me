@@ -102,11 +102,22 @@ pub fn add_flag_tag(
 }
 
 #[tauri::command]
+pub fn add_ignored_tag(
+    repo: String,
+    file: String,
+    start_line: u32,
+    end_line: u32,
+    kind: AnchorKind,
+) -> AppResult<TagStore> {
+    tags::add_ignored(&repo_root(repo)?, &file, start_line, end_line, kind)
+}
+
+#[tauri::command]
 pub fn remove_tag(repo: String, id: String) -> AppResult<TagStore> {
     tags::remove(&repo_root(repo)?, &id)
 }
 
-/// Remove every reviewed and flag tag in the repo.
+/// Remove every reviewed, flag, and ignore tag in the repo.
 #[tauri::command]
 pub fn clear_tags(repo: String) -> AppResult<TagStore> {
     tags::clear_all(&repo_root(repo)?)

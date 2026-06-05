@@ -4,6 +4,7 @@ import type { ChangedFile } from "../types/diff";
 import type { AnchorKind, TagStore } from "../types/tags";
 import {
   addFlagTag,
+  addIgnoredTag,
   addReviewedTag,
   clearTags,
   removeTag,
@@ -66,6 +67,26 @@ export async function addFlag(
 
 /** Remove flag tags by id (used to toggle a flag off). */
 export async function removeFlags(ids: string[]): Promise<void> {
+  const repo = repoPath();
+  if (!repo || ids.length === 0) return;
+  let store: TagStore | null = null;
+  for (const id of ids) store = await removeTag(repo, id);
+  if (store) apply(store);
+}
+
+export async function addIgnore(
+  file: string,
+  lo: number,
+  hi: number,
+  kind: AnchorKind,
+): Promise<void> {
+  const repo = repoPath();
+  if (!repo) return;
+  apply(await addIgnoredTag(repo, file, lo, hi, kind));
+}
+
+/** Remove ignore tags by id (used to toggle ignore off). */
+export async function removeIgnores(ids: string[]): Promise<void> {
   const repo = repoPath();
   if (!repo || ids.length === 0) return;
   let store: TagStore | null = null;

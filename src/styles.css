@@ -232,6 +232,10 @@ kbd {
   color: var(--accent-amber);
 }
 
+.status-ignored {
+  color: var(--accent-violet);
+}
+
 .status-hint {
   color: var(--fg-3);
   display: flex;
@@ -358,6 +362,10 @@ kbd {
   color: var(--accent-green);
 }
 
+.diff-section-header.section-ignored {
+  color: var(--accent-violet);
+}
+
 .diff-section-label {
   flex: 1;
   min-width: 0;
@@ -385,12 +393,20 @@ kbd {
   color: var(--accent-amber);
 }
 
+.mark-ignored {
+  color: var(--accent-violet);
+}
+
 .diff-line-row.is-reviewed {
   box-shadow: inset 2px 0 0 rgba(var(--accent-green-rgb), 0.7);
 }
 
 .diff-line-row.is-flagged {
   box-shadow: inset 2px 0 0 var(--accent-amber);
+}
+
+.diff-line-row.is-ignored {
+  box-shadow: inset 2px 0 0 var(--accent-violet);
 }
 
 .diff-line-row.is-reviewed.is-flagged {

@@ -72,8 +72,8 @@ printf 'changed\0bytes\n' > logo.bin                        # binary change
 - [ ] **Expect:** Every changed file appears with the right status glyph (`A`/`M`/`D`/`R`), `+adds −dels` counts, and a green staged dot `●` on files with staged changes (e.g. `A.java`). `fresh.txt` shows as `A`. `logo.bin` shows as **binary** (no expandable diff).
 - [ ] **Expect:** Renamed files (if you did `git mv`) show `old → new` with the `R` glyph.
 
-### 1.5b Three review sections (To review / Flagged / Reviewed)
-- [ ] **Expect:** The diff list is grouped into up to three magit-style sections, always in this order: **TO REVIEW**, **FLAGGED**, **REVIEWED** (uppercase headers with a `▾` caret and an item count). With nothing tagged yet, every changed file sits under **TO REVIEW** and the other two headers are **hidden** (empty sections never render).
+### 1.5b Review sections (To review / Flagged / Reviewed / Ignored)
+- [ ] **Expect:** The diff list is grouped into up to four magit-style sections, always in this order: **TO REVIEW**, **FLAGGED**, **REVIEWED**, **IGNORED** (uppercase headers with a `▾` caret and an item count). With nothing tagged yet, every changed file sits under **TO REVIEW** and the other headers are **hidden** (empty sections never render).
 - [ ] **Steps:** Press `Tab` (or double-click) on a section header.
 - [ ] **Expect:** The whole section folds (caret flips to `▸`, its files/hunks/lines hide); `Tab` again unfolds it.
 
@@ -127,13 +127,15 @@ printf 'changed\0bytes\n' > logo.bin                        # binary change
 
 ---
 
-## 2. M2 — Review & flag tagging
+## 2. M2 — Review, flag & ignore tagging
 
 > All tagging happens in the diff buffer. Reviewed = "I've checked this".
-> Flag = "come back and scrutinize this later".
-> Tagging **moves** items between the three sections (§1.5b): reviewing pulls a hunk
-> into **REVIEWED**, flagging into **FLAGGED**, `u`/un-flag returns it to **TO REVIEW**.
-> Classification is per-hunk with precedence **flagged > reviewed > to-review**.
+> Flag = "come back and scrutinize this later". Ignore (`i`) = "set this aside, I
+> don't need to review it".
+> Tagging **moves** items between the four sections (§1.5b): reviewing pulls a hunk
+> into **REVIEWED**, flagging into **FLAGGED**, ignoring into **IGNORED**;
+> `u`/un-flag/un-ignore returns it to **TO REVIEW**.
+> Classification is per-hunk with precedence **flagged > ignored > reviewed > to-review**.
 
 ### 2.1 Review a hunk
 - [ ] **Steps:** Expand a file, move the cursor onto a **hunk header**, press `r`.
@@ -159,13 +161,21 @@ printf 'changed\0bytes\n' > logo.bin                        # binary change
 - [ ] **Steps:** On a file/hunk/line (or a visual selection), press `f`. Press `f` again on the same scope.
 - [ ] **Expect:** First `f` adds an amber `⚑` (and amber line stripe) and moves the hunk under **FLAGGED**; status bar `⚑ count` increments. Second `f` removes it (toggle) and the hunk returns to its prior section. The flag covers exactly the scope currently highlighted — flagging a **hunk** stripes only that hunk's lines (sibling hunks stay unflagged), flagging a **line** stripes only that line.
 
+### 2.5b Ignore toggle (`i`)
+- [ ] **Steps:** On a file/hunk/line (or a visual selection) in **TO REVIEW**, press `i`. Press `i` again on the same scope.
+- [ ] **Expect:** First `i` adds a violet `⊘` (and violet line stripe) and moves the hunk under **IGNORED**; status bar `⊘ count` increments. Second `i` removes it (toggle) and the hunk returns to its prior section. Scope follows the highlighted selection exactly like flag (§2.5). Binary/hunkless files can be ignored at file scope.
+
+### 2.5c Ignore vs flag precedence
+- [ ] **Steps:** Ignore a hunk (it moves to **IGNORED**), then flag a line inside it.
+- [ ] **Expect:** The hunk moves to **FLAGGED** (flag wins over ignore); the hunk row can show both `⚑` and `⊘`. Removing the flag drops it back into **IGNORED**.
+
 ### 2.6 Reviewed + flagged together (flag precedence)
 - [ ] **Steps:** Review a hunk (it moves to **REVIEWED**), then flag a line inside it.
 - [ ] **Expect:** The hunk moves to **FLAGGED** (flag wins over reviewed); the line shows both a green and an amber edge stripe, and the hunk row can show both `✓` and `⚑`. Removing the flag drops it back into **REVIEWED**.
 
 ### 2.7 Persistence across restart
 - [ ] **Steps:** Tag several hunks/lines (review + flag). Fully quit the app and relaunch. Reopen the same repo.
-- [ ] **Expect:** All `✓` and `⚑` marks reload exactly. Inspect `/tmp/air-fixture/.review-me/tags.json` — it contains the `reviewed` and `flags` arrays with anchors.
+- [ ] **Expect:** All `✓`, `⚑`, and `⊘` marks reload exactly. Inspect `/tmp/air-fixture/.review-me/tags.json` — it contains the `reviewed`, `flags`, and `ignored` arrays with anchors.
 
 ### 2.8 Anchoring survives small edits
 - [ ] **Steps:** Review a hunk. In the fixture, insert 2–3 new lines **above** that hunk's region in the file (external editor). `Space` → `r` to refresh.
@@ -181,11 +191,11 @@ printf 'changed\0bytes\n' > logo.bin                        # binary change
 
 ### 2.11 Clear all tags (`:clear`)
 - [ ] **Steps:** Review a couple of hunks and flag a line, then press `:`, type `clear`, `Enter`.
-- [ ] **Expect:** A small centered confirm modal "Clear all tags?" appears, reading e.g. "Removes 2 reviewed + 1 flagged tags. This can't be undone." with footer `y confirm · n / Esc cancel`.
+- [ ] **Expect:** A small centered confirm modal "Clear all tags?" appears, reading e.g. "Removes 2 reviewed + 1 flagged + 0 ignored tags. This can't be undone." with footer `y confirm · n / Esc cancel`.
 - [ ] **Steps:** Press `Esc` (or `n`).
-- [ ] **Expect:** The modal closes and every `✓`/`⚑` is untouched.
+- [ ] **Expect:** The modal closes and every `✓`/`⚑`/`⊘` is untouched.
 - [ ] **Steps:** Run `:clear` again and press `y` (or `Enter`).
-- [ ] **Expect:** All three sections reset — every file returns to **TO REVIEW**, FLAGGED/REVIEWED headers disappear, and `/tmp/air-fixture/.review-me/tags.json` now has empty `reviewed` and `flags` arrays.
+- [ ] **Expect:** All sections reset — every file returns to **TO REVIEW**, FLAGGED/REVIEWED/IGNORED headers disappear, and `/tmp/air-fixture/.review-me/tags.json` now has empty `reviewed`, `flags`, and `ignored` arrays.
 - [ ] **Steps:** Press `Space` and scan the palette; also try `:clear` with no tags present.
 - [ ] **Expect:** There is **no** chord/shortcut for clear anywhere in the `Space` palette (command-line only). With nothing tagged, the modal reads "No tags to clear." and `y` is a harmless no-op.
 

@@ -1,5 +1,5 @@
 import type { ChangedFile, Hunk } from "../types/diff";
-import type { FlagTag, ReviewedTag } from "../types/tags";
+import type { FlagTag, IgnoredTag, ReviewedTag } from "../types/tags";
 
 export type LineRange = { lo: number; hi: number };
 
@@ -106,24 +106,54 @@ export function isHunkFlagged(flags: FlagTag[], file: string, hunk: Hunk): boole
   return overlaps(flags, file, r.lo, r.hi);
 }
 
-/** The three magit-style sections of the diff buffer, in display order. */
-export type ReviewSection = "toReview" | "flagged" | "reviewed";
+export function isLineIgnored(
+  ignored: IgnoredTag[],
+  file: string,
+  newLine: number,
+): boolean {
+  return covers(ignored, file, newLine, newLine);
+}
 
-/** Section a single reviewable hunk belongs in (flagged > reviewed > to-review). */
+export function isHunkIgnored(
+  ignored: IgnoredTag[],
+  file: string,
+  hunk: Hunk,
+): boolean {
+  const r = hunkNewRange(hunk);
+  if (!r) return false;
+  return overlaps(ignored, file, r.lo, r.hi);
+}
+
+/** The magit-style sections of the diff buffer, in display order. */
+export type ReviewSection = "toReview" | "flagged" | "reviewed" | "ignored";
+
+/**
+ * Section a single reviewable hunk belongs in. A flag is an active concern so it
+ * wins; an explicit ignore then takes a hunk out of the review flow ahead of a
+ * reviewed/to-review classification.
+ */
 export function sectionForHunk(
   reviewed: ReviewedTag[],
   flags: FlagTag[],
+  ignored: IgnoredTag[],
   file: string,
   hunk: Hunk,
 ): ReviewSection {
   if (isHunkFlagged(flags, file, hunk)) return "flagged";
+  if (isHunkIgnored(ignored, file, hunk)) return "ignored";
   if (isHunkReviewed(reviewed, file, hunk)) return "reviewed";
   return "toReview";
 }
 
-/** Section for a hunkless/binary file, which can only be flagged at file scope. */
-export function sectionForFile(flags: FlagTag[], file: string): ReviewSection {
-  return flags.some((t) => t.anchor.file === file) ? "flagged" : "toReview";
+/** Section for a hunkless/binary file, which can only be flagged/ignored at file scope. */
+export function sectionForFile(
+  flags: FlagTag[],
+  ignored: IgnoredTag[],
+  file: string,
+): ReviewSection {
+  if (flags.some((t) => t.anchor.file === file)) return "flagged";
+  if (ignored.some((t) => t.anchor.file === file)) return "ignored";
+  return "toReview";
 }
 
 /** Flag tags in `file` whose range overlaps `[lo, hi]` (used to toggle flags off). */
@@ -134,6 +164,21 @@ export function flagsOverlapping(
   hi: number,
 ): FlagTag[] {
   return flags.filter(
+    (t) =>
+      t.anchor.file === file &&
+      t.anchor.startLine <= hi &&
+      t.anchor.endLine >= lo,
+  );
+}
+
+/** Ignore tags in `file` whose range overlaps `[lo, hi]` (used to toggle ignore off). */
+export function ignoresOverlapping(
+  ignored: IgnoredTag[],
+  file: string,
+  lo: number,
+  hi: number,
+): IgnoredTag[] {
+  return ignored.filter(
     (t) =>
       t.anchor.file === file &&
       t.anchor.startLine <= hi &&

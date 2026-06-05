@@ -8,6 +8,7 @@ export default function BufferStatusBar() {
   const diff = useRepoStore((s) => s.diff);
   const reviewed = useTagsStore((s) => s.reviewed);
   const flags = useTagsStore((s) => s.flags);
+  const ignored = useTagsStore((s) => s.ignored);
   const activeBuffer = useUIStore((s) => s.activeBuffer);
   const vimMode = useUIStore((s) => s.vimMode);
 
@@ -34,11 +35,17 @@ export default function BufferStatusBar() {
               ⚑ {flags.length}
             </span>
           )}
+          {ignored.length > 0 && (
+            <span className="status-segment status-ignored">
+              ⊘ {ignored.length}
+            </span>
+          )}
         </>
       )}
       <span className="status-spacer" />
       <span className="status-segment status-hint">
-        <kbd>r</kbd> review · <kbd>f</kbd> flag · <kbd>Space</kbd> palette
+        <kbd>r</kbd> review · <kbd>f</kbd> flag · <kbd>i</kbd> ignore ·{" "}
+        <kbd>Space</kbd> palette
       </span>
     </div>
   );

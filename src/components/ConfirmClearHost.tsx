@@ -6,7 +6,7 @@ import { useUIStore } from "../state/ui";
 import { useModalFocus } from "./useModalFocus";
 
 /**
- * Confirmation for the `:clear` command. Wiping all reviewed/flag tags is
+ * Confirmation for the `:clear` command. Wiping all reviewed/flag/ignore tags is
  * destructive and irreversible, so it's gated behind this keyboard-driven modal
  * (`y` confirm · `n`/`Esc` cancel) rather than firing on the bare command.
  */
@@ -16,6 +16,7 @@ export default function ConfirmClearHost() {
   const requestFocus = useUIStore((s) => s.requestFocus);
   const reviewed = useTagsStore((s) => s.reviewed);
   const flags = useTagsStore((s) => s.flags);
+  const ignored = useTagsStore((s) => s.ignored);
 
   const modalRef = useRef<HTMLDivElement | null>(null);
   useModalFocus({ open, rootRef: modalRef, initialFocusRef: modalRef });
@@ -40,12 +41,12 @@ export default function ConfirmClearHost() {
 
   if (!open) return null;
 
-  const total = reviewed.length + flags.length;
+  const total = reviewed.length + flags.length + ignored.length;
   const body =
     total === 0
       ? "No tags to clear."
-      : `Removes ${reviewed.length} reviewed + ${flags.length} flagged ` +
-        `tag${total === 1 ? "" : "s"}. This can't be undone.`;
+      : `Removes ${reviewed.length} reviewed + ${flags.length} flagged + ` +
+        `${ignored.length} ignored tag${total === 1 ? "" : "s"}. This can't be undone.`;
 
   return (
     <div className="asset-picker-backdrop">

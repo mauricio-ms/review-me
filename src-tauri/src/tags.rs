@@ -63,6 +63,19 @@ pub struct FlagTag {
     pub severity: Option<String>,
 }
 
+/// A hunk/file the reviewer has set aside ("don't need to look at this"). Like a
+/// flag but with no severity — purely a marker that buckets it into the Ignore
+/// section.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IgnoredTag {
+    pub id: String,
+    pub anchor: Anchor,
+    pub created_at: u64,
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TagStore {
@@ -71,6 +84,8 @@ pub struct TagStore {
     pub reviewed: Vec<ReviewedTag>,
     #[serde(default)]
     pub flags: Vec<FlagTag>,
+    #[serde(default)]
+    pub ignored: Vec<IgnoredTag>,
 }
 
 impl Default for TagStore {
@@ -79,6 +94,7 @@ impl Default for TagStore {
             version: 1,
             reviewed: Vec::new(),
             flags: Vec::new(),
+            ignored: Vec::new(),
         }
     }
 }
@@ -90,6 +106,9 @@ pub fn load(root: &Path) -> AppResult<TagStore> {
         reanchor(root, &mut tag.anchor);
     }
     for tag in &mut store.flags {
+        reanchor(root, &mut tag.anchor);
+    }
+    for tag in &mut store.ignored {
         reanchor(root, &mut tag.anchor);
     }
     Ok(store)
@@ -143,20 +162,44 @@ pub fn add_flag(
     load(root)
 }
 
-pub fn remove(root: &Path, id: &str) -> AppResult<TagStore> {
+pub fn add_ignored(
+    root: &Path,
+    file: &str,
+    start_line: u32,
+    end_line: u32,
+    kind: AnchorKind,
+) -> AppResult<TagStore> {
     let mut store = read(root)?;
-    store.reviewed.retain(|t| t.id != id);
-    store.flags.retain(|t| t.id != id);
+    let anchor = build_anchor(root, file, start_line, end_line, kind);
+    store
+        .ignored
+        .retain(|t| !same_range(&t.anchor, file, start_line, end_line));
+    store.ignored.push(IgnoredTag {
+        id: new_id("ign", file, start_line, end_line),
+        anchor,
+        created_at: now_millis(),
+        note: None,
+    });
     write(root, &store)?;
     load(root)
 }
 
-/// Drop every reviewed and flag tag, persisting an empty store. Clearing in place
-/// preserves the store `version`.
+pub fn remove(root: &Path, id: &str) -> AppResult<TagStore> {
+    let mut store = read(root)?;
+    store.reviewed.retain(|t| t.id != id);
+    store.flags.retain(|t| t.id != id);
+    store.ignored.retain(|t| t.id != id);
+    write(root, &store)?;
+    load(root)
+}
+
+/// Drop every reviewed, flag, and ignore tag, persisting an empty store. Clearing
+/// in place preserves the store `version`.
 pub fn clear_all(root: &Path) -> AppResult<TagStore> {
     let mut store = read(root)?;
     store.reviewed.clear();
     store.flags.clear();
+    store.ignored.clear();
     write(root, &store)?;
     load(root)
 }
@@ -400,12 +443,33 @@ mod tests {
         write_lines(&root.join("a.txt"), &["one", "two", "three", "four", "five"]);
         add_reviewed(root, "a.txt", 2, 3, AnchorKind::Hunk).unwrap();
         add_flag(root, "a.txt", 1, 1, AnchorKind::Range, None, None).unwrap();
+        add_ignored(root, "a.txt", 4, 5, AnchorKind::Hunk).unwrap();
 
         let after = clear_all(root).unwrap();
         assert!(after.reviewed.is_empty());
         assert!(after.flags.is_empty());
+        assert!(after.ignored.is_empty());
         // Reloading confirms the empty state was persisted.
         let reloaded = load(root).unwrap();
-        assert!(reloaded.reviewed.is_empty() && reloaded.flags.is_empty());
+        assert!(
+            reloaded.reviewed.is_empty()
+                && reloaded.flags.is_empty()
+                && reloaded.ignored.is_empty()
+        );
+    }
+
+    #[test]
+    fn add_ignored_then_remove() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        write_lines(&root.join("a.txt"), &["one", "two", "three", "four", "five"]);
+
+        let store = add_ignored(root, "a.txt", 2, 3, AnchorKind::Hunk).unwrap();
+        assert_eq!(store.ignored.len(), 1);
+        assert!(!store.ignored[0].anchor.stale);
+        let id = store.ignored[0].id.clone();
+
+        let after = remove(root, &id).unwrap();
+        assert!(after.ignored.is_empty());
     }
 }
