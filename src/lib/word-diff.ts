@@ -87,11 +87,13 @@ export function wordDiff(
 /**
  * Refine a hunk's lines. Returns an array parallel to `lines`: each entry is the
  * word-segment breakdown for that line, or `null` when there's nothing to refine
- * (context lines, and pure insertions/deletions that have no counterpart).
+ * (context lines, and added/removed runs with no opposing side to diff against).
  *
  * A maximal run of removed lines immediately followed by a run of added lines is
  * a "replacement"; the k-th removed line is paired with the k-th added line
- * (git's diff-highlight heuristic). Unpaired leftovers stay whole-line colored.
+ * (git's diff-highlight heuristic). Lines past the paired count have no
+ * counterpart, so the whole line is marked changed (it is wholly new/old
+ * content) — matching magit, which refines the replacement as one block.
  */
 export function refineHunk(lines: DiffLine[]): (WordSeg[] | null)[] {
   const out: (WordSeg[] | null)[] = new Array(lines.length).fill(null);
@@ -110,6 +112,13 @@ export function refineHunk(lines: DiffLine[]): (WordSeg[] | null)[] {
       const { removed, added } = wordDiff(lines[i + k].content, lines[r + k].content);
       out[i + k] = removed;
       out[r + k] = added;
+    }
+    // Only a genuine replacement (removed run *and* added run) has leftovers; a
+    // pure deletion run stays at its base color. The unpaired tail on either
+    // side is wholly new/old content, so highlight the entire line.
+    if (a > r) {
+      for (let k = i + pairs; k < r; k++) out[k] = whole(lines[k].content);
+      for (let k = r + pairs; k < a; k++) out[k] = whole(lines[k].content);
     }
     i = a > r ? a : r;
   }
