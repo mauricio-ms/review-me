@@ -173,13 +173,13 @@ pub fn find_references(repo: String, symbol: SymbolRef) -> AppResult<Vec<XrefRes
     xref::find_references(&root, &files, &symbol)
 }
 
-/// Remove every reviewed tag overlapping `[start_line, end_line]` in `file`.
+/// Remove every reviewed, flag, and ignore tag overlapping `[start_line, end_line]` in `file`.
 #[tauri::command]
-pub fn unreview_range(
+pub fn unmark_range(
     repo: String,
     file: String,
     start_line: u32,
     end_line: u32,
 ) -> AppResult<TagStore> {
-    tags::unreview_range(&repo_root(repo)?, &file, start_line, end_line)
+    tags::unmark_range(&repo_root(repo)?, &file, start_line, end_line)
 }

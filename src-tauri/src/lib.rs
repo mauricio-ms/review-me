@@ -27,7 +27,7 @@ pub fn run() {
             commands::add_ignored_tag,
             commands::remove_tag,
             commands::clear_tags,
-            commands::unreview_range,
+            commands::unmark_range,
             commands::fuzzy_files,
             commands::list_repo_dir,
             commands::build_symbol_index,

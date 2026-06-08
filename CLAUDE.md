@@ -80,7 +80,7 @@ fundamentally per-hunk; file/line coverage is **derived** in `src/lib/coverage.t
 (`isHunkReviewed`/`isFileReviewed`), not stored. The diff buffer buckets each hunk into
 one of four sections — To review / Flagged / Reviewed / Ignored — by precedence
 **flagged > ignored > reviewed > to-review** (`sectionForHunk`); `r` reviews, `f` flags,
-`i` ignores (flag/ignore are toggles).
+`i` ignores, and `u` unmarks the current scope.
 
 ### Cross-references
 

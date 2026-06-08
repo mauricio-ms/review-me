@@ -156,36 +156,6 @@ export function sectionForFile(
   return "toReview";
 }
 
-/** Flag tags in `file` whose range overlaps `[lo, hi]` (used to toggle flags off). */
-export function flagsOverlapping(
-  flags: FlagTag[],
-  file: string,
-  lo: number,
-  hi: number,
-): FlagTag[] {
-  return flags.filter(
-    (t) =>
-      t.anchor.file === file &&
-      t.anchor.startLine <= hi &&
-      t.anchor.endLine >= lo,
-  );
-}
-
-/** Ignore tags in `file` whose range overlaps `[lo, hi]` (used to toggle ignore off). */
-export function ignoresOverlapping(
-  ignored: IgnoredTag[],
-  file: string,
-  lo: number,
-  hi: number,
-): IgnoredTag[] {
-  return ignored.filter(
-    (t) =>
-      t.anchor.file === file &&
-      t.anchor.startLine <= hi &&
-      t.anchor.endLine >= lo,
-  );
-}
-
 /** reviewed hunk count / total reviewable hunk count, across all files. */
 export function reviewProgress(
   files: ChangedFile[],

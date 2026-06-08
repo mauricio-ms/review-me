@@ -7,8 +7,7 @@ import {
   addIgnoredTag,
   addReviewedTag,
   clearTags,
-  removeTag,
-  unreviewRange,
+  unmarkRange,
 } from "./tauri";
 import { hunkNewRange } from "./coverage";
 
@@ -44,14 +43,14 @@ export async function reviewWholeFile(file: ChangedFile): Promise<void> {
   if (store) apply(store);
 }
 
-export async function unreviewLines(
+export async function unmarkLines(
   file: string,
   lo: number,
   hi: number,
 ): Promise<void> {
   const repo = repoPath();
   if (!repo) return;
-  apply(await unreviewRange(repo, file, lo, hi));
+  apply(await unmarkRange(repo, file, lo, hi));
 }
 
 export async function addFlag(
@@ -65,15 +64,6 @@ export async function addFlag(
   apply(await addFlagTag(repo, file, lo, hi, kind));
 }
 
-/** Remove flag tags by id (used to toggle a flag off). */
-export async function removeFlags(ids: string[]): Promise<void> {
-  const repo = repoPath();
-  if (!repo || ids.length === 0) return;
-  let store: TagStore | null = null;
-  for (const id of ids) store = await removeTag(repo, id);
-  if (store) apply(store);
-}
-
 export async function addIgnore(
   file: string,
   lo: number,
@@ -85,16 +75,7 @@ export async function addIgnore(
   apply(await addIgnoredTag(repo, file, lo, hi, kind));
 }
 
-/** Remove ignore tags by id (used to toggle ignore off). */
-export async function removeIgnores(ids: string[]): Promise<void> {
-  const repo = repoPath();
-  if (!repo || ids.length === 0) return;
-  let store: TagStore | null = null;
-  for (const id of ids) store = await removeTag(repo, id);
-  if (store) apply(store);
-}
-
-/** Drop every reviewed and flag tag in the repo. */
+/** Drop every reviewed, flag, and ignore tag in the repo. */
 export async function clearAllTags(): Promise<void> {
   const repo = repoPath();
   if (!repo) return;

@@ -134,7 +134,7 @@ printf 'changed\0bytes\n' > logo.bin                        # binary change
 > don't need to review it".
 > Tagging **moves** items between the four sections (§1.5b): reviewing pulls a hunk
 > into **REVIEWED**, flagging into **FLAGGED**, ignoring into **IGNORED**;
-> `u`/un-flag/un-ignore returns it to **TO REVIEW**.
+> `u` unmarks the current file/hunk/line/visual selection and returns it to **TO REVIEW**.
 > Classification is per-hunk with precedence **flagged > ignored > reviewed > to-review**.
 
 ### 2.1 Review a hunk
@@ -153,25 +153,25 @@ printf 'changed\0bytes\n' > logo.bin                        # binary change
 - [ ] **Steps:** Expand a hunk, move onto a diff line, press `v`, extend with `j`/`k` over a few lines, press `r`.
 - [ ] **Expect:** Header shows a `VISUAL` badge while selecting (violet highlight on selected rows). After `r`, only the selected lines get the green reviewed edge-stripe; selection clears. `Esc` cancels a selection without tagging.
 
-### 2.4 Unmark reviewed
-- [ ] **Steps:** On a reviewed hunk/file/line, press `u`.
-- [ ] **Expect:** The `✓` / reviewed stripe is removed for that scope. Status bar count decrements.
+### 2.4 Unmark a scope
+- [ ] **Steps:** On a reviewed, flagged, or ignored hunk/file/line, press `u`.
+- [ ] **Expect:** Any `✓` / `⚑` / `⊘` markers covering that scope are removed. The item returns to **TO REVIEW** and matching status bar counts decrement.
 
-### 2.5 Flag toggle (scope follows the highlighted selection)
-- [ ] **Steps:** On a file/hunk/line (or a visual selection), press `f`. Press `f` again on the same scope.
-- [ ] **Expect:** First `f` adds an amber `⚑` (and amber line stripe) and moves the hunk under **FLAGGED**; status bar `⚑ count` increments. Second `f` removes it (toggle) and the hunk returns to its prior section. The flag covers exactly the scope currently highlighted — flagging a **hunk** stripes only that hunk's lines (sibling hunks stay unflagged), flagging a **line** stripes only that line.
+### 2.5 Flag mark (scope follows the highlighted selection)
+- [ ] **Steps:** On a file/hunk/line (or a visual selection), press `f`. Press `f` again on the same scope, then press `u`.
+- [ ] **Expect:** `f` adds an amber `⚑` (and amber line stripe) and moves the hunk under **FLAGGED**; pressing `f` again keeps it flagged instead of toggling it off. `u` removes the flag. The flag covers exactly the scope currently highlighted — flagging a **hunk** stripes only that hunk's lines (sibling hunks stay unflagged), flagging a **line** stripes only that line.
 
-### 2.5b Ignore toggle (`i`)
-- [ ] **Steps:** On a file/hunk/line (or a visual selection) in **TO REVIEW**, press `i`. Press `i` again on the same scope.
-- [ ] **Expect:** First `i` adds a violet `⊘` (and violet line stripe) and moves the hunk under **IGNORED**; status bar `⊘ count` increments. Second `i` removes it (toggle) and the hunk returns to its prior section. Scope follows the highlighted selection exactly like flag (§2.5). Binary/hunkless files can be ignored at file scope.
+### 2.5b Ignore mark (`i`)
+- [ ] **Steps:** On a file/hunk/line (or a visual selection) in **TO REVIEW**, press `i`. Press `i` again on the same scope, then press `u`.
+- [ ] **Expect:** `i` adds a violet `⊘` (and violet line stripe) and moves the hunk under **IGNORED**; pressing `i` again keeps it ignored instead of toggling it off. `u` removes the ignore. Scope follows the highlighted selection exactly like flag (§2.5). Binary/hunkless files can be ignored at file scope.
 
 ### 2.5c Ignore vs flag precedence
 - [ ] **Steps:** Ignore a hunk (it moves to **IGNORED**), then flag a line inside it.
-- [ ] **Expect:** The hunk moves to **FLAGGED** (flag wins over ignore); the hunk row can show both `⚑` and `⊘`. Removing the flag drops it back into **IGNORED**.
+- [ ] **Expect:** The hunk moves to **FLAGGED** (flag wins over ignore); the hunk row can show both `⚑` and `⊘`. Pressing `u` on the hunk clears both scoped markers and returns it to **TO REVIEW**.
 
 ### 2.6 Reviewed + flagged together (flag precedence)
 - [ ] **Steps:** Review a hunk (it moves to **REVIEWED**), then flag a line inside it.
-- [ ] **Expect:** The hunk moves to **FLAGGED** (flag wins over reviewed); the line shows both a green and an amber edge stripe, and the hunk row can show both `✓` and `⚑`. Removing the flag drops it back into **REVIEWED**.
+- [ ] **Expect:** The hunk moves to **FLAGGED** (flag wins over reviewed); the line shows both a green and an amber edge stripe, and the hunk row can show both `✓` and `⚑`. Pressing `u` on the hunk clears both scoped markers and returns it to **TO REVIEW**.
 
 ### 2.7 Persistence across restart
 - [ ] **Steps:** Tag several hunks/lines (review + flag). Fully quit the app and relaunch. Reopen the same repo.

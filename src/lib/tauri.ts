@@ -111,13 +111,13 @@ export function clearTags(repo: string): Promise<TagStore> {
   return invoke<TagStore>("clear_tags", { repo });
 }
 
-export function unreviewRange(
+export function unmarkRange(
   repo: string,
   file: string,
   startLine: number,
   endLine: number,
 ): Promise<TagStore> {
-  return invoke<TagStore>("unreview_range", { repo, file, startLine, endLine });
+  return invoke<TagStore>("unmark_range", { repo, file, startLine, endLine });
 }
 
 export function fuzzyFiles(

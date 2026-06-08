@@ -45,7 +45,7 @@ export default function BufferStatusBar() {
       <span className="status-spacer" />
       <span className="status-segment status-hint">
         <kbd>r</kbd> review · <kbd>f</kbd> flag · <kbd>i</kbd> ignore ·{" "}
-        <kbd>Space</kbd> palette
+        <kbd>u</kbd> unmark · <kbd>Space</kbd> palette
       </span>
     </div>
   );

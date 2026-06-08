@@ -204,18 +204,21 @@ pub fn clear_all(root: &Path) -> AppResult<TagStore> {
     load(root)
 }
 
-/// Remove every reviewed tag in `file` whose range overlaps `[start, end]`. This is
-/// the `u` (unmark) action: unreviewing a hunk clears any reviewed tag covering it.
-pub fn unreview_range(
+/// Remove every tag in `file` whose range overlaps `[start, end]`. This is the
+/// `u` unmark action: it clears reviewed, flag, and ignore markers for the scope.
+pub fn unmark_range(
     root: &Path,
     file: &str,
     start: u32,
     end: u32,
 ) -> AppResult<TagStore> {
     let mut store = read(root)?;
-    store.reviewed.retain(|t| {
-        !(t.anchor.file == file && t.anchor.start_line <= end && t.anchor.end_line >= start)
-    });
+    let overlaps = |anchor: &Anchor| {
+        anchor.file == file && anchor.start_line <= end && anchor.end_line >= start
+    };
+    store.reviewed.retain(|t| !overlaps(&t.anchor));
+    store.flags.retain(|t| !overlaps(&t.anchor));
+    store.ignored.retain(|t| !overlaps(&t.anchor));
     write(root, &store)?;
     load(root)
 }
@@ -456,6 +459,42 @@ mod tests {
                 && reloaded.flags.is_empty()
                 && reloaded.ignored.is_empty()
         );
+    }
+
+    #[test]
+    fn unmark_range_removes_all_overlapping_tag_kinds() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        write_lines(
+            &root.join("a.txt"),
+            &["one", "two", "three", "four", "five", "six", "seven"],
+        );
+        write_lines(&root.join("b.txt"), &["one", "two", "three"]);
+        add_reviewed(root, "a.txt", 2, 3, AnchorKind::Hunk).unwrap();
+        add_flag(root, "a.txt", 3, 4, AnchorKind::Range, None, None).unwrap();
+        add_ignored(root, "a.txt", 1, 5, AnchorKind::Hunk).unwrap();
+        add_reviewed(root, "a.txt", 7, 7, AnchorKind::Range).unwrap();
+        add_flag(root, "b.txt", 1, 1, AnchorKind::Range, None, None).unwrap();
+        add_ignored(root, "b.txt", 2, 2, AnchorKind::Range).unwrap();
+
+        let after = unmark_range(root, "a.txt", 2, 4).unwrap();
+        assert_eq!(after.reviewed.len(), 1);
+        assert_eq!(
+            (
+                after.reviewed[0].anchor.file.as_str(),
+                after.reviewed[0].anchor.start_line,
+            ),
+            ("a.txt", 7),
+        );
+        assert_eq!(after.flags.len(), 1);
+        assert_eq!(after.flags[0].anchor.file, "b.txt");
+        assert_eq!(after.ignored.len(), 1);
+        assert_eq!(after.ignored[0].anchor.file, "b.txt");
+
+        let reloaded = load(root).unwrap();
+        assert_eq!(reloaded.reviewed.len(), 1);
+        assert_eq!(reloaded.flags.len(), 1);
+        assert_eq!(reloaded.ignored.len(), 1);
     }
 
     #[test]

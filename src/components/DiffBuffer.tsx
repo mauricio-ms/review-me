@@ -2,9 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   fileNewRange,
-  flagsOverlapping,
   hunkNewRange,
-  ignoresOverlapping,
   isFileReviewed,
   isHunkFlagged,
   isHunkIgnored,
@@ -21,11 +19,9 @@ import { setProjectCursor } from "../lib/project-view";
 import {
   addFlag,
   addIgnore,
-  removeFlags,
-  removeIgnores,
   reviewLines,
   reviewWholeFile,
-  unreviewLines,
+  unmarkLines,
 } from "../lib/review-actions";
 import { refineHunk, type WordSeg } from "../lib/word-diff";
 import DiffCleanState from "./DiffCleanState";
@@ -278,33 +274,23 @@ export default function DiffBuffer() {
     exitVisual();
   };
 
-  const doUnreview = () => {
+  const doUnmark = () => {
     const scope = targetScope();
-    if (scope) void unreviewLines(scope.file.path, scope.lo, scope.hi);
+    if (scope) void unmarkLines(scope.file.path, scope.lo, scope.hi);
     exitVisual();
   };
 
   const doFlag = () => {
     const scope = targetScope();
     if (!scope) return;
-    const overlapping = flagsOverlapping(flags, scope.file.path, scope.lo, scope.hi);
-    if (overlapping.length > 0) {
-      void removeFlags(overlapping.map((t) => t.id));
-    } else {
-      void addFlag(scope.file.path, scope.lo, scope.hi, scope.kind);
-    }
+    void addFlag(scope.file.path, scope.lo, scope.hi, scope.kind);
     exitVisual();
   };
 
   const doIgnore = () => {
     const scope = targetScope();
     if (!scope) return;
-    const overlapping = ignoresOverlapping(ignored, scope.file.path, scope.lo, scope.hi);
-    if (overlapping.length > 0) {
-      void removeIgnores(overlapping.map((t) => t.id));
-    } else {
-      void addIgnore(scope.file.path, scope.lo, scope.hi, scope.kind);
-    }
+    void addIgnore(scope.file.path, scope.lo, scope.hi, scope.kind);
     exitVisual();
   };
 
@@ -433,7 +419,7 @@ export default function DiffBuffer() {
         break;
       case "u":
         e.preventDefault();
-        doUnreview();
+        doUnmark();
         break;
       case "f":
         e.preventDefault();
