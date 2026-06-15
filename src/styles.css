@@ -1091,6 +1091,70 @@ kbd {
   white-space: nowrap;
 }
 
+/* ---------- commit reviewed ---------- */
+
+.commit-reviewed {
+  width: min(900px, 94vw);
+  height: min(680px, 86vh);
+}
+
+.commit-reviewed-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 70px 28px 20px;
+  color: var(--fg-1);
+  font-size: 18px;
+  line-height: 1.65;
+}
+
+.commit-path-list {
+  margin-top: 18px;
+  padding: 12px 14px;
+  border: 1px solid rgba(var(--accent-teal-rgb), 0.28);
+  background: rgba(var(--bg-0-rgb), 0.48);
+  color: var(--fg-2);
+  font-size: 14px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.commit-editor-shell {
+  flex: 1;
+  min-height: 0;
+  padding: 48px 12px 8px;
+}
+
+.commit-editor-shell .cm-editor {
+  height: 100%;
+  border: 1px solid rgba(var(--accent-teal-rgb), 0.22);
+  background: var(--bg-0);
+  font-family: var(--mono);
+  font-size: 16px;
+}
+
+.commit-editor-shell .cm-scroller {
+  font-family: var(--mono);
+}
+
+.commit-warning {
+  margin-top: 16px;
+  color: var(--accent-amber);
+}
+
+.commit-error {
+  margin: 0 20px 8px;
+  padding: 8px 10px;
+  border: 1px solid rgba(var(--accent-red-rgb), 0.32);
+  background: rgba(var(--accent-red-rgb), 0.08);
+  color: var(--accent-red);
+  font-size: 14px;
+}
+
+.commit-reviewed-body .commit-error {
+  margin: 0;
+}
+
 /* ---------- diff clean state (fake terminal) ---------- */
 
 .diff-clean {

@@ -11,7 +11,8 @@ export type PickerKind =
   | "openRepo"
   | "recentRepos"
   | "fuzzyFiles"
-  | "clearTags";
+  | "clearTags"
+  | "commitReviewed";
 
 type UIState = {
   activeBuffer: BufferName;

@@ -69,8 +69,10 @@ export default function CommandTransient() {
 
       const currentGroups = groupsRef.current;
       if (pendingPrefix) {
-        const group = currentGroups.find((g) => g.prefix === pendingPrefix);
-        const cmd = group?.commands.find((c) => c.key === k);
+        const cmd = currentGroups
+          .filter((g) => g.prefix === pendingPrefix)
+          .flatMap((g) => g.commands)
+          .find((c) => c.key === k);
         if (cmd && cmd.enabled) {
           void cmd.run();
         } else {

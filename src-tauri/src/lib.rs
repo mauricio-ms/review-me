@@ -6,6 +6,7 @@ mod fuzzy;
 mod queries;
 mod repo;
 mod repo_library;
+mod review_commit;
 mod tags;
 mod tree;
 mod xref;
@@ -28,6 +29,10 @@ pub fn run() {
             commands::remove_tag,
             commands::clear_tags,
             commands::unmark_range,
+            commands::reviewed_commit_preflight,
+            commands::prepare_reviewed_commit,
+            commands::abort_reviewed_commit,
+            commands::commit_reviewed_changes,
             commands::fuzzy_files,
             commands::list_repo_dir,
             commands::build_symbol_index,

@@ -6,6 +6,9 @@ use crate::fs_browse::{self, DirectoryListing, FileSystemListing};
 use crate::fuzzy::{self, FileMatch};
 use crate::repo::{self, RepoInfo};
 use crate::repo_library::{self, RememberedRepo};
+use crate::review_commit::{
+    self, PreparedReviewedCommit, ReviewedCommitPreflight, ReviewedCommitResult,
+};
 use crate::tags::{self, AnchorKind, TagStore};
 use crate::tree::{self, TreeListing};
 use crate::xref::{self, IndexStats, SymbolRef, XrefResult};
@@ -182,4 +185,35 @@ pub fn unmark_range(
     end_line: u32,
 ) -> AppResult<TagStore> {
     tags::unmark_range(&repo_root(repo)?, &file, start_line, end_line)
+}
+
+#[tauri::command]
+pub fn reviewed_commit_preflight(repo: String) -> AppResult<ReviewedCommitPreflight> {
+    let repository = repo::open(&PathBuf::from(repo))?;
+    review_commit::preflight(&repository)
+}
+
+#[tauri::command]
+pub fn prepare_reviewed_commit(
+    repo: String,
+    unstage_existing: bool,
+) -> AppResult<PreparedReviewedCommit> {
+    let repository = repo::open(&PathBuf::from(repo))?;
+    review_commit::prepare(&repository, unstage_existing)
+}
+
+#[tauri::command]
+pub fn abort_reviewed_commit(repo: String) -> AppResult<()> {
+    let repository = repo::open(&PathBuf::from(repo))?;
+    review_commit::abort(&repository)
+}
+
+#[tauri::command]
+pub fn commit_reviewed_changes(
+    repo: String,
+    message: String,
+    reviewed_tag_ids: Vec<String>,
+) -> AppResult<ReviewedCommitResult> {
+    let repository = repo::open(&PathBuf::from(repo))?;
+    review_commit::commit(&repository, &message, &reviewed_tag_ids)
 }

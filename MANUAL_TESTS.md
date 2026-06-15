@@ -199,6 +199,19 @@ printf 'changed\0bytes\n' > logo.bin                        # binary change
 - [ ] **Steps:** Press `Space` and scan the palette; also try `:clear` with no tags present.
 - [ ] **Expect:** There is **no** chord/shortcut for clear anywhere in the `Space` palette (command-line only). With nothing tagged, the modal reads "No tags to clear." and `y` is a harmless no-op.
 
+### 2.12 Commit reviewed changes (`:commit` / `Space` → `g` → `c`)
+- [ ] **Steps:** Review one text hunk, leave another text hunk in **TO REVIEW**, then run `:commit` (or `Space` → `g` → `c`).
+- [ ] **Expect:** The app stages only reviewed text hunks and opens an in-app Vim-style commit message buffer. The template has commented `#` help lines, a reviewed-hunk count, and the staged paths. `:wq` or `:x` commits; `:q` or `:cq` aborts and unstages the reviewed content. `Ctrl-Enter` also commits.
+- [ ] **Steps:** Enter a message, commit with `:wq`, then compare `git log --oneline`, `git diff HEAD`, and `.review-me/tags.json`.
+- [ ] **Expect:** A new commit exists containing only the reviewed text hunk. Unreviewed content remains in the working tree. Reviewed tags for committed content are cleared. Flagged and ignored tags remain.
+- [ ] **Steps:** Stage any unrelated path manually with `git add`, then run `:commit` again.
+- [ ] **Expect:** A confirmation appears explaining that continuing resets only the staging area to `HEAD` and does not modify working-tree files. `n`/`Esc` cancels without changing the index. `y`/`Enter` unstages the existing staged content, stages reviewed hunks, and opens the commit editor.
+- [ ] **Steps:** With the commit editor open, abort with `:q`.
+- [ ] **Expect:** The reviewed content staged by the flow is unstaged, the working tree content remains untouched, and the diff refreshes.
+- [ ] **Steps:** Try committing with only blank/comment lines in the commit message.
+- [ ] **Expect:** Commit is rejected and the editor stays open with an error message.
+- [ ] **Current limitation:** Deletion-only reviewed hunks, deleted files, and binary files are not included by this commit-1 flow. They are covered by the follow-up deletion/binary support change.
+
 ---
 
 ## 3. M3 — Fuzzy finder & project mode

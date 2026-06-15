@@ -9,6 +9,11 @@ import type {
   RepoInfo,
   TreeListing,
 } from "../types/repo";
+import type {
+  PreparedReviewedCommit,
+  ReviewedCommitPreflight,
+  ReviewedCommitResult,
+} from "../types/review-commit";
 import type { AnchorKind, TagStore } from "../types/tags";
 import type { IndexStats, SymbolRef, XrefResult } from "../types/xref";
 
@@ -118,6 +123,38 @@ export function unmarkRange(
   endLine: number,
 ): Promise<TagStore> {
   return invoke<TagStore>("unmark_range", { repo, file, startLine, endLine });
+}
+
+export function reviewedCommitPreflight(
+  repo: string,
+): Promise<ReviewedCommitPreflight> {
+  return invoke<ReviewedCommitPreflight>("reviewed_commit_preflight", { repo });
+}
+
+export function prepareReviewedCommit(
+  repo: string,
+  unstageExisting: boolean,
+): Promise<PreparedReviewedCommit> {
+  return invoke<PreparedReviewedCommit>("prepare_reviewed_commit", {
+    repo,
+    unstageExisting,
+  });
+}
+
+export function abortReviewedCommit(repo: string): Promise<void> {
+  return invoke<void>("abort_reviewed_commit", { repo });
+}
+
+export function commitReviewedChanges(
+  repo: string,
+  message: string,
+  reviewedTagIds: string[],
+): Promise<ReviewedCommitResult> {
+  return invoke<ReviewedCommitResult>("commit_reviewed_changes", {
+    repo,
+    message,
+    reviewedTagIds,
+  });
 }
 
 export function fuzzyFiles(

@@ -101,6 +101,11 @@ export function useCommands(rawClose: CommandClose): {
     openPicker("clearTags");
   }, [close, openPicker]);
 
+  const handleCommitReviewed = useCallback(() => {
+    close({ restoreFocus: false });
+    openPicker("commitReviewed");
+  }, [close, openPicker]);
+
   const handleToggleDiffMode = useCallback(() => {
     toggleDiffHighlight();
     close();
@@ -240,6 +245,17 @@ export function useCommands(rawClose: CommandClose): {
       key: "c",
       enabled: !!repo,
       run: handleCloseRepo,
+    },
+    {
+      id: "commit-reviewed",
+      name: "commit",
+      aliases: ["commitreviewed", "reviewed-commit", "gitcommit", "gc"],
+      label: "commit reviewed changes",
+      group: "git",
+      prefix: "g",
+      key: "c",
+      enabled: !!repo,
+      run: handleCommitReviewed,
     },
     {
       id: "clear",

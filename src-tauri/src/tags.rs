@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::collections::HashSet;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -189,6 +190,20 @@ pub fn remove(root: &Path, id: &str) -> AppResult<TagStore> {
     store.reviewed.retain(|t| t.id != id);
     store.flags.retain(|t| t.id != id);
     store.ignored.retain(|t| t.id != id);
+    write(root, &store)?;
+    load(root)
+}
+
+/// Remove only reviewed tags with ids in `ids`, preserving flag and ignore tags.
+/// Used after committing reviewed content so unresolved flagged/ignored sections
+/// keep their markers.
+pub fn remove_reviewed_by_ids(root: &Path, ids: &[String]) -> AppResult<TagStore> {
+    if ids.is_empty() {
+        return load(root);
+    }
+    let ids: HashSet<&str> = ids.iter().map(String::as_str).collect();
+    let mut store = read(root)?;
+    store.reviewed.retain(|t| !ids.contains(t.id.as_str()));
     write(root, &store)?;
     load(root)
 }
