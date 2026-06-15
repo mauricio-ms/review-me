@@ -9,7 +9,7 @@ use crate::repo_library::{self, RememberedRepo};
 use crate::review_commit::{
     self, PreparedReviewedCommit, ReviewedCommitPreflight, ReviewedCommitResult,
 };
-use crate::tags::{self, AnchorKind, TagStore};
+use crate::tags::{self, AnchorKind, AnchorSide, TagStore};
 use crate::tree::{self, TreeListing};
 use crate::xref::{self, IndexStats, SymbolRef, XrefResult};
 
@@ -87,8 +87,9 @@ pub fn add_reviewed_tag(
     start_line: u32,
     end_line: u32,
     kind: AnchorKind,
+    side: AnchorSide,
 ) -> AppResult<TagStore> {
-    tags::add_reviewed(&repo_root(repo)?, &file, start_line, end_line, kind)
+    tags::add_reviewed(&repo_root(repo)?, &file, start_line, end_line, kind, side)
 }
 
 #[tauri::command]
@@ -98,10 +99,11 @@ pub fn add_flag_tag(
     start_line: u32,
     end_line: u32,
     kind: AnchorKind,
+    side: AnchorSide,
     note: Option<String>,
     severity: Option<String>,
 ) -> AppResult<TagStore> {
-    tags::add_flag(&repo_root(repo)?, &file, start_line, end_line, kind, note, severity)
+    tags::add_flag(&repo_root(repo)?, &file, start_line, end_line, kind, side, note, severity)
 }
 
 #[tauri::command]
@@ -111,8 +113,9 @@ pub fn add_ignored_tag(
     start_line: u32,
     end_line: u32,
     kind: AnchorKind,
+    side: AnchorSide,
 ) -> AppResult<TagStore> {
-    tags::add_ignored(&repo_root(repo)?, &file, start_line, end_line, kind)
+    tags::add_ignored(&repo_root(repo)?, &file, start_line, end_line, kind, side)
 }
 
 #[tauri::command]
@@ -183,8 +186,9 @@ pub fn unmark_range(
     file: String,
     start_line: u32,
     end_line: u32,
+    side: AnchorSide,
 ) -> AppResult<TagStore> {
-    tags::unmark_range(&repo_root(repo)?, &file, start_line, end_line)
+    tags::unmark_range(&repo_root(repo)?, &file, start_line, end_line, side)
 }
 
 #[tauri::command]

@@ -117,7 +117,7 @@ export function useCommands(rawClose: CommandClose): {
     const range = projectSelectionRange();
     if (!path || !range) return;
     try {
-      await addFlag(path, range.lo, range.hi, "range");
+      await addFlag(path, range.lo, range.hi, "range", "new");
     } finally {
       requestFocus();
     }

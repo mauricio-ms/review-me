@@ -43,9 +43,9 @@ function pathPreview(paths: string[]): string {
 function commitTemplate(prepared: PreparedReviewedCommit): string {
   const unsupported =
     prepared.unsupportedReviewedCount > 0
-      ? `# Note: ${prepared.unsupportedReviewedCount} reviewed deletion-only hunk${
+      ? `# Note: ${prepared.unsupportedReviewedCount} reviewed change${
           prepared.unsupportedReviewedCount === 1 ? "" : "s"
-        } not included yet.\n#\n`
+        } could not be staged.\n#\n`
       : "";
   const lines = [
     "",
@@ -53,7 +53,7 @@ function commitTemplate(prepared: PreparedReviewedCommit): string {
     "# Lines starting with '#' will be ignored.",
     "# :wq or :x commits. :q or :cq aborts and unstages.",
     "#",
-    `# Reviewed hunks staged: ${prepared.hunkCount}`,
+    `# Reviewed units staged: ${prepared.hunkCount}`,
     "# Changes to be committed:",
     pathPreview(prepared.stagedPaths),
   ];
@@ -292,11 +292,10 @@ export default function CommitReviewedHost() {
             )}
             {phase === "empty" && (
               <>
-                <div>No reviewed text hunks are ready to commit.</div>
+                <div>No reviewed changes are ready to commit.</div>
                 {preflight?.unsupportedReviewedCount || prepared?.unsupportedReviewedCount ? (
                   <div className="commit-warning">
-                    Reviewed deletion-only hunks are not included until the deletion/binary
-                    support change.
+                    Some reviewed changes could not be staged.
                   </div>
                 ) : null}
               </>

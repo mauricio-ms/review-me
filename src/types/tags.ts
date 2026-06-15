@@ -1,14 +1,26 @@
 export type AnchorKind = "file" | "hunk" | "range";
 
+/**
+ * Which side of the diff an anchor's content lives on. `new` anchors to the
+ * working-tree file (added/modified hunks); `old` anchors to HEAD content
+ * (pure-deletion hunks and deleted text files); `file` anchors a whole binary-file
+ * change by blob identity.
+ */
+export type AnchorSide = "new" | "old" | "file";
+
 export interface Anchor {
   file: string;
-  /** 1-based inclusive line range in the file's current content. */
+  /**
+   * 1-based inclusive line range. New-side anchors index the working-tree file,
+   * old-side anchors index HEAD content, and file anchors ignore these (0,0).
+   */
   startLine: number;
   endLine: number;
   contentHash: string;
   contextBefore: string[];
   contextAfter: string[];
   kind: AnchorKind;
+  side: AnchorSide;
   /** Set by re-anchoring when the captured content can no longer be found. */
   stale: boolean;
 }

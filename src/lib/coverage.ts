@@ -1,9 +1,18 @@
 import type { ChangedFile, Hunk } from "../types/diff";
-import type { FlagTag, IgnoredTag, ReviewedTag } from "../types/tags";
+import type {
+  Anchor,
+  AnchorSide,
+  FlagTag,
+  IgnoredTag,
+  ReviewedTag,
+} from "../types/tags";
 
 export type LineRange = { lo: number; hi: number };
 
-/** The new-side line span a hunk occupies, or null for a pure-deletion hunk. */
+/** The line side + span a reviewable hunk is tagged against. */
+export type ReviewTarget = { side: AnchorSide; lo: number; hi: number };
+
+/** The new-side line span a hunk occupies (context + added), or null when it has none. */
 export function hunkNewRange(hunk: Hunk): LineRange | null {
   let lo = Infinity;
   let hi = -Infinity;
@@ -11,6 +20,20 @@ export function hunkNewRange(hunk: Hunk): LineRange | null {
     if (line.newLine != null) {
       lo = Math.min(lo, line.newLine);
       hi = Math.max(hi, line.newLine);
+    }
+  }
+  if (lo === Infinity) return null;
+  return { lo, hi };
+}
+
+/** The old-side (HEAD) span of a hunk's removed lines, or null when nothing is removed. */
+export function hunkOldRange(hunk: Hunk): LineRange | null {
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (const line of hunk.lines) {
+    if (line.kind === "removed" && line.oldLine != null) {
+      lo = Math.min(lo, line.oldLine);
+      hi = Math.max(hi, line.oldLine);
     }
   }
   if (lo === Infinity) return null;
@@ -32,34 +55,96 @@ export function fileNewRange(file: ChangedFile): LineRange | null {
   return { lo, hi };
 }
 
-function covers(
-  tags: { anchor: { file: string; startLine: number; endLine: number; stale: boolean } }[],
+/** The old-side span covering all of a file's removed lines, or null if none. */
+export function fileOldRange(file: ChangedFile): LineRange | null {
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (const hunk of file.hunks) {
+    const r = hunkOldRange(hunk);
+    if (r) {
+      lo = Math.min(lo, r.lo);
+      hi = Math.max(hi, r.hi);
+    }
+  }
+  if (lo === Infinity) return null;
+  return { lo, hi };
+}
+
+/** A hunk that removes lines without adding any — reviewed on the old (HEAD) side. */
+export function isPureDeletionHunk(hunk: Hunk): boolean {
+  let added = 0;
+  let removed = 0;
+  for (const line of hunk.lines) {
+    if (line.kind === "added") added += 1;
+    else if (line.kind === "removed") removed += 1;
+  }
+  return added === 0 && removed > 0;
+}
+
+/**
+ * The side + line span a hunk is reviewed against: the new side for added/modified
+ * hunks, the old side for pure deletions. Null for a hunk with no reviewable lines.
+ */
+export function hunkTarget(hunk: Hunk): ReviewTarget | null {
+  if (isPureDeletionHunk(hunk)) {
+    const r = hunkOldRange(hunk);
+    return r ? { side: "old", lo: r.lo, hi: r.hi } : null;
+  }
+  const r = hunkNewRange(hunk);
+  return r ? { side: "new", lo: r.lo, hi: r.hi } : null;
+}
+
+type Tagged = { anchor: Anchor };
+
+/** Treat a missing side (tags written before deletion/binary support) as new-side. */
+function sideOf(anchor: Anchor): AnchorSide {
+  return anchor.side ?? "new";
+}
+
+function coversSide(
+  tags: Tagged[],
   file: string,
   lo: number,
   hi: number,
+  side: AnchorSide,
 ): boolean {
   return tags.some(
     (t) =>
       !t.anchor.stale &&
+      sideOf(t.anchor) === side &&
       t.anchor.file === file &&
       t.anchor.startLine <= lo &&
       t.anchor.endLine >= hi,
   );
 }
 
-function overlaps(
-  tags: { anchor: { file: string; startLine: number; endLine: number; stale: boolean } }[],
+function overlapsSide(
+  tags: Tagged[],
   file: string,
   lo: number,
   hi: number,
+  side: AnchorSide,
 ): boolean {
   return tags.some(
     (t) =>
       !t.anchor.stale &&
+      sideOf(t.anchor) === side &&
       t.anchor.file === file &&
       t.anchor.startLine <= hi &&
       t.anchor.endLine >= lo,
   );
+}
+
+/** A whole-file (binary) anchor on the path. */
+function coversFile(tags: Tagged[], file: string): boolean {
+  return tags.some(
+    (t) => !t.anchor.stale && sideOf(t.anchor) === "file" && t.anchor.file === file,
+  );
+}
+
+/** File-scope flag/ignore: any non-stale anchor on the path (used for binary files). */
+function fileTagged(tags: Tagged[], file: string): boolean {
+  return tags.some((t) => !t.anchor.stale && t.anchor.file === file);
 }
 
 export function isHunkReviewed(
@@ -67,51 +152,53 @@ export function isHunkReviewed(
   file: string,
   hunk: Hunk,
 ): boolean {
-  const r = hunkNewRange(hunk);
-  if (!r) return false;
-  return covers(reviewed, file, r.lo, r.hi);
+  const t = hunkTarget(hunk);
+  return t ? coversSide(reviewed, file, t.lo, t.hi, t.side) : false;
 }
 
 export function isFileReviewed(
   reviewed: ReviewedTag[],
   file: ChangedFile,
 ): boolean {
+  if (file.binary) return coversFile(reviewed, file.path);
   if (file.hunks.length === 0) return false;
   return file.hunks.every((h) => {
-    const r = hunkNewRange(h);
-    // Pure-deletion hunks have no new lines to review; ignore them for coverage.
-    return r ? covers(reviewed, file.path, r.lo, r.hi) : true;
+    const t = hunkTarget(h);
+    // Hunks with no reviewable lines don't count against file coverage.
+    return t ? coversSide(reviewed, file.path, t.lo, t.hi, t.side) : true;
   });
 }
 
 export function isLineReviewed(
   reviewed: ReviewedTag[],
   file: string,
-  newLine: number,
+  line: number,
+  side: AnchorSide,
 ): boolean {
-  return covers(reviewed, file, newLine, newLine);
+  return coversSide(reviewed, file, line, line, side);
 }
 
 export function isLineFlagged(
   flags: FlagTag[],
   file: string,
-  newLine: number,
+  line: number,
+  side: AnchorSide,
 ): boolean {
-  return covers(flags, file, newLine, newLine);
+  return coversSide(flags, file, line, line, side);
 }
 
 export function isHunkFlagged(flags: FlagTag[], file: string, hunk: Hunk): boolean {
-  const r = hunkNewRange(hunk);
-  if (!r) return false;
-  return overlaps(flags, file, r.lo, r.hi);
+  const t = hunkTarget(hunk);
+  return t ? overlapsSide(flags, file, t.lo, t.hi, t.side) : false;
 }
 
 export function isLineIgnored(
   ignored: IgnoredTag[],
   file: string,
-  newLine: number,
+  line: number,
+  side: AnchorSide,
 ): boolean {
-  return covers(ignored, file, newLine, newLine);
+  return coversSide(ignored, file, line, line, side);
 }
 
 export function isHunkIgnored(
@@ -119,9 +206,8 @@ export function isHunkIgnored(
   file: string,
   hunk: Hunk,
 ): boolean {
-  const r = hunkNewRange(hunk);
-  if (!r) return false;
-  return overlaps(ignored, file, r.lo, r.hi);
+  const t = hunkTarget(hunk);
+  return t ? overlapsSide(ignored, file, t.lo, t.hi, t.side) : false;
 }
 
 /** The magit-style sections of the diff buffer, in display order. */
@@ -145,18 +231,23 @@ export function sectionForHunk(
   return "toReview";
 }
 
-/** Section for a hunkless/binary file, which can only be flagged/ignored at file scope. */
+/**
+ * Section for a hunkless/binary file, reviewed/flagged/ignored at file scope. Same
+ * precedence as a hunk (flagged > ignored > reviewed > to-review).
+ */
 export function sectionForFile(
+  reviewed: ReviewedTag[],
   flags: FlagTag[],
   ignored: IgnoredTag[],
   file: string,
 ): ReviewSection {
-  if (flags.some((t) => t.anchor.file === file)) return "flagged";
-  if (ignored.some((t) => t.anchor.file === file)) return "ignored";
+  if (fileTagged(flags, file)) return "flagged";
+  if (fileTagged(ignored, file)) return "ignored";
+  if (coversFile(reviewed, file)) return "reviewed";
   return "toReview";
 }
 
-/** reviewed hunk count / total reviewable hunk count, across all files. */
+/** reviewed unit count / total reviewable unit count (text hunks + binary files). */
 export function reviewProgress(
   files: ChangedFile[],
   reviewed: ReviewedTag[],
@@ -164,10 +255,16 @@ export function reviewProgress(
   let done = 0;
   let total = 0;
   for (const file of files) {
-    for (const hunk of file.hunks) {
-      if (!hunkNewRange(hunk)) continue;
+    if (file.binary) {
       total += 1;
-      if (isHunkReviewed(reviewed, file.path, hunk)) done += 1;
+      if (coversFile(reviewed, file.path)) done += 1;
+      continue;
+    }
+    for (const hunk of file.hunks) {
+      const t = hunkTarget(hunk);
+      if (!t) continue;
+      total += 1;
+      if (coversSide(reviewed, file.path, t.lo, t.hi, t.side)) done += 1;
     }
   }
   return { done, total };

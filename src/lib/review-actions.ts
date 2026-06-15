@@ -1,7 +1,7 @@
 import { useRepoStore } from "../state/repo";
 import { useTagsStore } from "../state/tags";
 import type { ChangedFile } from "../types/diff";
-import type { AnchorKind, TagStore } from "../types/tags";
+import type { AnchorKind, AnchorSide, TagStore } from "../types/tags";
 import {
   addFlagTag,
   addIgnoredTag,
@@ -9,7 +9,7 @@ import {
   clearTags,
   unmarkRange,
 } from "./tauri";
-import { hunkNewRange } from "./coverage";
+import { hunkTarget } from "./coverage";
 
 function repoPath(): string | null {
   return useRepoStore.getState().repoPath;
@@ -24,21 +24,29 @@ export async function reviewLines(
   lo: number,
   hi: number,
   kind: AnchorKind,
+  side: AnchorSide,
 ): Promise<void> {
   const repo = repoPath();
   if (!repo) return;
-  apply(await addReviewedTag(repo, file, lo, hi, kind));
+  apply(await addReviewedTag(repo, file, lo, hi, kind, side));
 }
 
-/** Mark every (non-pure-deletion) hunk of a file reviewed. */
+/**
+ * Mark a whole file reviewed: a binary file as a single file-scope unit, otherwise
+ * every reviewable hunk on its own side (new for edits, old for pure deletions).
+ */
 export async function reviewWholeFile(file: ChangedFile): Promise<void> {
   const repo = repoPath();
   if (!repo) return;
   let store: TagStore | null = null;
-  for (const hunk of file.hunks) {
-    const r = hunkNewRange(hunk);
-    if (!r) continue;
-    store = await addReviewedTag(repo, file.path, r.lo, r.hi, "hunk");
+  if (file.binary) {
+    store = await addReviewedTag(repo, file.path, 0, 0, "file", "file");
+  } else {
+    for (const hunk of file.hunks) {
+      const t = hunkTarget(hunk);
+      if (!t) continue;
+      store = await addReviewedTag(repo, file.path, t.lo, t.hi, "hunk", t.side);
+    }
   }
   if (store) apply(store);
 }
@@ -47,10 +55,11 @@ export async function unmarkLines(
   file: string,
   lo: number,
   hi: number,
+  side: AnchorSide,
 ): Promise<void> {
   const repo = repoPath();
   if (!repo) return;
-  apply(await unmarkRange(repo, file, lo, hi));
+  apply(await unmarkRange(repo, file, lo, hi, side));
 }
 
 export async function addFlag(
@@ -58,10 +67,11 @@ export async function addFlag(
   lo: number,
   hi: number,
   kind: AnchorKind,
+  side: AnchorSide,
 ): Promise<void> {
   const repo = repoPath();
   if (!repo) return;
-  apply(await addFlagTag(repo, file, lo, hi, kind));
+  apply(await addFlagTag(repo, file, lo, hi, kind, side));
 }
 
 export async function addIgnore(
@@ -69,10 +79,11 @@ export async function addIgnore(
   lo: number,
   hi: number,
   kind: AnchorKind,
+  side: AnchorSide,
 ): Promise<void> {
   const repo = repoPath();
   if (!repo) return;
-  apply(await addIgnoredTag(repo, file, lo, hi, kind));
+  apply(await addIgnoredTag(repo, file, lo, hi, kind, side));
 }
 
 /** Drop every reviewed, flag, and ignore tag in the repo. */

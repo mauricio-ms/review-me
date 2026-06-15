@@ -14,7 +14,7 @@ import type {
   ReviewedCommitPreflight,
   ReviewedCommitResult,
 } from "../types/review-commit";
-import type { AnchorKind, TagStore } from "../types/tags";
+import type { AnchorKind, AnchorSide, TagStore } from "../types/tags";
 import type { IndexStats, SymbolRef, XrefResult } from "../types/xref";
 
 export function openRepo(path: string): Promise<RepoInfo> {
@@ -62,6 +62,7 @@ export function addReviewedTag(
   startLine: number,
   endLine: number,
   kind: AnchorKind,
+  side: AnchorSide,
 ): Promise<TagStore> {
   return invoke<TagStore>("add_reviewed_tag", {
     repo,
@@ -69,6 +70,7 @@ export function addReviewedTag(
     startLine,
     endLine,
     kind,
+    side,
   });
 }
 
@@ -78,6 +80,7 @@ export function addFlagTag(
   startLine: number,
   endLine: number,
   kind: AnchorKind,
+  side: AnchorSide,
   note?: string | null,
   severity?: string | null,
 ): Promise<TagStore> {
@@ -87,6 +90,7 @@ export function addFlagTag(
     startLine,
     endLine,
     kind,
+    side,
     note: note ?? null,
     severity: severity ?? null,
   });
@@ -98,6 +102,7 @@ export function addIgnoredTag(
   startLine: number,
   endLine: number,
   kind: AnchorKind,
+  side: AnchorSide,
 ): Promise<TagStore> {
   return invoke<TagStore>("add_ignored_tag", {
     repo,
@@ -105,6 +110,7 @@ export function addIgnoredTag(
     startLine,
     endLine,
     kind,
+    side,
   });
 }
 
@@ -121,8 +127,15 @@ export function unmarkRange(
   file: string,
   startLine: number,
   endLine: number,
+  side: AnchorSide,
 ): Promise<TagStore> {
-  return invoke<TagStore>("unmark_range", { repo, file, startLine, endLine });
+  return invoke<TagStore>("unmark_range", {
+    repo,
+    file,
+    startLine,
+    endLine,
+    side,
+  });
 }
 
 export function reviewedCommitPreflight(

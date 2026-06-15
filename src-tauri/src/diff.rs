@@ -81,17 +81,18 @@ pub fn compute(repo: &Repository) -> AppResult<DiffSummary> {
     diff.find_similar(Some(DiffFindOptions::new().renames(true)))?;
 
     let staged = staged_paths(repo, head_tree.as_ref())?;
+    let root = repo::root(repo)?;
 
     let mut files = Vec::new();
     for idx in 0..diff.deltas().len() {
-        if let Some(file) = changed_file(&diff, idx, &staged)? {
+        if let Some(file) = changed_file(&diff, idx, &staged, repo, &root)? {
             files.push(file);
         }
     }
 
     let (head, branch) = repo::head_info(repo);
     Ok(DiffSummary {
-        repo_root: repo::root(repo)?.to_string_lossy().into_owned(),
+        repo_root: root.to_string_lossy().into_owned(),
         head,
         branch,
         files,
@@ -102,6 +103,8 @@ fn changed_file(
     diff: &Diff,
     idx: usize,
     staged: &HashSet<String>,
+    repo: &Repository,
+    root: &Path,
 ) -> AppResult<Option<ChangedFile>> {
     let delta = match diff.get_delta(idx) {
         Some(delta) => delta,
@@ -128,7 +131,7 @@ fn changed_file(
         _ => None,
     };
 
-    let binary = delta.new_file().is_binary() || delta.old_file().is_binary();
+    let binary = path_change_is_binary(repo, root, &path);
     let mut hunks = Vec::new();
     let mut added_lines = 0u32;
     let mut removed_lines = 0u32;
@@ -211,6 +214,32 @@ fn head_tree(repo: &Repository) -> AppResult<Option<Tree<'_>>> {
 
 fn path_string(path: &Path) -> String {
     path.to_string_lossy().into_owned()
+}
+
+/// libgit2 flags binary files lazily, so `DiffFile::is_binary()` is unreliable until a
+/// patch is generated. Detect it ourselves the way git does: a NUL byte in the first
+/// 8000 bytes of either side's content. Checks HEAD's blob and the working file so it
+/// catches added, modified, and deleted binaries alike.
+pub(crate) fn path_change_is_binary(repo: &Repository, root: &Path, path: &str) -> bool {
+    head_blob_bytes(repo, path)
+        .as_deref()
+        .is_some_and(looks_binary)
+        || working_bytes(root, path).as_deref().is_some_and(looks_binary)
+}
+
+fn looks_binary(bytes: &[u8]) -> bool {
+    bytes.iter().take(8000).any(|&b| b == 0)
+}
+
+fn head_blob_bytes(repo: &Repository, path: &str) -> Option<Vec<u8>> {
+    let tree = repo.head().ok()?.peel_to_commit().ok()?.tree().ok()?;
+    let entry = tree.get_path(Path::new(path)).ok()?;
+    let blob = entry.to_object(repo).ok()?.peel_to_blob().ok()?;
+    Some(blob.content().to_vec())
+}
+
+fn working_bytes(root: &Path, path: &str) -> Option<Vec<u8>> {
+    std::fs::read(root.join(path)).ok()
 }
 
 /// Decode a diff line/header, dropping a single trailing newline (git2 keeps the

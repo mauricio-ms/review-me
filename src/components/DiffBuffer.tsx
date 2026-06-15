@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   fileNewRange,
-  hunkNewRange,
+  fileOldRange,
+  hunkTarget,
   isFileReviewed,
   isHunkFlagged,
   isHunkIgnored,
@@ -10,6 +11,7 @@ import {
   isLineFlagged,
   isLineIgnored,
   isLineReviewed,
+  isPureDeletionHunk,
   sectionForFile,
   sectionForHunk,
   type ReviewSection,
@@ -29,7 +31,13 @@ import { useRepoStore } from "../state/repo";
 import { useTagsStore } from "../state/tags";
 import { useUIStore } from "../state/ui";
 import type { ChangedFile, DiffLine, Hunk } from "../types/diff";
-import type { AnchorKind, FlagTag, IgnoredTag, ReviewedTag } from "../types/tags";
+import type {
+  AnchorKind,
+  AnchorSide,
+  FlagTag,
+  IgnoredTag,
+  ReviewedTag,
+} from "../types/tags";
 
 type Row =
   | { kind: "section"; section: ReviewSection; count: number }
@@ -45,7 +53,13 @@ type Row =
       segments: WordSeg[] | null;
     };
 
-type Scope = { file: ChangedFile; lo: number; hi: number; kind: AnchorKind };
+type Scope = {
+  file: ChangedFile;
+  lo: number;
+  hi: number;
+  kind: AnchorKind;
+  side: AnchorSide;
+};
 
 const STATUS_GLYPH: Record<ChangedFile["status"], string> = {
   added: "A",
@@ -84,10 +98,13 @@ function buildRows(
   };
 
   for (const file of files) {
-    const reviewable = file.hunks.some((h) => hunkNewRange(h) != null);
+    const reviewable = file.hunks.some((h) => hunkTarget(h) != null);
     if (file.binary || !reviewable) {
-      // Binary / pure-deletion files can't be hunk-reviewed; classify the file.
-      buckets[sectionForFile(flags, ignored, file.path)].push({ file, hunks: [] });
+      // Binary / hunkless files are reviewed as a single file-scope unit.
+      buckets[sectionForFile(reviewed, flags, ignored, file.path)].push({
+        file,
+        hunks: [],
+      });
       continue;
     }
     const perSection: Record<ReviewSection, Hunk[]> = {
@@ -97,8 +114,8 @@ function buildRows(
       ignored: [],
     };
     for (const hunk of file.hunks) {
-      // Pure-deletion hunks have no new-side lines to tag → To review.
-      const sec = hunkNewRange(hunk)
+      // A hunk with no reviewable lines (neither added nor removed) → To review.
+      const sec = hunkTarget(hunk)
         ? sectionForHunk(reviewed, flags, ignored, file.path, hunk)
         : "toReview";
       perSection[sec].push(hunk);
@@ -218,24 +235,39 @@ export default function DiffBuffer() {
     return [cursor, end - 1];
   };
 
-  // The new-side line range + scope kind targeted by the current cursor/selection.
+  // The line range + scope kind/side targeted by the current cursor/selection. A
+  // selection over added/context lines tags the new side; over a pure deletion's
+  // removed lines, the old side.
   const targetScope = (): Scope | null => {
     if (visualAnchor != null) {
       const [a, b] = selectionRange();
       const anchor = rows[cursor];
       const file = anchor && anchor.kind !== "section" ? anchor.file : null;
       if (!file) return null;
-      let lo = Infinity;
-      let hi = -Infinity;
+      let newLo = Infinity;
+      let newHi = -Infinity;
+      let oldLo = Infinity;
+      let oldHi = -Infinity;
       for (let i = a; i <= b; i++) {
         const r = rows[i];
-        if (r.kind === "line" && r.file.path === file.path && r.line.newLine != null) {
-          lo = Math.min(lo, r.line.newLine);
-          hi = Math.max(hi, r.line.newLine);
+        if (r.kind !== "line" || r.file.path !== file.path) continue;
+        if (r.line.newLine != null) {
+          newLo = Math.min(newLo, r.line.newLine);
+          newHi = Math.max(newHi, r.line.newLine);
+        } else if (
+          r.line.kind === "removed" &&
+          r.line.oldLine != null &&
+          isPureDeletionHunk(r.hunk)
+        ) {
+          oldLo = Math.min(oldLo, r.line.oldLine);
+          oldHi = Math.max(oldHi, r.line.oldLine);
         }
       }
-      if (lo === Infinity) return cursorScope();
-      return { file, lo, hi, kind: "range" };
+      if (newLo !== Infinity)
+        return { file, lo: newLo, hi: newHi, kind: "range", side: "new" };
+      if (oldLo !== Infinity)
+        return { file, lo: oldLo, hi: oldHi, kind: "range", side: "old" };
+      return cursorScope();
     }
     return cursorScope();
   };
@@ -244,21 +276,45 @@ export default function DiffBuffer() {
     const row = rows[cursor];
     if (!row || row.kind === "section") return null;
     if (row.kind === "file") {
-      const r = fileNewRange(row.file);
-      if (!r) return null;
-      return { file: row.file, lo: r.lo, hi: r.hi, kind: "file" };
+      if (row.file.binary) {
+        return { file: row.file, lo: 0, hi: 0, kind: "file", side: "file" };
+      }
+      const nr = fileNewRange(row.file);
+      if (nr) return { file: row.file, lo: nr.lo, hi: nr.hi, kind: "file", side: "new" };
+      const or = fileOldRange(row.file);
+      if (or) return { file: row.file, lo: or.lo, hi: or.hi, kind: "file", side: "old" };
+      return null;
     }
     if (row.kind === "hunk") {
-      const r = hunkNewRange(row.hunk);
-      if (!r) return null;
-      return { file: row.file, lo: r.lo, hi: r.hi, kind: "hunk" };
+      const t = hunkTarget(row.hunk);
+      if (!t) return null;
+      return { file: row.file, lo: t.lo, hi: t.hi, kind: "hunk", side: t.side };
     }
     if (row.line.newLine != null) {
-      return { file: row.file, lo: row.line.newLine, hi: row.line.newLine, kind: "range" };
+      return {
+        file: row.file,
+        lo: row.line.newLine,
+        hi: row.line.newLine,
+        kind: "range",
+        side: "new",
+      };
     }
-    const r = hunkNewRange(row.hunk);
-    if (!r) return null;
-    return { file: row.file, lo: r.lo, hi: r.hi, kind: "hunk" };
+    if (
+      row.line.kind === "removed" &&
+      row.line.oldLine != null &&
+      isPureDeletionHunk(row.hunk)
+    ) {
+      return {
+        file: row.file,
+        lo: row.line.oldLine,
+        hi: row.line.oldLine,
+        kind: "range",
+        side: "old",
+      };
+    }
+    const t = hunkTarget(row.hunk);
+    if (!t) return null;
+    return { file: row.file, lo: t.lo, hi: t.hi, kind: "hunk", side: t.side };
   };
 
   const exitVisual = () => setVisualAnchor(null);
@@ -270,27 +326,28 @@ export default function DiffBuffer() {
       return;
     }
     const scope = targetScope();
-    if (scope) void reviewLines(scope.file.path, scope.lo, scope.hi, scope.kind);
+    if (scope)
+      void reviewLines(scope.file.path, scope.lo, scope.hi, scope.kind, scope.side);
     exitVisual();
   };
 
   const doUnmark = () => {
     const scope = targetScope();
-    if (scope) void unmarkLines(scope.file.path, scope.lo, scope.hi);
+    if (scope) void unmarkLines(scope.file.path, scope.lo, scope.hi, scope.side);
     exitVisual();
   };
 
   const doFlag = () => {
     const scope = targetScope();
     if (!scope) return;
-    void addFlag(scope.file.path, scope.lo, scope.hi, scope.kind);
+    void addFlag(scope.file.path, scope.lo, scope.hi, scope.kind, scope.side);
     exitVisual();
   };
 
   const doIgnore = () => {
     const scope = targetScope();
     if (!scope) return;
-    void addIgnore(scope.file.path, scope.lo, scope.hi, scope.kind);
+    void addIgnore(scope.file.path, scope.lo, scope.hi, scope.kind, scope.side);
     exitVisual();
   };
 
@@ -551,12 +608,28 @@ export default function DiffBuffer() {
             );
           }
           const line = row.line;
+          // Added/context lines highlight on the new side; a pure deletion's removed
+          // lines highlight on the old side.
+          let lineSide: AnchorSide | null = null;
+          let lineNo = 0;
+          if (line.newLine != null) {
+            lineSide = "new";
+            lineNo = line.newLine;
+          } else if (
+            line.kind === "removed" &&
+            line.oldLine != null &&
+            isPureDeletionHunk(row.hunk)
+          ) {
+            lineSide = "old";
+            lineNo = line.oldLine;
+          }
           const lineReviewed =
-            line.newLine != null && isLineReviewed(reviewed, row.file.path, line.newLine);
+            lineSide != null &&
+            isLineReviewed(reviewed, row.file.path, lineNo, lineSide);
           const lineFlagged =
-            line.newLine != null && isLineFlagged(flags, row.file.path, line.newLine);
+            lineSide != null && isLineFlagged(flags, row.file.path, lineNo, lineSide);
           const lineIgnored =
-            line.newLine != null && isLineIgnored(ignored, row.file.path, line.newLine);
+            lineSide != null && isLineIgnored(ignored, row.file.path, lineNo, lineSide);
           return (
             <div
               key={`l:${row.hunk.id}:${idx}`}

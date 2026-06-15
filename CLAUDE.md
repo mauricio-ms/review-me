@@ -71,16 +71,25 @@ highlighting lazy-loaded by extension via `@codemirror/language-data`).
 ### Tagging & anchoring (the subtle part)
 
 Reviewed/flag/ignore tags live in `<repo>/.review-me/tags.json` (three parallel arrays:
-`reviewed`, `flags`, `ignored`), anchored to a file's *current*
-content by `[startLine,endLine]` + sha256 of those lines + context lines. `tags::load`
-**re-anchors** every tag: exact hash at the stored position → else a ±200-line search →
-else `stale: true`. The frontend sends only `(file, startLine, endLine, kind)`; the
-backend computes the hash/context so add and re-anchor stay consistent. "Reviewed" is
-fundamentally per-hunk; file/line coverage is **derived** in `src/lib/coverage.ts`
-(`isHunkReviewed`/`isFileReviewed`), not stored. The diff buffer buckets each hunk into
-one of four sections — To review / Flagged / Reviewed / Ignored — by precedence
-**flagged > ignored > reviewed > to-review** (`sectionForHunk`); `r` reviews, `f` flags,
-`i` ignores, and `u` unmarks the current scope.
+`reviewed`, `flags`, `ignored`), anchored by `[startLine,endLine]` + sha256 of those
+lines + context lines. Each anchor also carries a **`side`** (`AnchorSide`): `new`
+anchors to the working tree (added/modified hunks, the default), `old` to HEAD content
+(pure-deletion hunks + deleted text files), `file` to a whole binary-file change
+identified by `old:new` blob oids (line numbers unused). `tags::load` **re-anchors**
+every tag by side: exact hash at the stored position → else a ±200-line search → else
+`stale: true` (file anchors compare blob oids; old anchors hash HEAD content, so
+`load`/`add_*` open the repo lazily). The frontend sends `(file, startLine, endLine,
+kind, side)`; the backend computes the hash/context so add and re-anchor stay
+consistent. "Reviewed" is fundamentally per-unit (text hunk, on whichever side, or a
+binary file); file/line coverage is **derived** in `src/lib/coverage.ts`
+(`hunkTarget`/`isHunkReviewed`/`isFileReviewed`), not stored. The diff buffer buckets
+each unit into one of four sections — To review / Flagged / Reviewed / Ignored — by
+precedence **flagged > ignored > reviewed > to-review** (`sectionForHunk`/
+`sectionForFile`); `r` reviews, `f` flags, `i` ignores, and `u` unmarks the current
+scope. `review_commit.rs` stages reviewed new-side + old-side hunks via `apply` and
+reviewed binary files via index add/remove. NB: libgit2's `DiffFile::is_binary()` is
+unreliable before patches are generated, so binary detection uses
+`diff::path_change_is_binary` (NUL-byte heuristic over HEAD blob + working file).
 
 ### Cross-references
 

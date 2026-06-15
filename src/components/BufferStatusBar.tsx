@@ -27,7 +27,7 @@ export default function BufferStatusBar() {
           </span>
           {activeBuffer === "diff" && total > 0 && (
             <span className="status-segment status-reviewed">
-              ✓ {done}/{total} hunks
+              ✓ {done}/{total} units
             </span>
           )}
           {flags.length > 0 && (

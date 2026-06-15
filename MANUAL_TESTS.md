@@ -29,6 +29,8 @@ git init -b master
 printf 'one\ntwo\nthree\nfour\nfive\n' > kept.txt
 printf 'public class A {\n    int x = 1;\n    int y = 2;\n}\n' > A.java
 printf 'binary\0content\n' > logo.bin
+printf 'd1\nd2\nd3\nd4\nd5\nd6\nd7\nd8\n' > shrink.txt
+printf 'goodbye\nworld\n' > gone.txt
 git add . && git commit -qm "initial"
 
 # Now produce a dirty working tree:
@@ -37,6 +39,8 @@ printf 'public class A {\n    int x = 1;\n    int y = 22;\n    int z = 3;\n}\n' 
 git add A.java                                              # staged modification
 printf 'brand new file\nsecond line\n' > fresh.txt          # untracked (status A)
 printf 'changed\0bytes\n' > logo.bin                        # binary change
+printf 'd1\nd2\nd6\nd7\nd8\n' > shrink.txt                  # pure-deletion hunk (d3..d5 removed)
+rm gone.txt                                                 # deleted text file (status D)
 ```
 
 > Tips for the remaining statuses:
@@ -149,6 +153,18 @@ printf 'changed\0bytes\n' > logo.bin                        # binary change
 - [ ] **Steps:** Expand a file with **two or more** hunks. Review just one hunk (`r` on its header).
 - [ ] **Expect:** The file header appears **twice** — once under **TO REVIEW** (listing only the still-unreviewed hunks) and once under **REVIEWED** (listing only the reviewed hunk) — exactly like magit repeats a file across Unstaged/Staged.
 
+### 2.2c Review a deletion-only hunk
+- [ ] **Steps:** Expand `shrink.txt` (the `d3..d5` removed block), put the cursor on its hunk header or a removed (`−`) line, press `r`.
+- [ ] **Expect:** The deletion hunk leaves **TO REVIEW** and moves under **REVIEWED** with a green `✓`; the removed lines get the green reviewed stripe. Status bar `✓ done/total units` increments. `u` returns it to **TO REVIEW**.
+
+### 2.2d Review a deleted file
+- [ ] **Steps:** Move to `gone.txt` (status `D`), expand it, and review its single deletion hunk (or press `r` on the file row).
+- [ ] **Expect:** The file moves under **REVIEWED**. Reviewing the file row reviews its whole deletion at once.
+
+### 2.2e Review / flag / ignore a binary file
+- [ ] **Steps:** Move to `logo.bin` (shown as **binary**, no expandable diff). Press `r`; then `u`; then `f`; then `i`.
+- [ ] **Expect:** `r` moves the binary file under **REVIEWED** with a `✓`; `u` returns it to **TO REVIEW**; `f` flags it (`⚑`, **FLAGGED**); `i` ignores it (`⊘`, **IGNORED**). All operate at file scope (binary content can't be line-tagged).
+
 ### 2.3 Review a sub-range (visual selection)
 - [ ] **Steps:** Expand a hunk, move onto a diff line, press `v`, extend with `j`/`k` over a few lines, press `r`.
 - [ ] **Expect:** Header shows a `VISUAL` badge while selecting (violet highlight on selected rows). After `r`, only the selected lines get the green reviewed edge-stripe; selection clears. `Esc` cancels a selection without tagging.
@@ -210,7 +226,12 @@ printf 'changed\0bytes\n' > logo.bin                        # binary change
 - [ ] **Expect:** The reviewed content staged by the flow is unstaged, the working tree content remains untouched, and the diff refreshes.
 - [ ] **Steps:** Try committing with only blank/comment lines in the commit message.
 - [ ] **Expect:** Commit is rejected and the editor stays open with an error message.
-- [ ] **Current limitation:** Deletion-only reviewed hunks, deleted files, and binary files are not included by this commit-1 flow. They are covered by the follow-up deletion/binary support change.
+
+### 2.12b Commit reviewed deletions and binary files
+- [ ] **Steps:** Review the `shrink.txt` deletion-only hunk (§2.2c), the deleted `gone.txt` (§2.2d), and the `logo.bin` binary change (§2.2e). Leave at least one text edit unreviewed. Run `:commit`, enter a message, `:wq`.
+- [ ] **Expect:** The template's "Reviewed units staged" count includes the deletion hunk, the deleted file, and the binary file, and all three paths appear under "Changes to be committed". After committing, `git show --stat HEAD` shows the `d3..d5` removal in `shrink.txt`, `gone.txt` deleted, and `logo.bin` modified — and **nothing** from the unreviewed text edit. Reviewed tags for those three are cleared; any flag/ignore tags remain.
+- [ ] **Steps:** Flag the `logo.bin` change (instead of reviewing it) and review only the `shrink.txt` deletion, then `:commit`.
+- [ ] **Expect:** Only the `shrink.txt` deletion is staged/committed; the flagged binary file is excluded and its `⚑` remains afterward.
 
 ---
 

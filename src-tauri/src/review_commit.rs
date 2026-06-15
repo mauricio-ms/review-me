@@ -9,7 +9,7 @@ use serde::Serialize;
 
 use crate::error::{AppError, AppResult};
 use crate::repo;
-use crate::tags::{self, Anchor, ReviewedTag, TagStore};
+use crate::tags::{self, Anchor, AnchorSide, ReviewedTag, TagStore};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -50,11 +50,41 @@ struct EligibleHunk {
     key: HunkKey,
 }
 
+/// A whole-file binary unit to stage (added/modified/deleted). Binary content can't be
+/// applied hunk-by-hunk, so the blob is staged or removed wholesale.
+#[derive(Debug, Clone)]
+struct EligibleFile {
+    path: String,
+    deleted: bool,
+}
+
 #[derive(Debug, Clone)]
 struct Eligibility {
     hunks: Vec<EligibleHunk>,
+    files: Vec<EligibleFile>,
     tag_ids: Vec<String>,
     unsupported_reviewed_count: u32,
+}
+
+impl Eligibility {
+    /// Paths touched by any eligible unit (hunks + binary files), sorted + deduped.
+    fn paths(&self) -> Vec<String> {
+        let mut paths = self
+            .hunks
+            .iter()
+            .map(|h| h.path.clone())
+            .chain(self.files.iter().map(|f| f.path.clone()))
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        paths.sort();
+        paths
+    }
+
+    /// Total reviewable units (text hunks + binary files).
+    fn unit_count(&self) -> u32 {
+        (self.hunks.len() + self.files.len()) as u32
+    }
 }
 
 pub fn preflight(repo: &Repository) -> AppResult<ReviewedCommitPreflight> {
@@ -62,19 +92,11 @@ pub fn preflight(repo: &Repository) -> AppResult<ReviewedCommitPreflight> {
     let head_tree = head_tree(repo)?;
     let staged_paths = staged_paths(repo, head_tree.as_ref())?;
     let eligibility = reviewed_hunks(repo, &root)?;
-    let mut reviewed_paths = eligibility
-        .hunks
-        .iter()
-        .map(|h| h.path.clone())
-        .collect::<HashSet<_>>()
-        .into_iter()
-        .collect::<Vec<_>>();
-    reviewed_paths.sort();
 
     Ok(ReviewedCommitPreflight {
         staged_paths,
-        reviewed_hunk_count: eligibility.hunks.len() as u32,
-        reviewed_paths,
+        reviewed_hunk_count: eligibility.unit_count(),
+        reviewed_paths: eligibility.paths(),
         unsupported_reviewed_count: eligibility.unsupported_reviewed_count,
     })
 }
@@ -99,20 +121,14 @@ pub fn prepare(
     if !eligibility.hunks.is_empty() {
         stage_hunks(repo, &eligibility.hunks)?;
     }
-
-    let mut staged_paths = eligibility
-        .hunks
-        .iter()
-        .map(|h| h.path.clone())
-        .collect::<HashSet<_>>()
-        .into_iter()
-        .collect::<Vec<_>>();
-    staged_paths.sort();
+    if !eligibility.files.is_empty() {
+        stage_files(repo, &eligibility.files)?;
+    }
 
     Ok(PreparedReviewedCommit {
-        staged_paths,
-        reviewed_tag_ids: eligibility.tag_ids,
-        hunk_count: eligibility.hunks.len() as u32,
+        staged_paths: eligibility.paths(),
+        reviewed_tag_ids: eligibility.tag_ids.clone(),
+        hunk_count: eligibility.unit_count(),
         unsupported_reviewed_count: eligibility.unsupported_reviewed_count,
     })
 }
@@ -171,9 +187,13 @@ fn reviewed_hunks(repo: &Repository, root: &Path) -> AppResult<Eligibility> {
     diff.find_similar(Some(DiffFindOptions::new().renames(true)))?;
 
     let mut hunks = Vec::new();
-    let mut eligible_ranges: HashMap<String, Vec<(u32, u32)>> = HashMap::new();
-    let mut excluded_ranges: HashMap<String, Vec<(u32, u32)>> = HashMap::new();
-    let mut unsupported_reviewed_count = 0u32;
+    let mut files = Vec::new();
+    // Eligible/excluded line ranges, keyed by (side, path) so a new-side and an
+    // old-side range on the same file never collide.
+    let mut eligible: HashMap<(AnchorSide, String), Vec<(u32, u32)>> = HashMap::new();
+    let mut excluded: HashMap<(AnchorSide, String), Vec<(u32, u32)>> = HashMap::new();
+    let mut eligible_files: HashSet<String> = HashSet::new();
+    let mut excluded_files: HashSet<String> = HashSet::new();
 
     for idx in 0..diff.deltas().len() {
         let Some(delta) = diff.get_delta(idx) else {
@@ -185,30 +205,58 @@ fn reviewed_hunks(repo: &Repository, root: &Path) -> AppResult<Eligibility> {
         let Some(path) = delta_path(&delta) else {
             continue;
         };
-        if delta.new_file().is_binary() || delta.old_file().is_binary() {
+
+        // Binary files are one whole-file unit, reviewed/flagged/ignored at file scope.
+        if crate::diff::path_change_is_binary(repo, root, &path) {
+            let reviewed = covers_file(&store.reviewed, &path);
+            let flagged = file_tagged(store.flags.iter().map(|t| &t.anchor), &path);
+            let ignored = file_tagged(store.ignored.iter().map(|t| &t.anchor), &path);
+            if reviewed && (flagged || ignored) {
+                excluded_files.insert(path.clone());
+            }
+            if reviewed && !flagged && !ignored {
+                files.push(EligibleFile {
+                    path: path.clone(),
+                    deleted: delta.status() == Delta::Deleted,
+                });
+                eligible_files.insert(path.clone());
+            }
             continue;
         }
+
         let Some(patch) = Patch::from_diff(&diff, idx)? else {
             continue;
         };
         for hunk_idx in 0..patch.num_hunks() {
             let (hunk, line_count) = patch.hunk(hunk_idx)?;
             let stats = hunk_stats(&patch, hunk_idx, line_count)?;
-            let Some((lo, hi)) = stats.new_range else {
+            // A hunk with additions is reviewed on the new side; a pure-deletion hunk
+            // (only removed lines) on the old side.
+            let (side, lo, hi) = if stats.added_lines > 0 {
+                match stats.new_range {
+                    Some((lo, hi)) => (AnchorSide::New, lo, hi),
+                    None => continue,
+                }
+            } else if stats.removed_lines > 0 {
+                match stats.old_range {
+                    Some((lo, hi)) => (AnchorSide::Old, lo, hi),
+                    None => continue,
+                }
+            } else {
                 continue;
             };
-            let reviewed = covers(&store.reviewed, &path, lo, hi);
-            let flagged = overlaps(store.flags.iter().map(|t| &t.anchor), &path, lo, hi);
-            let ignored = overlaps(store.ignored.iter().map(|t| &t.anchor), &path, lo, hi);
+
+            let reviewed = covers(&store.reviewed, side, &path, lo, hi);
+            let flagged = overlaps(store.flags.iter().map(|t| &t.anchor), side, &path, lo, hi);
+            let ignored = overlaps(store.ignored.iter().map(|t| &t.anchor), side, &path, lo, hi);
 
             if reviewed && (flagged || ignored) {
-                excluded_ranges.entry(path.clone()).or_default().push((lo, hi));
+                excluded
+                    .entry((side, path.clone()))
+                    .or_default()
+                    .push((lo, hi));
             }
             if !reviewed || flagged || ignored {
-                continue;
-            }
-            if stats.added_lines == 0 {
-                unsupported_reviewed_count += 1;
                 continue;
             }
 
@@ -222,7 +270,10 @@ fn reviewed_hunks(repo: &Repository, root: &Path) -> AppResult<Eligibility> {
                 path: path.clone(),
                 key,
             });
-            eligible_ranges.entry(path.clone()).or_default().push((lo, hi));
+            eligible
+                .entry((side, path.clone()))
+                .or_default()
+                .push((lo, hi));
         }
     }
 
@@ -234,13 +285,22 @@ fn reviewed_hunks(repo: &Repository, root: &Path) -> AppResult<Eligibility> {
             if anchor.stale {
                 return false;
             }
-            let committed = eligible_ranges
-                .get(&anchor.file)
-                .is_some_and(|ranges| range_covered(ranges, anchor.start_line, anchor.end_line));
-            let excluded = excluded_ranges
-                .get(&anchor.file)
-                .is_some_and(|ranges| range_overlaps_any(ranges, anchor.start_line, anchor.end_line));
-            committed && !excluded
+            match anchor.side {
+                AnchorSide::File => {
+                    eligible_files.contains(&anchor.file)
+                        && !excluded_files.contains(&anchor.file)
+                }
+                side => {
+                    let key = (side, anchor.file.clone());
+                    let committed = eligible.get(&key).is_some_and(|ranges| {
+                        range_covered(ranges, anchor.start_line, anchor.end_line)
+                    });
+                    let is_excluded = excluded.get(&key).is_some_and(|ranges| {
+                        range_overlaps_any(ranges, anchor.start_line, anchor.end_line)
+                    });
+                    committed && !is_excluded
+                }
+            }
         })
         .map(|tag| tag.id.clone())
         .collect::<Vec<_>>();
@@ -249,8 +309,9 @@ fn reviewed_hunks(repo: &Repository, root: &Path) -> AppResult<Eligibility> {
 
     Ok(Eligibility {
         hunks,
+        files,
         tag_ids,
-        unsupported_reviewed_count,
+        unsupported_reviewed_count: 0,
     })
 }
 
@@ -285,6 +346,22 @@ fn stage_hunks(repo: &Repository, hunks: &[EligibleHunk]) -> AppResult<()> {
     });
     repo.apply(&diff, ApplyLocation::Index, Some(&mut opts))?;
     let mut index = repo.index()?;
+    index.write()?;
+    Ok(())
+}
+
+/// Stage whole-file binary units: add the working blob, or remove the path for a
+/// reviewed deletion.
+fn stage_files(repo: &Repository, files: &[EligibleFile]) -> AppResult<()> {
+    let mut index = repo.index()?;
+    for file in files {
+        let path = Path::new(&file.path);
+        if file.deleted {
+            index.remove_path(path)?;
+        } else {
+            index.add_path(path)?;
+        }
+    }
     index.write()?;
     Ok(())
 }
@@ -335,27 +412,44 @@ fn head_tree(repo: &Repository) -> AppResult<Option<Tree<'_>>> {
 
 #[derive(Debug, Clone, Copy)]
 struct HunkStats {
+    /// New-side span across every line carrying a new line number (context + added).
     new_range: Option<(u32, u32)>,
+    /// Old-side span across the removed lines only (the deletion content).
+    old_range: Option<(u32, u32)>,
     added_lines: u32,
+    removed_lines: u32,
 }
 
 fn hunk_stats(patch: &Patch<'_>, hunk_idx: usize, line_count: usize) -> AppResult<HunkStats> {
-    let mut lo = u32::MAX;
-    let mut hi = 0u32;
+    let mut new_lo = u32::MAX;
+    let mut new_hi = 0u32;
+    let mut old_lo = u32::MAX;
+    let mut old_hi = 0u32;
     let mut added_lines = 0u32;
+    let mut removed_lines = 0u32;
     for line_idx in 0..line_count {
         let line = patch.line_in_hunk(hunk_idx, line_idx)?;
+        let removed = matches!(line.origin(), '-' | '<');
         if matches!(line.origin(), '+' | '>') {
             added_lines += 1;
         }
+        if removed {
+            removed_lines += 1;
+            if let Some(old_line) = line.old_lineno() {
+                old_lo = old_lo.min(old_line);
+                old_hi = old_hi.max(old_line);
+            }
+        }
         if let Some(new_line) = line.new_lineno() {
-            lo = lo.min(new_line);
-            hi = hi.max(new_line);
+            new_lo = new_lo.min(new_line);
+            new_hi = new_hi.max(new_line);
         }
     }
     Ok(HunkStats {
-        new_range: (lo != u32::MAX).then_some((lo, hi)),
+        new_range: (new_lo != u32::MAX).then_some((new_lo, new_hi)),
+        old_range: (old_lo != u32::MAX).then_some((old_lo, old_hi)),
         added_lines,
+        removed_lines,
     })
 }
 
@@ -380,20 +474,43 @@ fn path_string(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
-fn covers(tags: &[ReviewedTag], file: &str, lo: u32, hi: u32) -> bool {
+fn covers(tags: &[ReviewedTag], side: AnchorSide, file: &str, lo: u32, hi: u32) -> bool {
     tags.iter().any(|tag| {
         let anchor = &tag.anchor;
         !anchor.stale
+            && anchor.side == side
             && anchor.file == file
             && anchor.start_line <= lo
             && anchor.end_line >= hi
     })
 }
 
-fn overlaps<'a>(mut anchors: impl Iterator<Item = &'a Anchor>, file: &str, lo: u32, hi: u32) -> bool {
+fn overlaps<'a>(
+    mut anchors: impl Iterator<Item = &'a Anchor>,
+    side: AnchorSide,
+    file: &str,
+    lo: u32,
+    hi: u32,
+) -> bool {
     anchors.any(|anchor| {
-        !anchor.stale && anchor.file == file && anchor.start_line <= hi && anchor.end_line >= lo
+        !anchor.stale
+            && anchor.side == side
+            && anchor.file == file
+            && anchor.start_line <= hi
+            && anchor.end_line >= lo
     })
+}
+
+/// A binary file is reviewed when a non-stale file anchor names its path.
+fn covers_file(tags: &[ReviewedTag], file: &str) -> bool {
+    tags.iter().any(|tag| {
+        !tag.anchor.stale && tag.anchor.side == AnchorSide::File && tag.anchor.file == file
+    })
+}
+
+/// File-scope flag/ignore check for binary files: any non-stale anchor on the path.
+fn file_tagged<'a>(mut anchors: impl Iterator<Item = &'a Anchor>, file: &str) -> bool {
+    anchors.any(|anchor| !anchor.stale && anchor.file == file)
 }
 
 fn range_covered(ranges: &[(u32, u32)], lo: u32, hi: u32) -> bool {
@@ -511,7 +628,7 @@ mod tests {
         let (dir, repo) = init_repo();
         let root = dir.path();
         write_changed_two_hunks(root);
-        tags::add_reviewed(root, "a.txt", 1, 5, tags::AnchorKind::Hunk).unwrap();
+        tags::add_reviewed(root, "a.txt", 1, 5, tags::AnchorKind::Hunk, tags::AnchorSide::New).unwrap();
 
         let prepared = prepare(&repo, false).unwrap();
         assert_eq!(prepared.hunk_count, 1);
@@ -525,8 +642,8 @@ mod tests {
         let (dir, repo) = init_repo();
         let root = dir.path();
         write_changed_two_hunks(root);
-        tags::add_reviewed(root, "a.txt", 1, 5, tags::AnchorKind::Hunk).unwrap();
-        tags::add_flag(root, "a.txt", 2, 2, tags::AnchorKind::Range, None, None).unwrap();
+        tags::add_reviewed(root, "a.txt", 1, 5, tags::AnchorKind::Hunk, tags::AnchorSide::New).unwrap();
+        tags::add_flag(root, "a.txt", 2, 2, tags::AnchorKind::Range, tags::AnchorSide::New, None, None).unwrap();
 
         let prepared = prepare(&repo, false).unwrap();
         assert_eq!(prepared.hunk_count, 0);
@@ -539,7 +656,7 @@ mod tests {
         let (dir, repo) = init_repo();
         let root = dir.path();
         write_changed_two_hunks(root);
-        tags::add_reviewed(root, "a.txt", 1, 5, tags::AnchorKind::Hunk).unwrap();
+        tags::add_reviewed(root, "a.txt", 1, 5, tags::AnchorKind::Hunk, tags::AnchorSide::New).unwrap();
         prepare(&repo, false).unwrap();
 
         let cached = run(root, &["diff", "--cached", "--", "a.txt"]);
@@ -554,7 +671,7 @@ mod tests {
         let (dir, repo) = init_repo();
         let root = dir.path();
         write_changed_two_hunks(root);
-        tags::add_reviewed(root, "a.txt", 1, 5, tags::AnchorKind::Hunk).unwrap();
+        tags::add_reviewed(root, "a.txt", 1, 5, tags::AnchorKind::Hunk, tags::AnchorSide::New).unwrap();
         let prepared = prepare(&repo, false).unwrap();
 
         let err = commit(&repo, "\n# comment only\n", &prepared.reviewed_tag_ids)
@@ -568,9 +685,9 @@ mod tests {
         let (dir, repo) = init_repo();
         let root = dir.path();
         write_changed_two_hunks(root);
-        tags::add_reviewed(root, "a.txt", 1, 5, tags::AnchorKind::Hunk).unwrap();
-        tags::add_reviewed(root, "a.txt", 15, 20, tags::AnchorKind::Hunk).unwrap();
-        tags::add_flag(root, "a.txt", 18, 18, tags::AnchorKind::Range, None, None).unwrap();
+        tags::add_reviewed(root, "a.txt", 1, 5, tags::AnchorKind::Hunk, tags::AnchorSide::New).unwrap();
+        tags::add_reviewed(root, "a.txt", 15, 20, tags::AnchorKind::Hunk, tags::AnchorSide::New).unwrap();
+        tags::add_flag(root, "a.txt", 18, 18, tags::AnchorKind::Range, tags::AnchorSide::New, None, None).unwrap();
         let prepared = prepare(&repo, false).unwrap();
         assert_eq!(prepared.hunk_count, 1);
 
@@ -580,5 +697,142 @@ mod tests {
         assert_eq!(store.reviewed.len(), 1);
         assert_eq!(store.flags.len(), 1);
         assert_eq!(store.reviewed[0].anchor.start_line, 15);
+    }
+
+    /// Delete HEAD lines 5..7 in the working tree, leaving everything else.
+    fn delete_lines_five_to_seven(root: &Path) {
+        let lines = (1..=20)
+            .filter(|n| !(5..=7).contains(n))
+            .map(|n| format!("line {n}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        fs::write(root.join("a.txt"), format!("{lines}\n")).unwrap();
+    }
+
+    #[test]
+    fn prepare_stages_reviewed_deletion_hunk() {
+        let (dir, repo) = init_repo();
+        let root = dir.path();
+        delete_lines_five_to_seven(root);
+        // Old-side anchor over the removed block (HEAD lines 5..7).
+        tags::add_reviewed(root, "a.txt", 5, 7, tags::AnchorKind::Hunk, tags::AnchorSide::Old)
+            .unwrap();
+
+        let prepared = prepare(&repo, false).unwrap();
+        assert_eq!(prepared.hunk_count, 1);
+        let cached = run(root, &["diff", "--cached", "--", "a.txt"]);
+        assert!(cached.contains("-line 5"), "staged deletion:\n{cached}");
+        assert!(cached.contains("-line 7"));
+        assert!(!cached.contains("-line 8"), "line 8 must survive");
+    }
+
+    #[test]
+    fn deletion_hunk_excluded_when_flagged() {
+        let (dir, repo) = init_repo();
+        let root = dir.path();
+        delete_lines_five_to_seven(root);
+        tags::add_reviewed(root, "a.txt", 5, 7, tags::AnchorKind::Hunk, tags::AnchorSide::Old)
+            .unwrap();
+        // A flag on the same old-side range is an active concern → not staged.
+        tags::add_flag(root, "a.txt", 6, 6, tags::AnchorKind::Range, tags::AnchorSide::Old, None, None)
+            .unwrap();
+
+        let prepared = prepare(&repo, false).unwrap();
+        assert_eq!(prepared.hunk_count, 0);
+        assert!(run(root, &["diff", "--cached", "--", "a.txt"]).is_empty());
+    }
+
+    #[test]
+    fn commit_clears_committed_deletion_tag() {
+        let (dir, repo) = init_repo();
+        let root = dir.path();
+        delete_lines_five_to_seven(root);
+        tags::add_reviewed(root, "a.txt", 5, 7, tags::AnchorKind::Hunk, tags::AnchorSide::Old)
+            .unwrap();
+        let prepared = prepare(&repo, false).unwrap();
+        assert_eq!(prepared.reviewed_tag_ids.len(), 1);
+
+        commit(&repo, "drop lines 5-7", &prepared.reviewed_tag_ids).unwrap();
+        let store = tags::load(root).unwrap();
+        assert!(store.reviewed.is_empty(), "old-side tag cleared after commit");
+    }
+
+    #[test]
+    fn prepare_stages_reviewed_deleted_file() {
+        let (dir, repo) = init_repo();
+        let root = dir.path();
+        // b.txt exists at HEAD, then is deleted in the working tree.
+        fs::write(root.join("b.txt"), "one\ntwo\nthree\n").unwrap();
+        run(root, &["add", "b.txt"]);
+        run(root, &["commit", "-qm", "add b"]);
+        fs::remove_file(root.join("b.txt")).unwrap();
+
+        tags::add_reviewed(root, "b.txt", 1, 3, tags::AnchorKind::Hunk, tags::AnchorSide::Old)
+            .unwrap();
+
+        let prepared = prepare(&repo, false).unwrap();
+        assert_eq!(prepared.hunk_count, 1);
+        let status = run(root, &["diff", "--cached", "--name-status"]);
+        assert!(status.contains("D\tb.txt"), "staged deletion:\n{status}");
+    }
+
+    fn write_bin(root: &Path, name: &str, bytes: &[u8]) {
+        fs::write(root.join(name), bytes).unwrap();
+    }
+
+    #[test]
+    fn prepare_stages_reviewed_binary_modify() {
+        let (dir, repo) = init_repo();
+        let root = dir.path();
+        write_bin(root, "logo.bin", &[0, 159, 146, 150, 0, 1, 2]);
+        run(root, &["add", "logo.bin"]);
+        run(root, &["commit", "-qm", "add bin"]);
+        write_bin(root, "logo.bin", &[0, 1, 2, 3, 159, 146, 150]);
+
+        tags::add_reviewed(root, "logo.bin", 0, 0, tags::AnchorKind::File, tags::AnchorSide::File)
+            .unwrap();
+
+        let prepared = prepare(&repo, false).unwrap();
+        assert_eq!(prepared.hunk_count, 1);
+        assert_eq!(prepared.staged_paths, vec!["logo.bin"]);
+        let status = run(root, &["diff", "--cached", "--name-status"]);
+        assert!(status.contains("M\tlogo.bin"), "staged modify:\n{status}");
+    }
+
+    #[test]
+    fn prepare_stages_reviewed_binary_delete() {
+        let (dir, repo) = init_repo();
+        let root = dir.path();
+        write_bin(root, "logo.bin", &[0, 159, 146, 150, 0, 1, 2]);
+        run(root, &["add", "logo.bin"]);
+        run(root, &["commit", "-qm", "add bin"]);
+        fs::remove_file(root.join("logo.bin")).unwrap();
+
+        tags::add_reviewed(root, "logo.bin", 0, 0, tags::AnchorKind::File, tags::AnchorSide::File)
+            .unwrap();
+
+        let prepared = prepare(&repo, false).unwrap();
+        assert_eq!(prepared.hunk_count, 1);
+        let status = run(root, &["diff", "--cached", "--name-status"]);
+        assert!(status.contains("D\tlogo.bin"), "staged deletion:\n{status}");
+    }
+
+    #[test]
+    fn binary_unit_excluded_when_ignored() {
+        let (dir, repo) = init_repo();
+        let root = dir.path();
+        write_bin(root, "logo.bin", &[0, 159, 146, 150]);
+        run(root, &["add", "logo.bin"]);
+        run(root, &["commit", "-qm", "add bin"]);
+        write_bin(root, "logo.bin", &[0, 1, 2, 3]);
+
+        tags::add_reviewed(root, "logo.bin", 0, 0, tags::AnchorKind::File, tags::AnchorSide::File)
+            .unwrap();
+        tags::add_ignored(root, "logo.bin", 0, 0, tags::AnchorKind::File, tags::AnchorSide::File)
+            .unwrap();
+
+        let prepared = prepare(&repo, false).unwrap();
+        assert_eq!(prepared.hunk_count, 0);
+        assert!(run(root, &["diff", "--cached", "--name-status"]).is_empty());
     }
 }
