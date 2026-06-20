@@ -155,22 +155,88 @@ kbd {
 }
 
 .startup-logo {
-  font-size: 42px;
-  letter-spacing: 0.18em;
-  text-transform: lowercase;
-  text-shadow: 0 0 24px rgba(var(--accent-teal-rgb), 0.4);
+  display: inline-flex;
+  align-items: center;
+  gap: clamp(18px, 2.4vw, 32px);
 }
 
-.startup-tagline {
-  color: var(--fg-2);
-  font-size: 14px;
-  margin-bottom: 22px;
+.startup-logo-word {
+  --startup-logo-pixel: clamp(4px, 0.82vw, 9px);
+
+  display: inline-flex;
+  align-items: center;
+  gap: var(--startup-logo-pixel);
+  color: var(--accent-teal);
+  filter: drop-shadow(0 0 10px rgba(var(--accent-teal-rgb), 0.4));
+}
+
+.startup-logo-mark {
+  --startup-logo-pixel: clamp(4px, 0.78vw, 9px);
+
+  width: clamp(42px, 7.2vw, 88px);
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  position: relative;
+  border: 2px solid rgba(var(--accent-teal-rgb), 0.52);
+  background:
+    linear-gradient(90deg, rgba(var(--accent-blue-rgb), 0.13) 1px, transparent 1px)
+      0 0 / 10px 10px,
+    linear-gradient(0deg, rgba(var(--accent-blue-rgb), 0.13) 1px, transparent 1px)
+      0 0 / 10px 10px,
+    rgba(var(--bg-1-rgb), 0.88);
+  box-shadow:
+    6px 6px 0 rgba(var(--accent-violet-rgb), 0.18),
+    inset 0 0 0 4px rgba(var(--bg-0-rgb), 0.42);
+}
+
+.startup-logo-mark::before,
+.startup-logo-mark::after {
+  content: "";
+  position: absolute;
+  width: clamp(5px, 0.58vw, 8px);
+  height: clamp(5px, 0.58vw, 8px);
+  background: var(--accent-amber);
+}
+
+.startup-logo-mark::before {
+  top: -2px;
+  left: -2px;
+}
+
+.startup-logo-mark::after {
+  right: -2px;
+  bottom: -2px;
+}
+
+.startup-pixel-glyph {
+  display: grid;
+  gap: 0;
+  line-height: 0;
+}
+
+.startup-logo-pixel {
+  display: block;
+  width: var(--startup-logo-pixel);
+  height: var(--startup-logo-pixel);
+}
+
+.startup-logo-pixel.is-on {
+  background: currentColor;
+  box-shadow: inset -1px -1px 0 rgba(var(--bg-0-rgb), 0.34);
+}
+
+.startup-logo-glass {
+  color: var(--accent-teal);
+  filter: drop-shadow(0 0 8px rgba(var(--accent-teal-rgb), 0.42));
 }
 
 .startup-menu {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  margin-top: 18px;
 }
 
 .startup-menu-row {
