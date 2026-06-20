@@ -176,8 +176,12 @@ export default function DiffBuffer() {
   const diffHighlight = useUIStore((s) => s.diffHighlight);
 
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
   const rowRefs = useRef<(HTMLDivElement | null)[]>([]);
   const pending = useRef<string | null>(null);
+  // Set when we move the cursor to keep it on screen after a manual scroll, so the
+  // cursor effect below doesn't re-center and fight the scroll (Ctrl-E / Ctrl-R).
+  const skipScrollIntoView = useRef(false);
   const [cursor, setCursor] = useState(0);
   const [visualAnchor, setVisualAnchor] = useState<number | null>(null);
 
@@ -205,6 +209,10 @@ export default function DiffBuffer() {
   }, [activeBuffer, focusRequest]);
 
   useEffect(() => {
+    if (skipScrollIntoView.current) {
+      skipScrollIntoView.current = false;
+      return;
+    }
     rowRefs.current[cursor]?.scrollIntoView({ block: "nearest" });
   }, [cursor]);
 
@@ -402,7 +410,64 @@ export default function DiffBuffer() {
     }
   };
 
+  // Scroll the content one line without moving the cursor (magit/vim C-e/C-y). If the
+  // scroll pushes the selected row out of view, hop the cursor to the nearest still-
+  // visible row so it never disappears.
+  const scrollByLine = (dir: 1 | -1) => {
+    const el = listRef.current;
+    if (!el) return;
+    // Rows are uniform .diff-row height; sample the cursor row (fallback: first row).
+    const sample = rowRefs.current[cursor] ?? rowRefs.current.find(Boolean);
+    const lineH = sample?.offsetHeight ?? 24;
+    el.scrollTop += dir * lineH;
+    keepCursorVisible(el);
+  };
+
+  const keepCursorVisible = (el: HTMLDivElement) => {
+    const cur = rowRefs.current[cursor];
+    if (!cur) return;
+    const viewTop = el.scrollTop;
+    const viewBottom = viewTop + el.clientHeight;
+    const top = cur.offsetTop;
+    const bottom = top + cur.offsetHeight;
+    if (bottom > viewTop && top < viewBottom) return; // still (partially) visible
+    let target = -1;
+    if (bottom <= viewTop) {
+      // Scrolled down past the cursor: first row visible from the top.
+      target = rows.findIndex((_r, i) => {
+        const e2 = rowRefs.current[i];
+        return e2 != null && e2.offsetTop + e2.offsetHeight > viewTop;
+      });
+    } else {
+      // Scrolled up past the cursor: last row visible from the bottom.
+      for (let i = rows.length - 1; i >= 0; i--) {
+        const e2 = rowRefs.current[i];
+        if (e2 != null && e2.offsetTop < viewBottom) {
+          target = i;
+          break;
+        }
+      }
+    }
+    if (target >= 0 && target !== cursor) {
+      skipScrollIntoView.current = true;
+      setCursor(target);
+    }
+  };
+
   const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.ctrlKey && !e.metaKey && !e.altKey) {
+      if (e.key === "e") {
+        e.preventDefault();
+        scrollByLine(1);
+        return;
+      }
+      if (e.key === "r") {
+        // preventDefault is required: in tauri dev (Vite) Ctrl-R reloads the page.
+        e.preventDefault();
+        scrollByLine(-1);
+        return;
+      }
+    }
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     const key = e.key;
 
@@ -519,7 +584,7 @@ export default function DiffBuffer() {
       {isClean ? (
         <DiffCleanState />
       ) : (
-      <div className="diff-list">
+      <div className="diff-list" ref={listRef}>
         {rows.map((row, idx) => {
           const selected = idx === cursor;
           const inVisual = visual && idx >= selLo && idx <= selHi;
