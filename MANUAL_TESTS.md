@@ -90,6 +90,12 @@ rm gone.txt                                                 # deleted text file 
   - `]h` / `[h` jump to next / previous **hunk** header (after expanding).
   - `]s` / `[s` jump to next / previous **section** header.
 
+### 1.6b Scroll content without moving the cursor (`Ctrl-e` / `Ctrl-r`)
+- [ ] **Steps:** Open a repo whose diff is taller than the window. With the diff buffer focused, hold `Ctrl-e`, then `Ctrl-r`.
+- [ ] **Expect:** `Ctrl-e` scrolls the content **down** one line per press, `Ctrl-r` scrolls **up** one line — while the selected row's highlight stays put. At the very top/bottom the scroll stops cleanly (no error). `Ctrl-r` does **not** reload the app.
+- [ ] **Steps:** Keep pressing `Ctrl-e` until the selected row would scroll off the top (then `Ctrl-r` past the bottom).
+- [ ] **Expect:** The selection hops to the nearest still-visible row so the cursor never disappears. Pressing `j`/`k` afterward resumes normal cursor movement and re-centers as usual.
+
 ### 1.7 Expand / collapse files and hunks (magit-style nested folding)
 - [ ] **Steps:** On a file row, press `Tab` (or double-click).
 - [ ] **Expect:** The file expands to show hunk headers (`@@ … @@`, blue, each with a `▾`/`▸` caret) and unified-diff lines: old/new line-number gutters, `+` lines green, `−` lines red, context muted. `Tab` on the file row again collapses the whole file.
