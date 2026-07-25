@@ -4,6 +4,10 @@ node_modules/
 # build output
 dist/
 
+# local install (./install.sh)
+bin/
+src-tauri/icons/.gen/master-2048.png
+
 # rust / tauri
 src-tauri/target/
 src-tauri/gen/

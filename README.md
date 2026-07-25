@@ -94,6 +94,32 @@ npm run build          # frontend gate: tsc (strict) THEN vite build
 npm run tauri build    # produce a packaged desktop binary
 ```
 
+### Install locally (app launcher entry)
+
+`./install.sh` builds the release binary into `bin/`, installs the icon set into the
+hicolor theme, and writes an XDG `.desktop` entry so **review-me** shows up in your app
+launcher (Walker on Omarchy — `SUPER + SPACE` — or any GNOME/KDE search). The release
+build is slow; it only needs to re-run when the binary changes.
+
+```bash
+./install.sh            # build + register the launcher entry
+./install.sh --restart  # also (re)start the running app afterwards
+```
+
+The entry sets `Path=` to the repo root, so any cwd-relative lookups resolve there.
+
+The icon is the app's own startup-dashboard logo — the pixel-art magnifying-glass badge
+from `StartupDashboard.tsx` — so the launcher, window and taskbar all show the mark you
+see on screen. `src-tauri/icons/.gen/logo-mark.html` reproduces that badge at a fixed
+large size and `.gen/generate-icons.sh` screenshots it with headless Chromium, then
+downscales to the Tauri bundle icons plus the launcher master (`icon-512.png`).
+Re-run it after changing the startup logo's markup, its `.startup-logo-*` CSS, or the
+theme tokens; `install.sh` runs it automatically when Chromium is present.
+
+The PNGs must be RGBA or `tauri::generate_context!` fails the build with
+`icon … is not RGBA` — the script forces this and asserts it. `cd src-tauri && cargo check`
+re-runs that validation in seconds, without the slow release build.
+
 ---
 
 ## Usage

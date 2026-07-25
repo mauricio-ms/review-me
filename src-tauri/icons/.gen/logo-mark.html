@@ -1,0 +1,146 @@
+<!doctype html>
+<!--
+  logo-mark.html — a fixed-size, standalone copy of review-me's on-screen brand
+  mark: the pixel-art magnifying-glass badge from the startup dashboard
+  (src/components/StartupDashboard.tsx + .startup-logo-* in src/styles.css).
+
+  This exists so headless Chromium can rasterize the *real* logo deterministically
+  (see generate-icons.sh). Keep it in sync with the component: the DOM, the theme
+  tokens and the pixel bitstring below are copied verbatim; only sizes change.
+
+  Scaling: every responsive clamp() is replaced by its settled on-screen value at
+  the app's 1600px default window width, multiplied by k = 9:
+
+      badge      88px  -> 792px      border      2px -> 18px
+      pixel cell  9px  ->  81px      corner stud 8px -> 72px
+      grid cell  10px  ->  90px      grid line   1px ->  9px
+      offset shadow 6px -> 54px      inset ring  4px -> 36px
+      pixel bevel   1px ->  9px      glass glow  8px -> 72px
+
+  Only the wordmark is omitted — a launcher icon is the square mark, not the
+  "review-me" lockup.
+
+  CSS background gotcha: .startup-logo-mark's bottom background layer is
+  rgba(--bg-1, 0.88) sitting on the dashboard gradient, which is ~rgb(38,38,38)
+  under the mark. Pre-composited: 40*0.88 + 38*0.12 = 40 -> #282828. The grid
+  gradients and the translucent border stay rgba, because they now composite
+  over that opaque layer exactly as they do on screen. The outer offset shadow
+  needs the same treatment (it falls outside the element, onto what is a
+  transparent page here): 158*0.18 + 38*0.82 = 60 -> #3c3a43.
+-->
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  /* Gruber Darker tokens the logo uses, copied from src/styles.css. */
+  :root {
+    --bg-0-rgb: 24, 24, 24;
+    --accent-teal: #96a6c8;
+    --accent-teal-rgb: 150, 166, 200;
+    --accent-blue-rgb: 149, 169, 159;
+    --accent-amber: #ffdd33;
+
+    --startup-logo-pixel: 81px;   /* on-screen 9px * k */
+  }
+
+  html, body { margin: 0; background: transparent; }
+
+  /* 1024x1024 stage; --force-device-scale-factor=2 yields a 2048 master. */
+  .stage {
+    width: 1024px;
+    height: 1024px;
+    display: grid;
+    place-items: center;
+    background: transparent;
+  }
+
+  .startup-logo-mark {
+    width: 792px;
+    aspect-ratio: 1;
+    display: grid;
+    place-items: center;
+    flex: 0 0 auto;
+    position: relative;
+    border: 18px solid rgba(var(--accent-teal-rgb), 0.52);
+    background:
+      linear-gradient(90deg, rgba(var(--accent-blue-rgb), 0.13) 9px, transparent 9px)
+        0 0 / 90px 90px,
+      linear-gradient(0deg, rgba(var(--accent-blue-rgb), 0.13) 9px, transparent 9px)
+        0 0 / 90px 90px,
+      #282828;
+    box-shadow:
+      54px 54px 0 #3c3a43,
+      inset 0 0 0 36px rgba(var(--bg-0-rgb), 0.42);
+  }
+
+  .startup-logo-mark::before,
+  .startup-logo-mark::after {
+    content: "";
+    position: absolute;
+    width: 72px;
+    height: 72px;
+    background: var(--accent-amber);
+  }
+
+  .startup-logo-mark::before { top: -18px; left: -18px; }
+  .startup-logo-mark::after { right: -18px; bottom: -18px; }
+
+  .startup-pixel-glyph {
+    display: grid;
+    gap: 0;
+    line-height: 0;
+  }
+
+  .startup-logo-pixel {
+    display: block;
+    width: var(--startup-logo-pixel);
+    height: var(--startup-logo-pixel);
+  }
+
+  .startup-logo-pixel.is-on {
+    background: currentColor;
+    box-shadow: inset -9px -9px 0 rgba(var(--bg-0-rgb), 0.34);
+  }
+
+  .startup-logo-glass {
+    color: var(--accent-teal);
+    filter: drop-shadow(0 0 72px rgba(var(--accent-teal-rgb), 0.42));
+  }
+</style>
+</head>
+<body>
+  <div class="stage">
+    <span class="startup-logo-mark">
+      <span class="startup-pixel-glyph startup-logo-glass" id="glass"></span>
+    </span>
+  </div>
+  <script>
+    // Copied verbatim from GLASS_GLYPH in src/components/StartupDashboard.tsx.
+    const GLASS_GLYPH = [
+      "011110000",
+      "110011000",
+      "100001000",
+      "100001000",
+      "110011000",
+      "011111000",
+      "000011100",
+      "000001110",
+      "000000110",
+    ];
+
+    // Mirrors <PixelGlyph>: one span per cell, .is-on where the bit is 1.
+    const glass = document.getElementById("glass");
+    const columns = GLASS_GLYPH[0].length;
+    glass.style.gridTemplateColumns = `repeat(${columns}, var(--startup-logo-pixel))`;
+    glass.style.gridTemplateRows = `repeat(${GLASS_GLYPH.length}, var(--startup-logo-pixel))`;
+    for (const row of GLASS_GLYPH) {
+      for (const cell of row) {
+        const px = document.createElement("span");
+        px.className = `startup-logo-pixel ${cell === "1" ? "is-on" : ""}`;
+        glass.appendChild(px);
+      }
+    }
+    document.title = "ready";
+  </script>
+</body>
+</html>
