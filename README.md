@@ -70,7 +70,7 @@ Both stay mounted; you toggle between them and keep your cursor/scroll position.
 ### The branch under review
 
 The app keeps its own "checkout": the **branch under review**, shown in the status bar as
-`⎇ <branch>`. It starts as whatever the working tree is on (or the repo's default branch
+`review: <branch>`. It starts as whatever the working tree is on (or the repo's default branch
 if HEAD is detached), and `Space g s` / `:checkout` switches it — to a local branch or a
 remote-tracking one.
 

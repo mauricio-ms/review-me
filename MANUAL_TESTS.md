@@ -364,11 +364,11 @@ The fixture's first commit (`initial`) is the **root** commit — §6 reviews th
 
 ### 5.0 The branch under review
 - [ ] **Steps:** Open `/tmp/air-fixture` (checked out on `master`).
-- [ ] **Expect:** The status bar carries `⎇ master` in grey — the branch under review starts as the checkout. Hovering says it's also the checkout.
+- [ ] **Expect:** The status bar carries `review: master` in grey — the branch under review starts as the checkout. Hovering says it's also the checkout.
 - [ ] **Steps:** Press `Space` → `g` → `s` (or `:checkout`).
 - [ ] **Expect:** A **Branch to review** picker (`N refs`). Rows badge `reviewing` (teal) on `master`, `default` (amber) on `master`, `checkout` (green) on the checked-out branch, `local`/`remote`, plus the short oid. Selection starts on the branch already under review.
 - [ ] **Steps:** `Enter` on `feature`.
-- [ ] **Expect:** The picker closes; the status bar reads `⎇ feature` in **amber** (it isn't the checkout), and hovering explains the working tree is on `master`. In a terminal, `git -C /tmp/air-fixture status` shows **`On branch master`** with the same dirty files as before — nothing was checked out.
+- [ ] **Expect:** The picker closes; the status bar reads `review: feature` in **amber** (it isn't the checkout), and hovering explains the working tree is on `master`. In a terminal, `git -C /tmp/air-fixture status` shows **`On branch master`** with the same dirty files as before — nothing was checked out.
 - [ ] **Expect:** The working-tree diff on screen is unchanged: it still belongs to the real checkout.
 - [ ] **Steps:** Open the palette (`Space` → `g`).
 - [ ] **Expect:** The entries name the branch: `compare feature against a base`, `review a commit on feature`.
@@ -385,9 +385,9 @@ The fixture's first commit (`initial`) is the **root** commit — §6 reviews th
 
 ### 5.2 Switching the review branch re-targets the comparison
 - [ ] **Steps:** While showing `master...feature`, `Space g s` → `Enter` on `merged`.
-- [ ] **Expect:** The diff becomes `master...merged` without asking for a base again — same base, new target — and the status bar shows `⎇ merged` plus `⇄ master...merged`.
+- [ ] **Expect:** The diff becomes `master...merged` without asking for a base again — same base, new target — and the status bar shows `review: merged` plus `⇄ master...merged`.
 - [ ] **Steps:** `Space g s` → `Enter` on `master` (the comparison's own base).
-- [ ] **Expect:** Instead of comparing `master` to itself, the view drops back to the **working-tree diff** (`⎇ master`, `⎇ master` comparison segment, staged `●` markers back).
+- [ ] **Expect:** Instead of comparing `master` to itself, the view drops back to the **working-tree diff** (`review: master`, an `⎇ master` comparison segment, staged `●` markers back).
 
 ### 5.3 Errors stay inline
 - [ ] **Steps:** Create a branch with unrelated history (`git checkout --orphan lonely && git commit -qm x --allow-empty && git checkout -q master`). Put `lonely` under review (`Space g s`), then `:compare` against `master`.
@@ -397,7 +397,7 @@ The fixture's first commit (`initial`) is the **root** commit — §6 reviews th
 - [ ] **Steps:** Open `/tmp/air-clone` and press `Space` → `g` → `s`.
 - [ ] **Expect:** Locals are listed first, then `origin/…` rows badged `remote` (violet). **`origin/HEAD` is not listed** (it's an alias). `master` is marked `default`.
 - [ ] **Steps:** Put `origin/feature` under review, then `:compare` against `master`.
-- [ ] **Expect:** Works exactly like a local branch; the header shows `master...origin/feature` and the status bar `⎇ origin/feature` in amber.
+- [ ] **Expect:** Works exactly like a local branch; the header shows `master...origin/feature` and the status bar `review: origin/feature` in amber.
 
 ### 5.5 A repo with no branches
 - [ ] **Steps:** `mkdir /tmp/air-empty && git -C /tmp/air-empty init -b master` (no commits), then open it.
@@ -477,7 +477,7 @@ The fixture's first commit (`initial`) is the **root** commit — §6 reviews th
 
 ### 6.5 The review branch is unaffected by the commit choice
 - [ ] **Steps:** While reviewing a commit of `feature`, check the status bar, then `Space g s` → `Enter` on `merged`.
-- [ ] **Expect:** `⎇ feature` throughout the commit review (the review branch is where the commit came from), and switching to `merged` **leaves the commit diff on screen** — a commit belongs to no branch in particular, so there is nothing to re-target. Only the `⎇` segment changes.
+- [ ] **Expect:** `review: feature` throughout the commit review (the review branch is where the commit came from), and switching to `merged` **leaves the commit diff on screen** — a commit belongs to no branch in particular, so there is nothing to re-target. Only the `review:` segment changes.
 - [ ] **Expect:** Reopening `:log` now lists `merged`'s history.
 
 ### 6.6 Typing a sha reaches outside the list

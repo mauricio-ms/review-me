@@ -69,7 +69,7 @@ export default function BufferStatusBar() {
                   : `reviewing ${reviewBranch.ref} — the working tree is on ${repo.branch}`
               }
             >
-              ⎇ {reviewBranch.display}
+              review: {reviewBranch.display}
             </span>
           )}
           <span
