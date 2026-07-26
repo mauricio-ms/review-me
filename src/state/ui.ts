@@ -13,7 +13,8 @@ export type PickerKind =
   | "fuzzyFiles"
   | "clearTags"
   | "commitReviewed"
-  | "branchCompare";
+  | "branchCompare"
+  | "commitPick";
 
 type UIState = {
   activeBuffer: BufferName;

@@ -6,6 +6,7 @@ import BranchCompareHost from "./BranchCompareHost";
 import BufferStatusBar from "./BufferStatusBar";
 import CommandLine from "./CommandLine";
 import CommandTransient from "./CommandTransient";
+import CommitPickHost from "./CommitPickHost";
 import CommitReviewedHost from "./CommitReviewedHost";
 import ConfirmClearHost from "./ConfirmClearHost";
 import DiffBuffer from "./DiffBuffer";
@@ -102,6 +103,7 @@ export default function AppShell() {
       <RecentReposHost />
       <FuzzyFinderHost />
       <BranchCompareHost />
+      <CommitPickHost />
       <ConfirmClearHost />
       <CommitReviewedHost />
       <XrefHost />
