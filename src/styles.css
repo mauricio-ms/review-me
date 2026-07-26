@@ -754,6 +754,62 @@ kbd {
   font-weight: 700;
 }
 
+/* ---------- branch comparison picker ---------- */
+
+.branch-compare {
+  width: min(760px, 94vw);
+  height: min(560px, 82vh);
+}
+
+/* Name on the left, badges hugging the right edge. */
+.branch-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.branch-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.branch-badges {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--fg-2);
+}
+
+.branch-badge {
+  text-transform: lowercase;
+  letter-spacing: 0.04em;
+}
+
+.branch-badge.is-default {
+  color: var(--accent-amber);
+}
+
+.branch-badge.is-current {
+  color: var(--accent-green);
+}
+
+.branch-badge.is-remote {
+  color: var(--accent-violet);
+}
+
+.branch-oid {
+  color: var(--fg-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.branch-base {
+  color: var(--accent-teal);
+}
+
+.branch-error {
+  color: var(--accent-red);
+}
+
 /* ---------- xref panel ---------- */
 
 .xref-panel {

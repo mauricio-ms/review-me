@@ -15,6 +15,7 @@ import {
   preflightReviewedCommit,
   stageReviewedCommit,
 } from "../lib/review-commit";
+import { useRepoStore } from "../state/repo";
 import { useUIStore } from "../state/ui";
 import type {
   PreparedReviewedCommit,
@@ -65,6 +66,9 @@ export default function CommitReviewedHost() {
   const open = useUIStore((s) => s.picker === "commitReviewed");
   const closePicker = useUIStore((s) => s.closePicker);
   const requestFocus = useUIStore((s) => s.requestFocus);
+  const comparingBranches = useRepoStore(
+    (s) => s.comparison.kind === "branches",
+  );
 
   const modalRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<EditorView | null>(null);
@@ -115,6 +119,17 @@ export default function CommitReviewedHost() {
     setPrepared(null);
     setMessage("");
     setError(null);
+    // The `:commit` command is disabled in branch mode, but staging is destructive
+    // enough to be worth refusing here too rather than trusting the caller.
+    if (comparingBranches) {
+      setError(
+        "Committing reviewed changes applies to the working-tree diff. " +
+          "Both sides of a branch comparison are already committed — " +
+          "switch back with :worktree (Space g w) first.",
+      );
+      setPhase("error");
+      return;
+    }
     setBusy(true);
     void preflightReviewedCommit()
       .then((next) => {
@@ -141,7 +156,7 @@ export default function CommitReviewedHost() {
     return () => {
       cancelled = true;
     };
-  }, [open, prepare]);
+  }, [comparingBranches, open, prepare]);
 
   const abortEditor = useCallback(async () => {
     if (busy) return;

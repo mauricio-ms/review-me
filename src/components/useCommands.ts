@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 
-import { refreshDiff } from "../lib/open-repo";
+import { applyComparison, refreshDiff } from "../lib/open-repo";
 import { projectSelectionRange } from "../lib/project-view";
 import { addFlag } from "../lib/review-actions";
 import { findUsages, gotoDefinition } from "../lib/xref";
@@ -8,6 +8,7 @@ import { useProjectStore } from "../state/project";
 import { useRepoStore } from "../state/repo";
 import { useTagsStore } from "../state/tags";
 import { useUIStore, type BufferName } from "../state/ui";
+import { WORKTREE_SPEC } from "../types/diff";
 
 /** Closes the overlay that invoked a command. Provided by each consumer. */
 export type CommandClose = (options?: { restoreFocus?: boolean }) => void;
@@ -47,7 +48,9 @@ export function useCommands(rawClose: CommandClose): {
   const openPicker = useUIStore((s) => s.openPicker);
   const requestFocus = useUIStore((s) => s.requestFocus);
   const repo = useRepoStore((s) => s.repo);
+  const comparison = useRepoStore((s) => s.comparison);
   const closeRepo = useRepoStore((s) => s.closeRepo);
+  const comparingBranches = comparison.kind === "branches";
   const openPath = useProjectStore((s) => s.openPath);
   const diffHighlight = useUIStore((s) => s.diffHighlight);
   const toggleDiffHighlight = useUIStore((s) => s.toggleDiffHighlight);
@@ -105,6 +108,23 @@ export function useCommands(rawClose: CommandClose): {
     close({ restoreFocus: false });
     openPicker("commitReviewed");
   }, [close, openPicker]);
+
+  const handleCompareBranches = useCallback(() => {
+    close({ restoreFocus: false });
+    openPicker("branchCompare");
+  }, [close, openPicker]);
+
+  const handleWorktreeDiff = useCallback(async () => {
+    close({ restoreFocus: false });
+    setBusy("switching");
+    try {
+      // applyComparison records the failure in the diff status.
+      await applyComparison(WORKTREE_SPEC).catch(() => {});
+    } finally {
+      setBusy(null);
+      requestFocus();
+    }
+  }, [close, requestFocus]);
 
   const handleToggleDiffMode = useCallback(() => {
     toggleDiffHighlight();
@@ -247,14 +267,41 @@ export function useCommands(rawClose: CommandClose): {
       run: handleCloseRepo,
     },
     {
+      id: "compare",
+      name: "compare",
+      aliases: ["branches", "branch", "cmp"],
+      label: "compare branches",
+      group: "git",
+      prefix: "g",
+      key: "b",
+      enabled: !!repo,
+      run: handleCompareBranches,
+    },
+    {
+      id: "worktree",
+      name: "worktree",
+      aliases: ["wt", "working", "uncommitted"],
+      label: "working-tree diff",
+      group: "git",
+      prefix: "g",
+      key: "w",
+      // Already the working-tree diff — nothing to switch back to.
+      enabled: !!repo && comparingBranches,
+      run: handleWorktreeDiff,
+    },
+    {
       id: "commit-reviewed",
       name: "commit",
       aliases: ["commitreviewed", "reviewed-commit", "gitcommit", "gc"],
-      label: "commit reviewed changes",
+      label: comparingBranches
+        ? "commit reviewed changes (working-tree diff only)"
+        : "commit reviewed changes",
       group: "git",
       prefix: "g",
       key: "c",
-      enabled: !!repo,
+      // Both sides of a branch comparison are already committed; there is nothing
+      // to stage and nothing the reviewer could mean by committing here.
+      enabled: !!repo && !comparingBranches,
       run: handleCommitReviewed,
     },
     {
