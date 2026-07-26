@@ -930,6 +930,54 @@ mod tests {
         assert!(logo.hunks.is_empty());
     }
 
+    /// The IPC contract with `src/types/diff.ts`. A renamed field here fails only at
+    /// runtime, in a picker the Rust tests never touch, so pin the exact wire shape.
+    #[test]
+    fn commit_spec_and_comparison_match_the_typescript_shape() {
+        let spec: DiffSpec =
+            serde_json::from_str(r#"{"kind":"commit","oid":"abc","branchRef":"refs/heads/x"}"#)
+                .unwrap();
+        assert_eq!(
+            spec,
+            commit_spec("abc", Some("refs/heads/x")),
+            "camelCase branchRef, tagged `commit`"
+        );
+        // serde emits null for None, which the TS side reads as `string | null`.
+        let no_branch: DiffSpec =
+            serde_json::from_str(r#"{"kind":"commit","oid":"abc","branchRef":null}"#).unwrap();
+        assert_eq!(no_branch, commit_spec("abc", None));
+
+        let json = serde_json::to_value(Comparison::Commit {
+            oid: "a".repeat(40),
+            short_oid: "aaaaaaa".into(),
+            summary: "subject".into(),
+            author_name: "Ada".into(),
+            timestamp: 7,
+            parent_oid: None,
+            is_merge: false,
+            branch_name: Some("x".into()),
+        })
+        .unwrap();
+        // serde_json orders keys alphabetically; only the names are the contract.
+        let keys: Vec<&str> = json.as_object().unwrap().keys().map(String::as_str).collect();
+        assert_eq!(
+            keys,
+            vec![
+                "authorName",
+                "branchName",
+                "isMerge",
+                "kind",
+                "oid",
+                "parentOid",
+                "shortOid",
+                "summary",
+                "timestamp",
+            ]
+        );
+        assert_eq!(json["kind"], "commit");
+        assert!(json["parentOid"].is_null(), "a root commit reads as null");
+    }
+
     #[test]
     fn comparison_never_mutates_the_repository() {
         let dir = tempfile::tempdir().unwrap();

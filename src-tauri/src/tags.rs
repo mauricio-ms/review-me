@@ -1179,6 +1179,24 @@ mod tests {
         assert!(load(root, WT).unwrap().reviewed.is_empty());
     }
 
+    /// The IPC contract with `src/types/tags.ts`, and the on-disk shape in
+    /// `tags.json`: a commit scope is `{kind, oid}` and nothing else — no branch.
+    #[test]
+    fn commit_scope_matches_the_typescript_shape() {
+        let scope: ReviewScope =
+            serde_json::from_str(r#"{"kind":"commit","oid":"abc"}"#).unwrap();
+        assert_eq!(
+            scope,
+            ReviewScope::Commit {
+                oid: "abc".to_string()
+            }
+        );
+        assert_eq!(
+            serde_json::to_string(&scope).unwrap(),
+            r#"{"kind":"commit","oid":"abc"}"#
+        );
+    }
+
     fn commit_scope(root: &Path, rev: &str) -> ReviewScope {
         let repo = Repository::open(root).unwrap();
         ReviewScope::Commit {
