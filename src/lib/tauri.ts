@@ -6,6 +6,7 @@ import type {
   DirectoryListing,
   FileMatch,
   FileSystemListing,
+  ProjectSource,
   RememberedRepo,
   RepoInfo,
   TreeListing,
@@ -58,8 +59,12 @@ export function createDirectory(
   return invoke<DirectoryListing>("create_directory", { path, name });
 }
 
-export function readFile(repo: string, path: string): Promise<string> {
-  return invoke<string>("read_file", { repo, path });
+export function readFile(
+  repo: string,
+  source: ProjectSource,
+  path: string,
+): Promise<string> {
+  return invoke<string>("read_file", { repo, source, path });
 }
 
 export function loadTags(repo: string, scope: ReviewScope): Promise<TagStore> {
@@ -198,39 +203,50 @@ export function commitReviewedChanges(
 
 export function fuzzyFiles(
   repo: string,
+  source: ProjectSource,
   query: string,
   limit: number,
 ): Promise<FileMatch[]> {
-  return invoke<FileMatch[]>("fuzzy_files", { repo, query, limit });
+  return invoke<FileMatch[]>("fuzzy_files", { repo, source, query, limit });
 }
 
-export function listRepoDir(repo: string, path: string): Promise<TreeListing> {
-  return invoke<TreeListing>("list_repo_dir", { repo, path });
+export function listRepoDir(
+  repo: string,
+  source: ProjectSource,
+  path: string,
+): Promise<TreeListing> {
+  return invoke<TreeListing>("list_repo_dir", { repo, source, path });
 }
 
-export function buildSymbolIndex(repo: string): Promise<IndexStats> {
-  return invoke<IndexStats>("build_symbol_index", { repo });
+export function buildSymbolIndex(
+  repo: string,
+  source: ProjectSource,
+): Promise<IndexStats> {
+  return invoke<IndexStats>("build_symbol_index", { repo, source });
 }
 
 export function symbolAt(
   repo: string,
+  source: ProjectSource,
   path: string,
   line: number,
   col: number,
 ): Promise<SymbolRef | null> {
-  return invoke<SymbolRef | null>("symbol_at", { repo, path, line, col });
+  return invoke<SymbolRef | null>("symbol_at", { repo, source, path, line, col });
 }
 
 export function findDefinition(
   repo: string,
+  source: ProjectSource,
   symbol: SymbolRef,
 ): Promise<XrefResult[]> {
-  return invoke<XrefResult[]>("find_definition", { repo, symbol });
+  return invoke<XrefResult[]>("find_definition", { repo, source, symbol });
 }
 
 export function findReferences(
   repo: string,
+  source: ProjectSource,
   symbol: SymbolRef,
 ): Promise<XrefResult[]> {
-  return invoke<XrefResult[]>("find_references", { repo, symbol });
+  return invoke<XrefResult[]>("find_references", { repo, source, symbol });
 }

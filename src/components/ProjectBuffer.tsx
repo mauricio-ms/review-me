@@ -50,6 +50,8 @@ export default function ProjectBuffer() {
   const expanded = useProjectStore((s) => s.expanded);
   const openPath = useProjectStore((s) => s.openPath);
   const content = useProjectStore((s) => s.content);
+  // Non-null while the buffer is reading a commit rather than the working tree.
+  const sourceLabel = useProjectStore((s) => s.sourceLabel);
   const flags = useTagsStore((s) => s.flags);
   const activeBuffer = useUIStore((s) => s.activeBuffer);
   const focusRequest = useUIStore((s) => s.focusRequest);
@@ -254,7 +256,9 @@ export default function ProjectBuffer() {
       >
         {content == null ? (
           <div className="project-viewer-empty">
-            <div className="empty-title">no file open</div>
+            <div className="empty-title">
+              no file open{sourceLabel ? ` — ${sourceLabel}` : ""}
+            </div>
             <div className="empty-hint">
               Select a file in the tree, or press <kbd>Space</kbd> <kbd>f</kbd> to
               fuzzy-find. <kbd>Ctrl</kbd>+<kbd>h</kbd> returns to the tree;{" "}
@@ -263,7 +267,17 @@ export default function ProjectBuffer() {
           </div>
         ) : (
           <>
-            <div className="project-viewer-path">{openPath}</div>
+            <div className="project-viewer-path">
+              <span className="project-viewer-file">{openPath}</span>
+              {sourceLabel && (
+                <span
+                  className="project-viewer-rev"
+                  title="reading a committed revision, not the working tree"
+                >
+                  @ {sourceLabel}
+                </span>
+              )}
+            </div>
             <CodeMirror
               value={content}
               extensions={extensions}

@@ -16,7 +16,7 @@ import {
   sectionForHunk,
   type ReviewSection,
 } from "../lib/coverage";
-import { openFileInProject } from "../lib/project";
+import { openFileFromDiff } from "../lib/project";
 import { setProjectCursor } from "../lib/project-view";
 import {
   addFlag,
@@ -411,14 +411,17 @@ export default function DiffBuffer() {
     if (idx >= 0) setCursor(idx);
   };
 
-  // Open the file under the cursor in project mode, positioned at the new-side
-  // line the cursor maps to (line → that line, hunk → its start, file → first change).
+  // Open the file under the cursor in project mode, positioned at the line the
+  // cursor maps to (line → that line, hunk → its start, file → first change). The
+  // scope's side also picks the revision: old-side content (a deletion) only exists
+  // in the base, so opening it must not fall back to the working tree.
   const openAtCursor = () => {
     const row = rows[cursor];
     if (!row || row.kind === "section") return;
     const scope = cursorScope();
     const line = scope ? scope.lo : 1;
-    void openFileInProject(row.file.path).then(() => {
+    const side = scope?.side === "old" ? "old" : "new";
+    void openFileFromDiff(row.file.path, side).then(() => {
       requestAnimationFrame(() =>
         requestAnimationFrame(() => setProjectCursor(line)),
       );

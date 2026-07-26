@@ -8,6 +8,7 @@ mod queries;
 mod repo;
 mod repo_library;
 mod review_commit;
+mod revision;
 mod tags;
 mod tree;
 mod xref;

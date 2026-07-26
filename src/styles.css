@@ -689,12 +689,28 @@ kbd {
 }
 
 .project-viewer-path {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
   padding: 6px 12px;
   border-bottom: 1px solid var(--bg-3);
   background: var(--bg-1);
   color: var(--fg-2);
   font-family: var(--mono);
   font-size: 12px;
+}
+
+.project-viewer-file {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Shown only when the viewer is reading a commit — never let a branch review look
+   like the working tree. */
+.project-viewer-rev {
+  flex: none;
+  color: var(--accent-violet);
 }
 
 .project-viewer-empty {

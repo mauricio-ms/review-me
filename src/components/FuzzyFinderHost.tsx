@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { fileIcon } from "../lib/file-icons";
 import { openFileInProject } from "../lib/project";
 import { fuzzyFiles } from "../lib/tauri";
+import { useProjectStore } from "../state/project";
 import { useRepoStore } from "../state/repo";
 import { useUIStore } from "../state/ui";
 import type { FileMatch } from "../types/repo";
@@ -30,6 +31,8 @@ export default function FuzzyFinderHost() {
   const closePicker = useUIStore((s) => s.closePicker);
   const requestFocus = useUIStore((s) => s.requestFocus);
   const repoPath = useRepoStore((s) => s.repoPath);
+  // The finder searches the revision project mode is showing, not always the disk.
+  const source = useProjectStore((s) => s.source);
 
   const [query, setQuery] = useState("");
   const [rows, setRows] = useState<FileMatch[]>([]);
@@ -39,7 +42,7 @@ export default function FuzzyFinderHost() {
     if (!open || !repoPath) return;
     let cancelled = false;
     const handle = window.setTimeout(() => {
-      void fuzzyFiles(repoPath, query, LIMIT).then((matches) => {
+      void fuzzyFiles(repoPath, source, query, LIMIT).then((matches) => {
         if (!cancelled) setRows(matches);
       });
     }, 70);
@@ -47,7 +50,7 @@ export default function FuzzyFinderHost() {
       cancelled = true;
       window.clearTimeout(handle);
     };
-  }, [open, query, repoPath]);
+  }, [open, query, repoPath, source]);
 
   // Reset when reopened.
   useEffect(() => {

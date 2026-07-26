@@ -11,6 +11,22 @@ export interface RememberedRepo {
   lastOpenedAt: number;
 }
 
+/**
+ * Which snapshot of the repo project mode is reading. `worktree` is the checkout on
+ * disk; `commit` is a resolved commit's tree — so opening a file from a
+ * `master...feature` diff shows *that branch's* content, not whatever is checked out.
+ */
+export type ProjectSource =
+  | { kind: "worktree" }
+  | { kind: "commit"; oid: string };
+
+export const WORKTREE_SOURCE: ProjectSource = { kind: "worktree" };
+
+export function sameSource(a: ProjectSource, b: ProjectSource): boolean {
+  if (a.kind === "worktree" || b.kind === "worktree") return a.kind === b.kind;
+  return a.oid === b.oid;
+}
+
 export type BranchKind = "local" | "remote";
 
 /**
