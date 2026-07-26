@@ -107,6 +107,18 @@ export default function DiffCleanState() {
       });
       list.push({ kind: "cmd", text: `git merge-base ${range.replace("...", " ")}` });
       list.push({ kind: "out", text: shortOid(comparison.mergeBase) });
+    } else if (comparison?.kind === "commit") {
+      // An empty commit (or one whose changes cancel out) isn't a clean tree either.
+      list.push({ kind: "cmd", text: `git show --stat ${comparison.shortOid}` });
+      list.push({
+        kind: "out",
+        text: comparison.parentOid
+          ? `${comparison.shortOid} changes nothing against its parent`
+          : `${comparison.shortOid} is an empty root commit`,
+        tone: "ok",
+      });
+      list.push({ kind: "cmd", text: `git log -1 --format=%s ${comparison.shortOid}` });
+      list.push({ kind: "out", text: comparison.summary });
     } else {
       const branch = comparison?.branch || "(unknown)";
       const head = comparison?.head ?? "";

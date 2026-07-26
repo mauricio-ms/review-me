@@ -4,8 +4,10 @@ import { useRepoStore } from "../state/repo";
 import { useUIStore } from "../state/ui";
 import BranchCompareHost from "./BranchCompareHost";
 import BufferStatusBar from "./BufferStatusBar";
+import CheckoutBranchHost from "./CheckoutBranchHost";
 import CommandLine from "./CommandLine";
 import CommandTransient from "./CommandTransient";
+import CommitPickHost from "./CommitPickHost";
 import CommitReviewedHost from "./CommitReviewedHost";
 import ConfirmClearHost from "./ConfirmClearHost";
 import DiffBuffer from "./DiffBuffer";
@@ -101,7 +103,9 @@ export default function AppShell() {
       <OpenRepoHost />
       <RecentReposHost />
       <FuzzyFinderHost />
+      <CheckoutBranchHost />
       <BranchCompareHost />
+      <CommitPickHost />
       <ConfirmClearHost />
       <CommitReviewedHost />
       <XrefHost />

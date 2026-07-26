@@ -5,8 +5,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this is
 
 **review-me** is a Tauri v2 desktop tool for reviewing code produced by LLM agents:
-a magit-style, vim-driven UI over a git diff — either working-tree-vs-HEAD or a
-`base...target` branch comparison — with reviewed/flag tagging, a fuzzy file finder,
+a magit-style, vim-driven UI over a git diff — working-tree-vs-HEAD, a
+`base...target` branch comparison, or a single commit vs its first parent — with
+reviewed/flag tagging, a fuzzy file finder,
 an IDE-like project mode, and tree-sitter cross-references.
 The stack and UX deliberately mirror the sibling app at
 `/home/mms/development/projects/video-studio` (buffer model, command palette, neo-picker
@@ -39,7 +40,8 @@ layer and `lib.rs` is the module list + `invoke_handler!`. Each command is **sta
 it receives `repo` (the repo root path), opens the repo fresh via `repo::open` (cheap
 with libgit2), and returns. The one exception is `xref.rs`, which caches a parsed
 symbol index in a global `Mutex`.
-- `repo.rs` open/validate, `RepoInfo`. `branches.rs` local/remote ref discovery + `resolve()` → (base tip, target tip, merge base).
+- `repo.rs` open/validate, `RepoInfo` (incl. `review_branch_ref`, the branch the UI starts reviewing). `branches.rs` local/remote ref discovery + `resolve()` → (base tip, target tip, merge base).
+- `commits.rs` `list(repo, ref, limit)` → newest-first `CommitInfo`s and `resolve(repo, rev)` → (oid, **first** parent oid, info). Any revision resolves (full oid, abbreviation, `HEAD~2`), but only full oids may reach a `DiffSpec`/`ReviewScope`.
 - `diff.rs` `compute(repo, &DiffSpec)` → `DiffSummary { comparison, files }` (`ChangedFile`/`Hunk`/`DiffLine`). See "Comparisons" below.
 - `revision.rs` `ProjectSource` (worktree | commit) and tree-backed content/listing/file-list reads.
 - `tags.rs` review/flag persistence + **anchoring** (see below). `tree.rs` ignore-aware dir listing. `fuzzy.rs` nucleo-matcher file ranking.
@@ -49,8 +51,8 @@ symbol index in a global `Mutex`.
 mounted and toggles visibility with `display:none` (preserves cursor/scroll). A single
 **`components/useCommands.ts`** registry feeds both the `Space` transient palette
 (`CommandTransient`) and the `:` command line (`CommandLine`); commands carry a `buffer`
-scope and chord `prefix`/`key`. Modal pickers (open-repo, recent, fuzzy, branch-compare,
-xref) are gated
+scope and chord `prefix`/`key`. Modal pickers (open-repo, recent, fuzzy, checkout-branch,
+branch-compare, commit-pick, xref) are gated
 by `useUIStore.picker` or a dedicated store and use `useModalFocus`.
 
 **State** is Zustand in `src/state/` (`ui`, `repo`, `tags`, `project`, `xref`). Cross-cutting
@@ -61,24 +63,54 @@ conventions that will bite if ignored:
 - **Selectors must not return fresh `[]`/`{}`** — use module-level `EMPTY_*` constants
   (Zustand infinite-rerender trap).
 
+### The branch under review
+
+`useRepoStore.reviewBranch` (`ReviewBranch { ref, display }`) is the app's own notion of a
+checkout and the **single place a branch is chosen**: `:compare` collects only a base and
+targets it, `:log` lists its history. It is seeded on open from `RepoInfo.reviewBranchRef`
+(HEAD's branch, else the repo's default branch, else `None` — a repo with no branches
+disables both commands) and changed by `:checkout` (`Space g s`, `CheckoutBranchHost`).
+
+It is **app-level only**: nothing fetches, checks out, stages, or writes to the working
+tree, so a branch that isn't checked out reviews like any other. Worktree mode still means
+the real checkout — that's why the status bar shows the review branch separately and turns
+it amber when the two differ.
+
+`lib/open-repo.ts`'s **`switchReviewBranch`** re-targets an active branch comparison so the
+concept stays live (same base, new target), falling back to the worktree diff when the new
+branch is that comparison's own base. A commit comparison is left alone: a commit belongs
+to no branch in particular, which is also why `DiffSpec::Commit.branchRef` is display-only.
+
 ### Comparisons
 
 `DiffSpec` (mirrored in `src/types/diff.ts`) selects what the diff buffer shows:
-`{kind:"worktree"}` or `{kind:"branches", baseRef, targetRef, strategy:"mergeBase"}`.
-Refs are **canonical** (`refs/heads/x`, `refs/remotes/origin/x`) everywhere — requests,
-`Comparison` metadata, and persisted review scopes — so a local `x` and `origin/x` are
-never confused. Branch mode diffs the merge-base tree against the target tree and
-**never** touches the checkout, index, or working tree; `ChangedFile.staged` is `None`
-there. Binary detection differs by mode: worktree probes HEAD's blob + the file on disk
-(`path_change_is_binary`), branch mode probes the delta's own blobs, because the compared
-branch usually isn't checked out.
+`{kind:"worktree"}`, `{kind:"branches", baseRef, targetRef, strategy:"mergeBase"}`, or
+`{kind:"commit", oid, branchRef}`. Two naming invariants hold **everywhere** — requests,
+`Comparison` metadata, and persisted review scopes: refs are **canonical**
+(`refs/heads/x`, `refs/remotes/origin/x`) so a local `x` and `origin/x` are never
+confused, and commit oids are **full 40 chars** so an abbreviation can't split one
+commit's review in two (resolve typed revisions via `resolve_commit` *before* building a
+spec). Commit mode's `branchRef` is display context only: it is excluded from `sameSpec`
+and from `ReviewScope`, so the same commit reached from two branches is one review.
+
+Branch mode diffs the merge-base tree against the target tree; commit mode diffs the
+commit's tree against its **first parent's** (a merge is never a combined diff; a root
+commit has no old tree, so everything reads as added). Neither **ever** touches the
+checkout, index, or working tree, and `ChangedFile.staged` is `None` in both. Binary
+detection differs by mode: worktree probes HEAD's blob + the file on disk
+(`path_change_is_binary`), while both committed-history modes probe the delta's own blobs,
+because the revision under review usually isn't checked out.
+
+`readsCommittedHistory(spec)` in `types/diff.ts` is the "not the worktree" test — use it
+rather than checking for `branches` when the point is that nothing here can be staged.
 
 `src/lib/open-repo.ts`'s **`applyComparison(spec)`** is the single loading path: it
 computes the diff and loads that scope's tags, then commits both to the stores at once
 (retaining the previous comparison on failure) and drops stale in-flight responses via a
 request ticket. `useRepoStore.comparison` is the applied spec; `comparisonEpoch` bumps
 when its identity changes, which resets folds and the diff cursor. Opening a repo always
-resets to worktree; `refresh` recomputes whatever is applied.
+resets to worktree; `refresh` recomputes whatever is applied (a branch pair can move under
+it; a commit spec is immutable, so only its tags are re-read).
 
 ### The diff buffer is NOT CodeMirror
 
@@ -102,18 +134,25 @@ lines + context lines. Each anchor carries a **`side`** (`AnchorSide`) and a
 old side (pure-deletion hunks + deleted text files), `file` to a whole binary-file change
 identified by `old:new` blob oids (line numbers unused).
 
-`scope`: `worktree` or `{branches, baseRef, targetRef}` — **which comparison the mark
-belongs to**. `tags::load(root, scope)` returns *only* that scope's tags, so identical
-paths and line ranges stay isolated across comparisons; dedup, `unmark_range`, and
-`clear_scope` are all scope-filtered. Both fields `#[serde(default)]`, so pre-existing
-tags load as new-side worktree marks unchanged.
+`scope`: `worktree`, `{branches, baseRef, targetRef}`, or `{commit, oid}` — **which
+comparison the mark belongs to**. `tags::load(root, scope)` returns *only* that scope's
+tags, so identical paths and line ranges stay isolated across comparisons — including the
+pair that renders identically, a branch pair and that branch's tip commit. Dedup,
+`unmark_range`, and `clear_scope` are all scope-filtered. Both fields
+`#[serde(default)]`, so pre-existing tags load as new-side worktree marks unchanged. A
+commit scope holds the oid alone (never the branch it was picked from), which makes it the
+most stable scope there is: deleting that branch leaves every mark live.
 
 The scope also decides **what content the anchor hashes**: `tags.rs`'s `Snapshot` reads
-the working tree + HEAD for worktree scope and the merge-base + target trees for a branch
-scope, and is shared by `build_anchor` and `reanchor` so they can't disagree. `load`
+the working tree + HEAD for worktree scope, the merge-base + target trees for a branch
+scope, and the first-parent + commit trees for a commit scope; it is shared by
+`build_anchor` and `reanchor` so they can't disagree. `Snapshot::Trees.old` is `Option`
+because a root commit has no old side — absence there is *definitive* (so `readable` still
+answers true), unlike a snapshot that can't be resolved at all. `load`
 re-anchors by side: exact hash at the stored position → else a ±200-line search → else
-`stale: true`. A snapshot that *can't read* a side (no repo; a branch that no longer
-resolves) leaves the anchor untouched rather than declaring it stale on missing evidence.
+`stale: true`. A snapshot that *can't read* a side (no repo; a branch or commit that no
+longer resolves) leaves the anchor untouched rather than declaring it stale on missing
+evidence; an anchor whose captured hash is empty has nothing to verify and stays live.
 The frontend sends `(scope, file, startLine, endLine, kind, side)`; the backend computes
 the hash/context so add and re-anchor stay consistent. "Reviewed" is fundamentally per-unit (text hunk, on whichever side, or a
 binary file); file/line coverage is **derived** in `src/lib/coverage.ts`
@@ -123,8 +162,9 @@ precedence **flagged > ignored > reviewed > to-review** (`sectionForHunk`/
 `sectionForFile`); `r` reviews, `f` flags, `i` ignores, and `u` unmarks the current
 scope. `review_commit.rs` stages reviewed new-side + old-side hunks via `apply` and
 reviewed binary files via index add/remove; it loads **worktree-scoped tags only**, and
-`:commit` is disabled (with a defensive guard in `CommitReviewedHost`) while comparing
-branches, where both sides are already committed. NB: libgit2's `DiffFile::is_binary()` is
+`:commit` is disabled (with a defensive guard in `CommitReviewedHost`) whenever
+`readsCommittedHistory` holds — a branch pair or a single commit — where both sides are
+already committed. NB: libgit2's `DiffFile::is_binary()` is
 unreliable before patches are generated, so binary detection uses
 `diff::path_change_is_binary` (NUL-byte heuristic over HEAD blob + working file).
 
@@ -133,9 +173,11 @@ unreliable before patches are generated, so binary detection uses
 `useProjectStore.source` (`ProjectSource`: worktree | commit) is the single revision the
 tree, viewer, fuzzy finder, and xref index all read through — `read_file`,
 `list_repo_dir`, `fuzzy_files`, and every xref command take it. `applyComparison` points
-it at the target commit in branch mode (so a moved branch re-points it on refresh) and at
-the worktree otherwise; `openFileFromDiff` switches to the **merge base** for old-side
-content (deletions), since that's the only revision containing it. Changing the source
+it at the target commit in branch mode (so a moved branch re-points it on refresh), at the
+reviewed commit in commit mode, and at the worktree otherwise (`lib/project.ts`'s
+`ambientSource`); `openFileFromDiff` switches to the **old side's** revision for deletions
+— the merge base, or the commit's first parent (`baseSource`) — since that's the only
+revision containing them. Changing the source
 drops cached listings and the open file — they belong to the old snapshot — and
 `ProjectBuffer`'s modeline names the revision whenever it isn't the worktree.
 
@@ -161,6 +203,11 @@ warmed in the background on repo open/refresh.
 - **Anything that reads repo content:** take a `ProjectSource` (project/browse reads) or a
   `ReviewScope` (tag reads) rather than assuming the working tree — that assumption is
   exactly what branch comparison broke.
+- **New comparison mode:** a `DiffSpec` variant needs a matching `Comparison` variant
+  (metadata for the header/status bar/clean state), a `ReviewScope` variant, a `Snapshot`
+  arm in `tags.rs`, `sameSpec`/`comparisonLabel`/`scopeForSpec` cases, and
+  `ambientSource`/`baseSource` cases so project mode follows it. If it involves a branch,
+  take it from `useRepoStore.reviewBranch` rather than adding another branch picker.
 
 ## CodeMirror gotchas (carried from video-studio)
 
@@ -172,7 +219,7 @@ warmed in the background on repo open/refresh.
 
 ## Testing
 
-Logic is unit-tested in Rust against `tempfile` git fixtures (`diff`, `tags`, `fuzzy`,
-`xref`, `repo_library`). UI/interaction is covered by the manual checklist in
+Logic is unit-tested in Rust against `tempfile` git fixtures (`diff`, `tags`, `commits`,
+`fuzzy`, `xref`, `repo_library`). UI/interaction is covered by the manual checklist in
 `MANUAL_TESTS.md` (fixture setup + per-milestone scenarios) — keep it current when adding
 features.

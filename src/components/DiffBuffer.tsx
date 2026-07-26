@@ -89,7 +89,28 @@ function emptyLabel(comparison: Comparison | undefined): string {
   if (comparison?.kind === "branches") {
     return `no changes between ${comparison.baseName} and ${comparison.targetName}`;
   }
+  if (comparison?.kind === "commit") {
+    return `${comparison.shortOid} changes nothing`;
+  }
   return "working tree clean";
+}
+
+/** The revision range in the header: what the diff was taken between. */
+function headerRange(comparison: Comparison | undefined): string {
+  switch (comparison?.kind) {
+    case "branches":
+      return `merge-base ${shortOid(comparison.mergeBase)} → ${shortOid(
+        comparison.targetOid,
+      )}`;
+    case "commit":
+      return comparison.parentOid
+        ? `${comparison.isMerge ? "first parent" : "parent"} ${shortOid(
+            comparison.parentOid,
+          )} → ${comparison.shortOid}`
+        : `root commit ${comparison.shortOid}`;
+    default:
+      return comparison?.head ?? "";
+  }
 }
 
 function buildRows(
@@ -599,13 +620,7 @@ export default function DiffBuffer() {
         <span className="diff-header-branch">
           {comparison ? comparisonLabel(comparison) : ""}
         </span>
-        <span className="diff-header-sha">
-          {comparison?.kind === "branches"
-            ? `merge-base ${shortOid(comparison.mergeBase)} → ${shortOid(
-                comparison.targetOid,
-              )}`
-            : (comparison?.head ?? "")}
-        </span>
+        <span className="diff-header-sha">{headerRange(comparison)}</span>
         <span className="diff-header-count">
           {files.length === 0
             ? emptyLabel(comparison)

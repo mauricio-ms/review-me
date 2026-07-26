@@ -289,6 +289,18 @@ kbd {
   font-weight: 600;
 }
 
+/* The branch under review — the app's own "checkout", which drives both the branch
+   comparison and the commit picker. */
+.status-review-branch {
+  color: var(--fg-2);
+}
+
+/* Reviewing a branch that isn't the one on disk: worth flagging, since the
+   working-tree diff still belongs to the real checkout. */
+.status-review-branch.is-elsewhere {
+  color: var(--accent-amber);
+}
+
 .status-changes {
   color: var(--fg-2);
 }
@@ -814,6 +826,14 @@ kbd {
   color: var(--accent-violet);
 }
 
+.branch-badge.is-reviewing {
+  color: var(--accent-teal);
+}
+
+.neo-row.branch-row.is-reviewing .branch-name {
+  color: var(--accent-teal);
+}
+
 .branch-oid {
   color: var(--fg-2);
   font-variant-numeric: tabular-nums;
@@ -825,6 +845,62 @@ kbd {
 
 .branch-error {
   color: var(--accent-red);
+}
+
+/* ---------- commit picker ---------- */
+
+.commit-pick {
+  width: min(860px, 96vw);
+  height: min(620px, 84vh);
+}
+
+/* Sha, then the subject taking the slack, then author/age hugging the right edge.
+   Qualified with `.neo-row` so it beats the base row's 3-column template regardless
+   of source order. */
+.neo-row.commit-row {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 12px;
+}
+
+.commit-oid {
+  color: var(--accent-amber);
+  font-variant-numeric: tabular-nums;
+}
+
+.commit-summary {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.commit-summary.is-resolve {
+  color: var(--fg-2);
+  font-style: italic;
+}
+
+.commit-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--fg-2);
+}
+
+.commit-badge {
+  text-transform: lowercase;
+  letter-spacing: 0.04em;
+}
+
+.commit-badge.is-merge {
+  color: var(--accent-violet);
+}
+
+.commit-badge.is-head {
+  color: var(--accent-green);
+}
+
+.commit-when {
+  font-variant-numeric: tabular-nums;
 }
 
 /* ---------- xref panel ---------- */

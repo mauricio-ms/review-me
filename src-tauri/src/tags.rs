@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::branches;
+use crate::commits;
 use crate::error::AppResult;
 use crate::repo;
 
@@ -44,14 +45,19 @@ impl Default for AnchorSide {
 
 /// Which comparison a tag was made against. Marks are scoped so reviewing
 /// `master...feature` never marks the same lines as reviewed in the working-tree
-/// diff (or in a different branch pair). Ref names — not oids — are the durable
-/// identity: a branch that moves is still the same review.
+/// diff (or in a different branch pair, or in a single commit). For a branch pair the
+/// ref names — not oids — are the durable identity: a branch that moves is still the
+/// same review. A single commit is identified by its full oid, which cannot move at
+/// all, and deliberately not by the branch it was picked from: the same commit reached
+/// from two branches is one review.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum ReviewScope {
     Worktree,
     #[serde(rename_all = "camelCase")]
     Branches { base_ref: String, target_ref: String },
+    #[serde(rename_all = "camelCase")]
+    Commit { oid: String },
 }
 
 impl Default for ReviewScope {
@@ -72,9 +78,11 @@ enum Snapshot<'r> {
     },
     Trees {
         repo: &'r Repository,
-        /// The merge-base tree — what branch-mode "old side" content means.
-        old: Tree<'r>,
-        /// The target tree — what branch-mode "new side" content means.
+        /// The old side: the merge-base tree for a branch pair, the first parent's tree
+        /// for a single commit. `None` only for a root commit, whose old side is
+        /// definitively empty rather than unreadable.
+        old: Option<Tree<'r>>,
+        /// The new side: the target tree, or the reviewed commit's own tree.
         new: Tree<'r>,
     },
 }
@@ -88,6 +96,8 @@ impl<'r> Snapshot<'r> {
             Snapshot::Worktree { repo, .. } => {
                 side == AnchorSide::New || repo.is_some()
             }
+            // Both trees are in hand — a root commit's absent old side is evidence of
+            // emptiness, not absence of evidence.
             Snapshot::Trees { .. } => true,
         }
     }
@@ -99,8 +109,12 @@ impl<'r> Snapshot<'r> {
                 _ => repo.and_then(|repo| head_lines(repo, file)),
             },
             Snapshot::Trees { repo, old, new } => {
-                let tree = if side == AnchorSide::New { new } else { old };
-                tree_lines(repo, tree, file)
+                let tree = if side == AnchorSide::New {
+                    Some(new)
+                } else {
+                    old.as_ref()
+                };
+                tree_lines(repo, tree?, file)
             }
         }
     }
@@ -112,16 +126,18 @@ impl<'r> Snapshot<'r> {
                 repo.and_then(|repo| head_blob_oid(repo, file)),
                 working_blob_oid(root, file),
             ),
-            Snapshot::Trees { old, new, .. } => {
-                (tree_blob_oid(old, file), tree_blob_oid(new, file))
-            }
+            Snapshot::Trees { old, new, .. } => (
+                old.as_ref().and_then(|old| tree_blob_oid(old, file)),
+                tree_blob_oid(new, file),
+            ),
         }
     }
 }
 
 /// Resolve `scope` against the repo. `None` means the scope can't be read right now
-/// (no repo, or a branch that no longer exists) — anchors are then left untouched
-/// rather than being declared stale on missing evidence.
+/// (no repo, a branch that no longer exists, a commit that isn't in this object
+/// database) — anchors are then left untouched rather than being declared stale on
+/// missing evidence.
 fn snapshot<'r>(
     root: &'r Path,
     repo: Option<&'r Repository>,
@@ -137,8 +153,22 @@ fn snapshot<'r>(
             let resolved = branches::resolve(repo, base_ref, target_ref).ok()?;
             Some(Snapshot::Trees {
                 repo,
-                old: repo.find_commit(resolved.merge_base).ok()?.tree().ok()?,
+                old: Some(repo.find_commit(resolved.merge_base).ok()?.tree().ok()?),
                 new: repo.find_commit(resolved.target_oid).ok()?.tree().ok()?,
+            })
+        }
+        ReviewScope::Commit { oid } => {
+            let repo = repo?;
+            let resolved = commits::resolve(repo, oid).ok()?;
+            let old = match resolved.parent_oid {
+                // A missing parent object is unreadable; no parent at all is empty.
+                Some(parent) => Some(repo.find_commit(parent).ok()?.tree().ok()?),
+                None => None,
+            };
+            Some(Snapshot::Trees {
+                repo,
+                old,
+                new: repo.find_commit(resolved.oid).ok()?.tree().ok()?,
             })
         }
     }
@@ -1146,6 +1176,208 @@ mod tests {
         // same path sees no change at all — proving the oids came from the trees.
         let (old, new) = anchor.content_hash.split_once(':').unwrap();
         assert_ne!(old, new);
+        assert!(load(root, WT).unwrap().reviewed.is_empty());
+    }
+
+    /// The IPC contract with `src/types/tags.ts`, and the on-disk shape in
+    /// `tags.json`: a commit scope is `{kind, oid}` and nothing else — no branch.
+    #[test]
+    fn commit_scope_matches_the_typescript_shape() {
+        let scope: ReviewScope =
+            serde_json::from_str(r#"{"kind":"commit","oid":"abc"}"#).unwrap();
+        assert_eq!(
+            scope,
+            ReviewScope::Commit {
+                oid: "abc".to_string()
+            }
+        );
+        assert_eq!(
+            serde_json::to_string(&scope).unwrap(),
+            r#"{"kind":"commit","oid":"abc"}"#
+        );
+    }
+
+    fn commit_scope(root: &Path, rev: &str) -> ReviewScope {
+        let repo = Repository::open(root).unwrap();
+        ReviewScope::Commit {
+            oid: commits::resolve(&repo, rev).unwrap().oid.to_string(),
+        }
+    }
+
+    #[test]
+    fn commit_anchor_hashes_the_commit_tree_not_the_worktree() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        branchy_repo(root);
+        let scope = commit_scope(root, "refs/heads/feature");
+
+        // master is checked out, so the working tree says "two" where the reviewed
+        // commit says "FEATURE".
+        let wt = add_reviewed(root, WT, "a.txt", 2, 2, AnchorKind::Hunk, AnchorSide::New).unwrap();
+        let cm =
+            add_reviewed(root, &scope, "a.txt", 2, 2, AnchorKind::Hunk, AnchorSide::New).unwrap();
+        assert_ne!(
+            wt.reviewed[0].anchor.content_hash, cm.reviewed[0].anchor.content_hash,
+            "commit anchors read the commit's tree, not the checkout"
+        );
+        assert!(!cm.reviewed[0].anchor.stale);
+
+        // Nothing about the checkout can disturb a commit-scoped anchor.
+        write_lines(&root.join("a.txt"), &["completely", "different", "content"]);
+        let reloaded = load(root, &scope).unwrap();
+        assert!(!reloaded.reviewed[0].anchor.stale);
+        assert_eq!(reloaded.reviewed[0].anchor.start_line, 2);
+    }
+
+    #[test]
+    fn commit_old_side_anchor_reads_the_first_parent() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        init_repo(root);
+        write_lines(&root.join("a.txt"), &["one", "two", "three", "four"]);
+        git(root, &["add", "."]);
+        git(root, &["commit", "-qm", "init"]);
+        // Delete lines 2..3 in the reviewed commit → an old-side (parent) target.
+        write_lines(&root.join("a.txt"), &["one", "four"]);
+        git(root, &["commit", "-qam", "trim"]);
+
+        let scope = commit_scope(root, "HEAD");
+        let store =
+            add_reviewed(root, &scope, "a.txt", 2, 3, AnchorKind::Hunk, AnchorSide::Old).unwrap();
+        assert!(!store.reviewed[0].anchor.stale);
+
+        // The same lines hashed straight from the parent commit's tree.
+        let repo = Repository::open(root).unwrap();
+        let parent_tree = repo
+            .revparse_single("HEAD~1")
+            .unwrap()
+            .peel_to_commit()
+            .unwrap()
+            .tree()
+            .unwrap();
+        let lines = tree_lines(&repo, &parent_tree, "a.txt").unwrap();
+        assert_eq!(
+            store.reviewed[0].anchor.content_hash,
+            hash_lines(&lines[1..3])
+        );
+    }
+
+    #[test]
+    fn commit_marks_are_isolated_from_worktree_and_branch_marks() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        branchy_repo(root);
+        let pair = branch_scope("refs/heads/master", "refs/heads/feature");
+        let tip = commit_scope(root, "refs/heads/feature");
+        let other_tip = commit_scope(root, "refs/heads/other");
+
+        // The same file and line range, marked in four different comparisons — and the
+        // branch pair and its tip commit show the very same diff, so nothing but the
+        // scope keeps them apart.
+        for scope in [WT, &pair, &tip, &other_tip] {
+            add_reviewed(root, scope, "a.txt", 2, 2, AnchorKind::Hunk, AnchorSide::New).unwrap();
+        }
+        for scope in [WT, &pair, &tip, &other_tip] {
+            let store = load(root, scope).unwrap();
+            assert_eq!(store.reviewed.len(), 1, "each scope sees only its own mark");
+            assert_eq!(store.reviewed[0].anchor.scope, *scope);
+        }
+
+        // Clearing one commit leaves every other comparison intact.
+        let cleared = clear_scope(root, &tip).unwrap();
+        assert!(cleared.reviewed.is_empty());
+        for scope in [WT, &pair, &other_tip] {
+            assert_eq!(load(root, scope).unwrap().reviewed.len(), 1);
+        }
+    }
+
+    #[test]
+    fn commit_marks_outlive_the_branch_they_were_picked_from() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        branchy_repo(root);
+        let scope = commit_scope(root, "refs/heads/feature");
+        add_reviewed(root, &scope, "a.txt", 2, 2, AnchorKind::Hunk, AnchorSide::New).unwrap();
+
+        // A commit can't move, and losing the branch that pointed at it changes
+        // nothing: the oid still resolves, so the mark stays live.
+        git(root, &["branch", "-qD", "feature"]);
+        let store = load(root, &scope).unwrap();
+        assert_eq!(store.reviewed.len(), 1);
+        assert!(!store.reviewed[0].anchor.stale);
+        assert_eq!(store.reviewed[0].anchor.start_line, 2);
+    }
+
+    #[test]
+    fn unknown_commit_scope_leaves_anchors_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        branchy_repo(root);
+        let scope = commit_scope(root, "refs/heads/feature");
+        add_reviewed(root, &scope, "a.txt", 2, 2, AnchorKind::Hunk, AnchorSide::New).unwrap();
+
+        // A commit this object database has never heard of is missing evidence.
+        let ghost = ReviewScope::Commit {
+            oid: "0".repeat(40),
+        };
+        let mut store = read(root).unwrap();
+        store.reviewed[0].anchor.scope = ghost.clone();
+        write(root, &store).unwrap();
+
+        let loaded = load(root, &ghost).unwrap();
+        assert_eq!(loaded.reviewed.len(), 1);
+        assert!(!loaded.reviewed[0].anchor.stale);
+    }
+
+    #[test]
+    fn root_commit_has_no_old_side_to_anchor_to() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        init_repo(root);
+        write_lines(&root.join("a.txt"), &["one", "two", "three"]);
+        git(root, &["add", "."]);
+        git(root, &["commit", "-qm", "init"]);
+
+        let scope = commit_scope(root, "HEAD");
+        // The new side is the root commit's own tree and anchors normally.
+        let new_side =
+            add_reviewed(root, &scope, "a.txt", 1, 2, AnchorKind::Hunk, AnchorSide::New).unwrap();
+        assert!(!new_side.reviewed[0].anchor.stale);
+        assert!(!new_side.reviewed[0].anchor.content_hash.is_empty());
+
+        // There is no old side to read, so an old-side mark captures nothing — and by
+        // the empty-hash convention it stays live rather than being called stale on
+        // content that never existed. Unreachable from the UI anyway: a root commit's
+        // diff is all additions, so it offers no old-side unit to mark.
+        let old_side =
+            add_flag(root, &scope, "a.txt", 1, 2, AnchorKind::Hunk, AnchorSide::Old, None, None)
+                .unwrap();
+        assert!(old_side.flags[0].anchor.content_hash.is_empty());
+        assert!(!load(root, &scope).unwrap().flags[0].anchor.stale);
+    }
+
+    #[test]
+    fn commit_file_anchor_uses_the_parent_and_commit_blobs() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        init_repo(root);
+        fs::write(root.join("logo.bin"), [0u8, 1, 2, 3]).unwrap();
+        git(root, &["add", "."]);
+        git(root, &["commit", "-qm", "init"]);
+        fs::write(root.join("logo.bin"), [0u8, 9, 9, 9]).unwrap();
+        git(root, &["commit", "-qam", "new logo"]);
+
+        let scope = commit_scope(root, "HEAD");
+        let store =
+            add_reviewed(root, &scope, "logo.bin", 0, 0, AnchorKind::File, AnchorSide::File)
+                .unwrap();
+        let anchor = &store.reviewed[0].anchor;
+        assert!(!anchor.stale, "the two blobs differ");
+        let (old, new) = anchor.content_hash.split_once(':').unwrap();
+        assert_ne!(old, new);
+
+        // The working tree matches the commit, so worktree scope sees no change —
+        // proving the oids came from the two trees.
         assert!(load(root, WT).unwrap().reviewed.is_empty());
     }
 }

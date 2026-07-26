@@ -179,6 +179,15 @@ pub fn short_oid(oid: &Oid) -> String {
     oid.to_string().chars().take(7).collect()
 }
 
+/// The display shorthand of a canonical ref: `refs/heads/x` → `x`,
+/// `refs/remotes/origin/x` → `origin/x`. Anything else is already short.
+pub fn shorthand(ref_name: &str) -> &str {
+    ref_name
+        .strip_prefix("refs/heads/")
+        .or_else(|| ref_name.strip_prefix("refs/remotes/"))
+        .unwrap_or(ref_name)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

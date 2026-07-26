@@ -8,7 +8,7 @@ import { useProjectStore } from "../state/project";
 import { useRepoStore } from "../state/repo";
 import { useTagsStore } from "../state/tags";
 import { useUIStore, type BufferName } from "../state/ui";
-import { WORKTREE_SPEC } from "../types/diff";
+import { readsCommittedHistory, WORKTREE_SPEC } from "../types/diff";
 
 /** Closes the overlay that invoked a command. Provided by each consumer. */
 export type CommandClose = (options?: { restoreFocus?: boolean }) => void;
@@ -48,9 +48,11 @@ export function useCommands(rawClose: CommandClose): {
   const openPicker = useUIStore((s) => s.openPicker);
   const requestFocus = useUIStore((s) => s.requestFocus);
   const repo = useRepoStore((s) => s.repo);
+  const reviewBranch = useRepoStore((s) => s.reviewBranch);
   const comparison = useRepoStore((s) => s.comparison);
   const closeRepo = useRepoStore((s) => s.closeRepo);
-  const comparingBranches = comparison.kind === "branches";
+  // A branch pair or a single commit: both sides are already committed history.
+  const comparingHistory = readsCommittedHistory(comparison);
   const openPath = useProjectStore((s) => s.openPath);
   const diffHighlight = useUIStore((s) => s.diffHighlight);
   const toggleDiffHighlight = useUIStore((s) => s.toggleDiffHighlight);
@@ -112,6 +114,16 @@ export function useCommands(rawClose: CommandClose): {
   const handleCompareBranches = useCallback(() => {
     close({ restoreFocus: false });
     openPicker("branchCompare");
+  }, [close, openPicker]);
+
+  const handlePickCommit = useCallback(() => {
+    close({ restoreFocus: false });
+    openPicker("commitPick");
+  }, [close, openPicker]);
+
+  const handleCheckoutBranch = useCallback(() => {
+    close({ restoreFocus: false });
+    openPicker("checkoutBranch");
   }, [close, openPicker]);
 
   const handleWorktreeDiff = useCallback(async () => {
@@ -267,15 +279,45 @@ export function useCommands(rawClose: CommandClose): {
       run: handleCloseRepo,
     },
     {
+      id: "checkout",
+      name: "checkout",
+      aliases: ["co", "switch", "branch"],
+      label: reviewBranch
+        ? `branch to review → ${reviewBranch.display}`
+        : "branch to review",
+      group: "git",
+      prefix: "g",
+      key: "s",
+      enabled: !!repo,
+      run: handleCheckoutBranch,
+    },
+    {
       id: "compare",
       name: "compare",
-      aliases: ["branches", "branch", "cmp"],
-      label: "compare branches",
+      aliases: ["branches", "cmp", "base"],
+      label: reviewBranch
+        ? `compare ${reviewBranch.display} against a base`
+        : "compare branches (no branch to review)",
       group: "git",
       prefix: "g",
       key: "b",
-      enabled: !!repo,
+      // Both pickers review the branch the app is on; without one there is nothing
+      // to compare or to list commits from.
+      enabled: !!repo && !!reviewBranch,
       run: handleCompareBranches,
+    },
+    {
+      id: "commit-diff",
+      name: "log",
+      aliases: ["commits", "show", "revision"],
+      label: reviewBranch
+        ? `review a commit on ${reviewBranch.display}`
+        : "review a commit (no branch to review)",
+      group: "git",
+      prefix: "g",
+      key: "l",
+      enabled: !!repo && !!reviewBranch,
+      run: handlePickCommit,
     },
     {
       id: "worktree",
@@ -286,22 +328,22 @@ export function useCommands(rawClose: CommandClose): {
       prefix: "g",
       key: "w",
       // Already the working-tree diff — nothing to switch back to.
-      enabled: !!repo && comparingBranches,
+      enabled: !!repo && comparingHistory,
       run: handleWorktreeDiff,
     },
     {
       id: "commit-reviewed",
       name: "commit",
       aliases: ["commitreviewed", "reviewed-commit", "gitcommit", "gc"],
-      label: comparingBranches
+      label: comparingHistory
         ? "commit reviewed changes (working-tree diff only)"
         : "commit reviewed changes",
       group: "git",
       prefix: "g",
       key: "c",
-      // Both sides of a branch comparison are already committed; there is nothing
-      // to stage and nothing the reviewer could mean by committing here.
-      enabled: !!repo && !comparingBranches,
+      // Committed history has nothing to stage — neither side of a branch pair nor a
+      // commit's own diff is something the reviewer could mean by committing here.
+      enabled: !!repo && !comparingHistory,
       run: handleCommitReviewed,
     },
     {

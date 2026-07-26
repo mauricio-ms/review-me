@@ -2,7 +2,7 @@ import { create } from "zustand";
 
 import type { ReviewSection } from "../lib/coverage";
 import { sameSpec, WORKTREE_SPEC, type DiffSpec, type DiffSummary } from "../types/diff";
-import type { RepoInfo } from "../types/repo";
+import type { RepoInfo, ReviewBranch } from "../types/repo";
 
 export type DiffStatus =
   | { kind: "idle" }
@@ -12,6 +12,12 @@ export type DiffStatus =
 type RepoState = {
   repo: RepoInfo | null;
   repoPath: string | null;
+  /**
+   * The branch under review — what a branch comparison targets and whose history the
+   * commit picker lists. App-level only: nothing is ever checked out. Null in a repo
+   * with no branches.
+   */
+  reviewBranch: ReviewBranch | null;
   diff: DiffSummary | null;
   /** The comparison currently applied — what `diff` was computed from. */
   comparison: DiffSpec;
@@ -29,6 +35,7 @@ type RepoState = {
   collapsedSections: Set<ReviewSection>;
 
   setRepo: (repo: RepoInfo, path: string) => void;
+  setReviewBranch: (branch: ReviewBranch | null) => void;
   /**
    * Commit a freshly computed comparison. Folds reset only when the comparison's
    * identity changed — a plain refresh keeps the reviewer's place.
@@ -45,6 +52,7 @@ type RepoState = {
 export const useRepoStore = create<RepoState>((set) => ({
   repo: null,
   repoPath: null,
+  reviewBranch: null,
   diff: null,
   comparison: WORKTREE_SPEC,
   comparisonEpoch: 0,
@@ -53,6 +61,7 @@ export const useRepoStore = create<RepoState>((set) => ({
   collapsedHunks: new Set(),
   collapsedSections: new Set(),
 
+  setReviewBranch: (reviewBranch) => set({ reviewBranch }),
   setRepo: (repo, path) =>
     set((s) =>
       s.repoPath === path
@@ -112,6 +121,7 @@ export const useRepoStore = create<RepoState>((set) => ({
     set((s) => ({
       repo: null,
       repoPath: null,
+      reviewBranch: null,
       diff: null,
       comparison: WORKTREE_SPEC,
       comparisonEpoch: s.comparisonEpoch + 1,

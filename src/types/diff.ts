@@ -10,8 +10,10 @@ export type DiffStrategy = "mergeBase";
 /**
  * What the diff buffer should show. `worktree` is the default magit-status view
  * (working tree vs. HEAD); `branches` reviews committed history between two refs and
- * never touches the checkout, index, or working tree. Refs are canonical
- * (`refs/heads/x`, `refs/remotes/origin/x`).
+ * `commit` reviews a single commit against its first parent. Neither
+ * committed-history mode touches the checkout, index, or working tree. Refs are
+ * canonical (`refs/heads/x`, `refs/remotes/origin/x`) and commit oids are always the
+ * full 40 chars.
  */
 export type DiffSpec =
   | { kind: "worktree" }
@@ -20,6 +22,17 @@ export type DiffSpec =
       baseRef: string;
       targetRef: string;
       strategy: DiffStrategy;
+    }
+  | {
+      kind: "commit";
+      /** Full 40-char oid — the comparison's identity. */
+      oid: string;
+      /**
+       * The branch the commit was picked from. Display context only: it is absent
+       * from both the comparison's identity and its review scope, so the same commit
+       * reached from two branches is one review.
+       */
+      branchRef: string | null;
     };
 
 export const WORKTREE_SPEC: DiffSpec = { kind: "worktree" };
@@ -39,6 +52,21 @@ export type Comparison =
       baseOid: string;
       targetOid: string;
       mergeBase: string;
+    }
+  | {
+      kind: "commit";
+      /** Full oid — the durable identity of the comparison. */
+      oid: string;
+      shortOid: string;
+      summary: string;
+      authorName: string;
+      /** Author time, seconds since the epoch. */
+      timestamp: number;
+      /** The first parent, whose tree is the old side; null for a root commit. */
+      parentOid: string | null;
+      isMerge: boolean;
+      /** Shorthand of the branch the commit was picked from, for display. */
+      branchName: string | null;
     };
 
 export interface DiffLine {
@@ -87,11 +115,31 @@ export function shortOid(oid: string): string {
   return oid.slice(0, 7);
 }
 
-/** `master...feature`, or the branch label in worktree mode. */
+/** Longest commit subject shown in a label before it is cut short. */
+const SUMMARY_MAX = 48;
+
+/**
+ * The identifying label for a comparison: the branch in worktree mode,
+ * `master...feature` for a branch pair, `abc1234 subject` for a single commit.
+ */
 export function comparisonLabel(comparison: Comparison): string {
-  return comparison.kind === "worktree"
-    ? comparison.branch
-    : `${comparison.baseName}...${comparison.targetName}`;
+  switch (comparison.kind) {
+    case "worktree":
+      return comparison.branch;
+    case "branches":
+      return `${comparison.baseName}...${comparison.targetName}`;
+    case "commit":
+      return `${comparison.shortOid} ${truncate(comparison.summary, SUMMARY_MAX)}`;
+  }
+}
+
+function truncate(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
+
+/** Whether the comparison is committed history — nothing about it can be staged. */
+export function readsCommittedHistory(spec: DiffSpec): boolean {
+  return spec.kind !== "worktree";
 }
 
 /**
@@ -99,10 +147,18 @@ export function comparisonLabel(comparison: Comparison): string {
  * folds and the cursor.
  */
 export function sameSpec(a: DiffSpec, b: DiffSpec): boolean {
-  if (a.kind === "worktree" || b.kind === "worktree") return a.kind === b.kind;
-  return (
-    a.baseRef === b.baseRef &&
-    a.targetRef === b.targetRef &&
-    a.strategy === b.strategy
-  );
+  if (a.kind !== b.kind) return false;
+  if (a.kind === "worktree" || b.kind === "worktree") return true;
+  if (a.kind === "branches" || b.kind === "branches") {
+    return (
+      a.kind === "branches" &&
+      b.kind === "branches" &&
+      a.baseRef === b.baseRef &&
+      a.targetRef === b.targetRef &&
+      a.strategy === b.strategy
+    );
+  }
+  // A commit is identified by its oid alone; `branchRef` is display context, so
+  // re-picking the same commit from another branch is not a new comparison.
+  return a.oid === b.oid;
 }
