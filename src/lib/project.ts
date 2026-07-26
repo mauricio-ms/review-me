@@ -15,31 +15,52 @@ type SourceChoice = { source: ProjectSource; label: string | null };
 
 /**
  * The revision project mode should default to for a comparison: the checkout in
- * worktree mode, the branch under review in branch mode. Opening a file from a
- * branch diff must never silently show its working-tree version.
+ * worktree mode, the branch under review in branch mode, the reviewed commit itself
+ * in commit mode. Opening a file from a committed-history diff must never silently
+ * show its working-tree version.
  */
 export function ambientSource(comparison: Comparison | undefined): SourceChoice {
-  if (comparison?.kind !== "branches") {
-    return { source: WORKTREE_SOURCE, label: null };
+  switch (comparison?.kind) {
+    case "branches":
+      return {
+        source: { kind: "commit", oid: comparison.targetOid },
+        label: `${comparison.targetName}@${shortOid(comparison.targetOid)}`,
+      };
+    case "commit":
+      return {
+        source: { kind: "commit", oid: comparison.oid },
+        label: comparison.branchName
+          ? `${comparison.branchName}@${comparison.shortOid}`
+          : comparison.shortOid,
+      };
+    default:
+      return { source: WORKTREE_SOURCE, label: null };
   }
-  return {
-    source: { kind: "commit", oid: comparison.targetOid },
-    label: `${comparison.targetName}@${shortOid(comparison.targetOid)}`,
-  };
 }
 
 /**
- * The revision that holds a branch comparison's *old* side — the merge base. Deleted
- * files and old-side navigation only exist there.
+ * The revision that holds a comparison's *old* side: the merge base for a branch
+ * pair, the first parent for a single commit. Deleted files and old-side navigation
+ * only exist there. A root commit has no old side, so it falls back to the commit
+ * itself — nothing in its diff can ask for old-side content anyway.
  */
 export function baseSource(comparison: Comparison | undefined): SourceChoice {
-  if (comparison?.kind !== "branches") {
-    return { source: WORKTREE_SOURCE, label: null };
+  switch (comparison?.kind) {
+    case "branches":
+      return {
+        source: { kind: "commit", oid: comparison.mergeBase },
+        label: `${comparison.baseName}@${shortOid(comparison.mergeBase)} (merge-base)`,
+      };
+    case "commit":
+      return comparison.parentOid
+        ? {
+            source: { kind: "commit", oid: comparison.parentOid },
+            label: `${shortOid(comparison.parentOid)} (parent of ${comparison.shortOid})`,
+          }
+        : ambientSource(comparison);
+    default:
+      return { source: WORKTREE_SOURCE, label: null };
   }
-  return {
-    source: { kind: "commit", oid: comparison.mergeBase },
-    label: `${comparison.baseName}@${shortOid(comparison.mergeBase)} (merge-base)`,
-  };
 }
 
 /** Point the project buffer at a revision (no-op when it's already there). */
