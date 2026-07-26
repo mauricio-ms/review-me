@@ -282,6 +282,13 @@ kbd {
   color: var(--accent-teal);
 }
 
+/* Branch comparison mode: a different colour so the reviewer can never mistake
+   committed-history review for the working-tree diff. */
+.status-branch.is-comparing {
+  color: var(--accent-violet);
+  font-weight: 600;
+}
+
 .status-changes {
   color: var(--fg-2);
 }

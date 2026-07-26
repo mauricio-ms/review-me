@@ -2,10 +2,12 @@ import { reviewProgress } from "../lib/coverage";
 import { useRepoStore } from "../state/repo";
 import { useTagsStore } from "../state/tags";
 import { useUIStore } from "../state/ui";
+import { comparisonLabel, shortOid } from "../types/diff";
 
 export default function BufferStatusBar() {
   const repo = useRepoStore((s) => s.repo);
   const diff = useRepoStore((s) => s.diff);
+  const comparison = diff?.comparison;
   const reviewed = useTagsStore((s) => s.reviewed);
   const flags = useTagsStore((s) => s.flags);
   const ignored = useTagsStore((s) => s.ignored);
@@ -21,7 +23,21 @@ export default function BufferStatusBar() {
       <span className="status-segment status-buffer">{activeBuffer}</span>
       {repo && (
         <>
-          <span className="status-segment status-branch">⎇ {repo.branch}</span>
+          <span
+            className={`status-segment status-branch${
+              comparison?.kind === "branches" ? " is-comparing" : ""
+            }`}
+            title={
+              comparison?.kind === "branches"
+                ? `merge-base ${shortOid(comparison.mergeBase)} → ${shortOid(
+                    comparison.targetOid,
+                  )}`
+                : undefined
+            }
+          >
+            {comparison?.kind === "branches" ? "⇄" : "⎇"}{" "}
+            {comparison ? comparisonLabel(comparison) : repo.branch}
+          </span>
           <span className="status-segment status-changes">
             {files.length} changed
           </span>

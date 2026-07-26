@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
-use crate::diff::{self, DiffSummary};
+use crate::branches::{self, BranchInfo};
+use crate::diff::{self, DiffSpec, DiffSummary};
 use crate::error::{AppError, AppResult};
 use crate::fs_browse::{self, DirectoryListing, FileSystemListing};
 use crate::fuzzy::{self, FileMatch};
@@ -30,11 +31,19 @@ pub fn open_repo(app: tauri::AppHandle, path: String) -> AppResult<RepoInfo> {
     Ok(info)
 }
 
-/// The working-tree-vs-HEAD diff for the repo rooted at `repo`.
+/// The diff `spec` describes for the repo rooted at `repo`: working-tree-vs-HEAD by
+/// default, or a merge-base branch comparison.
 #[tauri::command]
-pub fn compute_diff(repo: String) -> AppResult<DiffSummary> {
+pub fn compute_diff(repo: String, spec: DiffSpec) -> AppResult<DiffSummary> {
     let repository = repo::open(&PathBuf::from(repo))?;
-    diff::compute(&repository)
+    diff::compute(&repository, &spec)
+}
+
+/// Local and remote-tracking branches for the comparison picker.
+#[tauri::command]
+pub fn list_branches(repo: String) -> AppResult<Vec<BranchInfo>> {
+    let repository = repo::open(&PathBuf::from(repo))?;
+    branches::list(&repository)
 }
 
 #[tauri::command]

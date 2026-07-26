@@ -1,3 +1,4 @@
+mod branches;
 mod commands;
 mod diff;
 mod error;
@@ -16,6 +17,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::open_repo,
             commands::compute_diff,
+            commands::list_branches,
             commands::list_recent_repos,
             commands::forget_repo,
             commands::list_file_system_entries,

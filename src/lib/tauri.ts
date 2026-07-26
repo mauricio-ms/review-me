@@ -1,7 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 
-import type { DiffSummary } from "../types/diff";
+import type { DiffSpec, DiffSummary } from "../types/diff";
 import type {
+  BranchInfo,
   DirectoryListing,
   FileMatch,
   FileSystemListing,
@@ -21,8 +22,12 @@ export function openRepo(path: string): Promise<RepoInfo> {
   return invoke<RepoInfo>("open_repo", { path });
 }
 
-export function computeDiff(repo: string): Promise<DiffSummary> {
-  return invoke<DiffSummary>("compute_diff", { repo });
+export function computeDiff(repo: string, spec: DiffSpec): Promise<DiffSummary> {
+  return invoke<DiffSummary>("compute_diff", { repo, spec });
+}
+
+export function listBranches(repo: string): Promise<BranchInfo[]> {
+  return invoke<BranchInfo[]>("list_branches", { repo });
 }
 
 export function listRecentRepos(): Promise<RememberedRepo[]> {

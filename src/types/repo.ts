@@ -11,6 +11,24 @@ export interface RememberedRepo {
   lastOpenedAt: number;
 }
 
+export type BranchKind = "local" | "remote";
+
+/**
+ * One selectable ref in the branch-comparison picker. `name` is the canonical ref
+ * (`refs/heads/x`, `refs/remotes/origin/x`) used in requests and persisted review
+ * scopes; `display` is the shorthand shown to the reviewer.
+ */
+export interface BranchInfo {
+  name: string;
+  display: string;
+  shortOid: string;
+  kind: BranchKind;
+  /** The branch HEAD currently points at. */
+  isCurrent: boolean;
+  /** The repo's inferred default branch (remote HEAD, else master, else main). */
+  isDefault: boolean;
+}
+
 export type FileSystemEntryKind = "directory" | "file";
 
 export interface FileSystemEntry {

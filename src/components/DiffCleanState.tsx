@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { useRepoStore } from "../state/repo";
 import { useTagsStore } from "../state/tags";
+import { shortOid } from "../types/diff";
 
 /** One line of the fake shell transcript. `cmd` lines type out char-by-char after a
  *  prompt; `out` lines print whole (optionally tinted green via `tone: "ok"`). */
@@ -89,25 +90,38 @@ export default function DiffCleanState() {
   const flags = useTagsStore((s) => s.flags);
   const ignored = useTagsStore((s) => s.ignored);
 
-  const branch = diff?.branch || "(unknown)";
-  const head = diff?.head ?? "";
+  const comparison = diff?.comparison;
   const cwd =
     diff?.repoRoot.split("/").filter(Boolean).pop() ?? "repo";
 
   const segs = useMemo<Seg[]>(() => {
-    const list: Seg[] = [
-      { kind: "cmd", text: "git status" },
-      { kind: "out", text: `On branch ${branch}` },
-    ];
-    if (head === "") list.push({ kind: "out", text: "No commits yet" });
-    list.push({
-      kind: "out",
-      text: "nothing to commit, working tree clean",
-      tone: "ok",
-    });
-    if (head !== "") {
-      list.push({ kind: "cmd", text: "git rev-parse --short HEAD" });
-      list.push({ kind: "out", text: head });
+    const list: Seg[] = [];
+    if (comparison?.kind === "branches") {
+      // Nothing between two commits isn't a clean working tree — say what it is.
+      const range = `${comparison.baseName}...${comparison.targetName}`;
+      list.push({ kind: "cmd", text: `git diff --stat ${range}` });
+      list.push({
+        kind: "out",
+        text: `no changes between ${comparison.baseName} and ${comparison.targetName}`,
+        tone: "ok",
+      });
+      list.push({ kind: "cmd", text: `git merge-base ${range.replace("...", " ")}` });
+      list.push({ kind: "out", text: shortOid(comparison.mergeBase) });
+    } else {
+      const branch = comparison?.branch || "(unknown)";
+      const head = comparison?.head ?? "";
+      list.push({ kind: "cmd", text: "git status" });
+      list.push({ kind: "out", text: `On branch ${branch}` });
+      if (head === "") list.push({ kind: "out", text: "No commits yet" });
+      list.push({
+        kind: "out",
+        text: "nothing to commit, working tree clean",
+        tone: "ok",
+      });
+      if (head !== "") {
+        list.push({ kind: "cmd", text: "git rev-parse --short HEAD" });
+        list.push({ kind: "out", text: head });
+      }
     }
     list.push({ kind: "cmd", text: "review-me status" });
     list.push({
@@ -116,7 +130,7 @@ export default function DiffCleanState() {
       tone: "ok",
     });
     return list;
-  }, [branch, head, reviewed.length, flags.length, ignored.length]);
+  }, [comparison, reviewed.length, flags.length, ignored.length]);
 
   const reduced = useMemo(prefersReducedMotion, []);
   const { shown, done } = useTerminalReveal(segs, !reduced);
