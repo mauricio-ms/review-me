@@ -2,7 +2,38 @@ import { reviewProgress } from "../lib/coverage";
 import { useRepoStore } from "../state/repo";
 import { useTagsStore } from "../state/tags";
 import { useUIStore } from "../state/ui";
-import { comparisonLabel, shortOid } from "../types/diff";
+import { comparisonLabel, shortOid, type Comparison } from "../types/diff";
+
+/** Worktree, branch pair, single commit — each comparison mode gets its own mark. */
+function comparisonGlyph(comparison: Comparison | undefined): string {
+  switch (comparison?.kind) {
+    case "branches":
+      return "⇄";
+    case "commit":
+      return "⊙";
+    default:
+      return "⎇";
+  }
+}
+
+/** The exact revisions behind the label, on hover. */
+function comparisonTitle(comparison: Comparison | undefined): string | undefined {
+  switch (comparison?.kind) {
+    case "branches":
+      return `merge-base ${shortOid(comparison.mergeBase)} → ${shortOid(
+        comparison.targetOid,
+      )}`;
+    case "commit": {
+      const range = comparison.parentOid
+        ? `${shortOid(comparison.parentOid)} → ${comparison.shortOid}`
+        : `root commit ${comparison.shortOid}`;
+      const where = comparison.branchName ? ` on ${comparison.branchName}` : "";
+      return `${range}${where} · ${comparison.summary} (${comparison.authorName})`;
+    }
+    default:
+      return undefined;
+  }
+}
 
 export default function BufferStatusBar() {
   const repo = useRepoStore((s) => s.repo);
@@ -25,17 +56,11 @@ export default function BufferStatusBar() {
         <>
           <span
             className={`status-segment status-branch${
-              comparison?.kind === "branches" ? " is-comparing" : ""
+              comparison && comparison.kind !== "worktree" ? " is-comparing" : ""
             }`}
-            title={
-              comparison?.kind === "branches"
-                ? `merge-base ${shortOid(comparison.mergeBase)} → ${shortOid(
-                    comparison.targetOid,
-                  )}`
-                : undefined
-            }
+            title={comparisonTitle(comparison)}
           >
-            {comparison?.kind === "branches" ? "⇄" : "⎇"}{" "}
+            {comparisonGlyph(comparison)}{" "}
             {comparison ? comparisonLabel(comparison) : repo.branch}
           </span>
           <span className="status-segment status-changes">

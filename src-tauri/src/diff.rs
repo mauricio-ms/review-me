@@ -5,6 +5,7 @@ use git2::{Delta, Diff, DiffDelta, DiffFindOptions, DiffOptions, Oid, Patch, Rep
 use serde::{Deserialize, Serialize};
 
 use crate::branches::{self, ResolvedBranches};
+use crate::commits::{self, ResolvedCommit};
 use crate::error::AppResult;
 use crate::repo;
 
@@ -17,8 +18,9 @@ pub enum DiffStrategy {
 }
 
 /// What the diff buffer is showing. `Worktree` is the default magit-status view
-/// (working tree vs. HEAD); `Branches` reviews committed history between two refs
-/// and never touches the checkout, index, or working tree.
+/// (working tree vs. HEAD); `Branches` reviews committed history between two refs and
+/// `Commit` reviews one commit against its first parent. Neither committed-history
+/// mode touches the checkout, index, or working tree.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum DiffSpec {
@@ -28,6 +30,16 @@ pub enum DiffSpec {
         base_ref: String,
         target_ref: String,
         strategy: DiffStrategy,
+    },
+    #[serde(rename_all = "camelCase")]
+    Commit {
+        /// Full 40-char oid — the comparison's identity.
+        oid: String,
+        /// The branch the commit was picked from. Display context only: it names
+        /// where the reviewer found the commit, and is deliberately absent from both
+        /// the comparison's identity and its review scope, so the same commit reached
+        /// from two branches is one review.
+        branch_ref: Option<String>,
     },
 }
 
@@ -56,6 +68,21 @@ pub enum Comparison {
         base_oid: String,
         target_oid: String,
         merge_base: String,
+    },
+    #[serde(rename_all = "camelCase")]
+    Commit {
+        /// Full oid — the durable identity of the comparison.
+        oid: String,
+        short_oid: String,
+        summary: String,
+        author_name: String,
+        timestamp: i64,
+        /// The first parent, whose tree is the old side. `None` for a root commit,
+        /// whose old side is empty.
+        parent_oid: Option<String>,
+        is_merge: bool,
+        /// Shorthand of the branch the commit was picked from, for display.
+        branch_name: Option<String>,
     },
 }
 
@@ -129,6 +156,9 @@ pub fn compute(repo: &Repository, spec: &DiffSpec) -> AppResult<DiffSummary> {
             target_ref,
             strategy: DiffStrategy::MergeBase,
         } => compute_branches(repo, &branches::resolve(repo, base_ref, target_ref)?),
+        DiffSpec::Commit { oid, branch_ref } => {
+            compute_commit(repo, &commits::resolve(repo, oid)?, branch_ref.as_deref())
+        }
     }
 }
 
@@ -199,6 +229,53 @@ fn compute_branches(repo: &Repository, resolved: &ResolvedBranches) -> AppResult
             base_oid: resolved.base_oid.to_string(),
             target_oid: resolved.target_oid.to_string(),
             merge_base: resolved.merge_base.to_string(),
+        },
+        files,
+    })
+}
+
+/// `git show <commit>`: the commit's tree against its first parent's. A merge is
+/// reviewed against parent 1 (never a combined diff); a root commit has no old tree at
+/// all, so every one of its files reads as added. Like branch mode, the checkout and
+/// index are irrelevant here.
+fn compute_commit(
+    repo: &Repository,
+    resolved: &ResolvedCommit,
+    branch_ref: Option<&str>,
+) -> AppResult<DiffSummary> {
+    let new_tree = repo.find_commit(resolved.oid)?.tree()?;
+    let old_tree = match resolved.parent_oid {
+        Some(parent) => Some(repo.find_commit(parent)?.tree()?),
+        None => None,
+    };
+
+    let mut opts = DiffOptions::new();
+    opts.context_lines(3);
+    let mut diff = repo.diff_tree_to_tree(old_tree.as_ref(), Some(&new_tree), Some(&mut opts))?;
+    diff.find_similar(Some(DiffFindOptions::new().renames(true)))?;
+
+    let mut files = Vec::new();
+    for idx in 0..diff.deltas().len() {
+        let file = changed_file(&diff, idx, None, &|delta, _path| {
+            delta_change_is_binary(repo, delta)
+        })?;
+        if let Some(file) = file {
+            files.push(file);
+        }
+    }
+
+    let info = &resolved.info;
+    Ok(DiffSummary {
+        repo_root: repo::root(repo)?.to_string_lossy().into_owned(),
+        comparison: Comparison::Commit {
+            oid: info.oid.clone(),
+            short_oid: info.short_oid.clone(),
+            summary: info.summary.clone(),
+            author_name: info.author_name.clone(),
+            timestamp: info.timestamp,
+            parent_oid: resolved.parent_oid.map(|oid| oid.to_string()),
+            is_merge: info.is_merge,
+            branch_name: branch_ref.map(|r| branches::shorthand(r).to_string()),
         },
         files,
     })
@@ -404,6 +481,23 @@ mod tests {
             target_ref: target.to_string(),
             strategy: DiffStrategy::MergeBase,
         }
+    }
+
+    fn commit_spec(rev: &str, branch_ref: Option<&str>) -> DiffSpec {
+        DiffSpec::Commit {
+            oid: rev.to_string(),
+            branch_ref: branch_ref.map(str::to_string),
+        }
+    }
+
+    /// The full oid of `rev`, the way the picker would hand one over.
+    fn oid_of(repo: &Repository, rev: &str) -> String {
+        repo.revparse_single(rev)
+            .unwrap()
+            .peel_to_commit()
+            .unwrap()
+            .id()
+            .to_string()
     }
 
     #[test]
@@ -669,6 +763,171 @@ mod tests {
         let repo = Repository::open(root).unwrap();
         let after = compute(&repo, &spec).unwrap();
         assert!(after.files.iter().any(|f| f.path == "later.txt"));
+    }
+
+    #[test]
+    fn commit_diff_shows_one_commit_against_its_parent() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        diverged_repo(root);
+        let repo = Repository::open(root).unwrap();
+
+        // feature's single commit: modify, delete, rename, add.
+        let summary = compute(
+            &repo,
+            &commit_spec(&oid_of(&repo, "refs/heads/feature"), Some("refs/heads/feature")),
+        )
+        .unwrap();
+
+        let by_path = |p: &str| summary.files.iter().find(|f| f.path == p);
+        assert!(matches!(
+            by_path("kept.txt").unwrap().status,
+            ChangeStatus::Modified
+        ));
+        assert!(matches!(
+            by_path("gone.txt").unwrap().status,
+            ChangeStatus::Deleted
+        ));
+        assert!(matches!(
+            by_path("added.txt").unwrap().status,
+            ChangeStatus::Added
+        ));
+        let renamed = by_path("new-name.txt").unwrap();
+        assert!(matches!(renamed.status, ChangeStatus::Renamed));
+        assert_eq!(renamed.old_path.as_deref(), Some("old-name.txt"));
+        // master's own post-fork commit is on the other side of history entirely.
+        assert!(by_path("base-only.txt").is_none());
+
+        // Committed history has no staging state.
+        assert!(summary.files.iter().all(|f| f.staged.is_none()));
+
+        match summary.comparison {
+            Comparison::Commit {
+                ref oid,
+                ref short_oid,
+                ref summary,
+                ref parent_oid,
+                ref branch_name,
+                is_merge,
+                ..
+            } => {
+                assert_eq!(oid, &oid_of(&repo, "refs/heads/feature"));
+                assert_eq!(short_oid, &oid[..7]);
+                assert_eq!(summary, "feature work");
+                assert_eq!(parent_oid.as_deref(), Some(oid_of(&repo, "refs/heads/feature~1").as_str()));
+                assert_eq!(branch_name.as_deref(), Some("feature"), "shorthand, not the full ref");
+                assert!(!is_merge);
+            }
+            _ => panic!("expected a commit comparison"),
+        }
+    }
+
+    #[test]
+    fn commit_diff_uses_the_first_parent_of_a_merge() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        diverged_repo(root);
+        // master (with base-only.txt) merges feature in; master is parent 1.
+        run(root, &["merge", "-q", "--no-ff", "-m", "merge feature", "feature"]);
+
+        let repo = Repository::open(root).unwrap();
+        let head = oid_of(&repo, "HEAD");
+        let summary = compute(&repo, &commit_spec(&head, None)).unwrap();
+
+        // Against parent 1 (master), the merge introduces feature's work…
+        assert!(summary.files.iter().any(|f| f.path == "added.txt"));
+        // …and not master's own base-only.txt, which parent 1 already had.
+        assert!(!summary.files.iter().any(|f| f.path == "base-only.txt"));
+
+        match summary.comparison {
+            Comparison::Commit {
+                is_merge,
+                ref parent_oid,
+                ref branch_name,
+                ..
+            } => {
+                assert!(is_merge);
+                assert_eq!(parent_oid.as_deref(), Some(oid_of(&repo, "HEAD^1").as_str()));
+                assert!(branch_name.is_none(), "no branch context was supplied");
+            }
+            _ => panic!("expected a commit comparison"),
+        }
+    }
+
+    #[test]
+    fn root_commit_reads_as_all_additions() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        diverged_repo(root);
+        let repo = Repository::open(root).unwrap();
+        let first = oid_of(&repo, "refs/heads/master~1");
+
+        let summary = compute(&repo, &commit_spec(&first, None)).unwrap();
+        assert!(!summary.files.is_empty());
+        assert!(
+            summary
+                .files
+                .iter()
+                .all(|f| matches!(f.status, ChangeStatus::Added)),
+            "a root commit has no old tree, so everything is added"
+        );
+        assert!(summary.files.iter().all(|f| f.removed_lines == 0));
+        match summary.comparison {
+            Comparison::Commit { ref parent_oid, .. } => assert!(parent_oid.is_none()),
+            _ => panic!("expected a commit comparison"),
+        }
+    }
+
+    #[test]
+    fn commit_diff_ignores_the_worktree_and_rejects_bad_revisions() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        diverged_repo(root);
+        // Dirty the checkout in every way that shows up in worktree mode.
+        fs::write(root.join("kept.txt"), "wildly different\n").unwrap();
+        fs::write(root.join("untracked.txt"), "not committed\n").unwrap();
+        run(root, &["add", "untracked.txt"]);
+
+        let repo = Repository::open(root).unwrap();
+        let summary = compute(
+            &repo,
+            &commit_spec(&oid_of(&repo, "refs/heads/feature"), None),
+        )
+        .unwrap();
+        assert!(!summary.files.iter().any(|f| f.path == "untracked.txt"));
+        let kept = summary.files.iter().find(|f| f.path == "kept.txt").unwrap();
+        assert_eq!(
+            kept.hunks[0]
+                .lines
+                .iter()
+                .filter(|l| matches!(l.kind, DiffLineKind::Added))
+                .map(|l| l.content.as_str())
+                .collect::<Vec<_>>(),
+            vec!["CHANGED"],
+            "the committed change is shown, not the dirty working copy"
+        );
+
+        assert!(compute(&repo, &commit_spec("not-a-revision", None)).is_err());
+    }
+
+    #[test]
+    fn commit_diff_detects_binary_changes_from_blobs() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        run(root, &["init", "-q", "-b", "master"]);
+        fs::write(root.join("logo.bin"), [0u8, 1, 2, 3, 4]).unwrap();
+        run(root, &["add", "."]);
+        run(root, &["commit", "-qm", "init"]);
+        fs::write(root.join("logo.bin"), [0u8, 9, 9, 9, 9]).unwrap();
+        run(root, &["commit", "-qam", "new logo"]);
+        // A text file on disk where the binary used to be would fool a path probe.
+        fs::write(root.join("logo.bin"), "now plain text\n").unwrap();
+
+        let repo = Repository::open(root).unwrap();
+        let summary = compute(&repo, &commit_spec(&oid_of(&repo, "HEAD"), None)).unwrap();
+        let logo = summary.files.iter().find(|f| f.path == "logo.bin").unwrap();
+        assert!(logo.binary, "binary change detected from the delta blobs");
+        assert!(logo.hunks.is_empty());
     }
 
     #[test]
