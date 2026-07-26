@@ -48,6 +48,7 @@ export function useCommands(rawClose: CommandClose): {
   const openPicker = useUIStore((s) => s.openPicker);
   const requestFocus = useUIStore((s) => s.requestFocus);
   const repo = useRepoStore((s) => s.repo);
+  const reviewBranch = useRepoStore((s) => s.reviewBranch);
   const comparison = useRepoStore((s) => s.comparison);
   const closeRepo = useRepoStore((s) => s.closeRepo);
   // A branch pair or a single commit: both sides are already committed history.
@@ -118,6 +119,11 @@ export function useCommands(rawClose: CommandClose): {
   const handlePickCommit = useCallback(() => {
     close({ restoreFocus: false });
     openPicker("commitPick");
+  }, [close, openPicker]);
+
+  const handleCheckoutBranch = useCallback(() => {
+    close({ restoreFocus: false });
+    openPicker("checkoutBranch");
   }, [close, openPicker]);
 
   const handleWorktreeDiff = useCallback(async () => {
@@ -273,25 +279,44 @@ export function useCommands(rawClose: CommandClose): {
       run: handleCloseRepo,
     },
     {
+      id: "checkout",
+      name: "checkout",
+      aliases: ["co", "switch", "branch"],
+      label: reviewBranch
+        ? `branch to review → ${reviewBranch.display}`
+        : "branch to review",
+      group: "git",
+      prefix: "g",
+      key: "s",
+      enabled: !!repo,
+      run: handleCheckoutBranch,
+    },
+    {
       id: "compare",
       name: "compare",
-      aliases: ["branches", "branch", "cmp"],
-      label: "compare branches",
+      aliases: ["branches", "cmp", "base"],
+      label: reviewBranch
+        ? `compare ${reviewBranch.display} against a base`
+        : "compare branches (no branch to review)",
       group: "git",
       prefix: "g",
       key: "b",
-      enabled: !!repo,
+      // Both pickers review the branch the app is on; without one there is nothing
+      // to compare or to list commits from.
+      enabled: !!repo && !!reviewBranch,
       run: handleCompareBranches,
     },
     {
       id: "commit-diff",
       name: "log",
       aliases: ["commits", "show", "revision"],
-      label: "review a commit",
+      label: reviewBranch
+        ? `review a commit on ${reviewBranch.display}`
+        : "review a commit (no branch to review)",
       group: "git",
       prefix: "g",
       key: "l",
-      enabled: !!repo,
+      enabled: !!repo && !!reviewBranch,
       run: handlePickCommit,
     },
     {

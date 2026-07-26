@@ -14,7 +14,8 @@ export type PickerKind =
   | "clearTags"
   | "commitReviewed"
   | "branchCompare"
-  | "commitPick";
+  | "commitPick"
+  | "checkoutBranch";
 
 type UIState = {
   activeBuffer: BufferName;

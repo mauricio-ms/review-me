@@ -1,28 +1,25 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { applyComparison } from "../lib/open-repo";
-import { listBranches, listCommits, resolveCommit } from "../lib/tauri";
+import { listCommits, resolveCommit } from "../lib/tauri";
 import { timeAgo } from "../lib/time";
 import { useRepoStore } from "../state/repo";
 import { useUIStore } from "../state/ui";
 import type { DiffSpec } from "../types/diff";
-import type { BranchInfo, CommitInfo } from "../types/repo";
+import type { CommitInfo } from "../types/repo";
 import NeoPicker from "./NeoPicker";
 
-/** Which side of the choice the picker is currently collecting. */
-type Stage = "branch" | "commit";
-
 /**
- * How much history the second stage offers. Deep enough for any review, shallow
- * enough to stay instant on a large repo; anything older is reachable by typing its
- * sha, which resolves against the whole object database.
+ * How much history the picker offers. Deep enough for any review, shallow enough to
+ * stay instant on a large repo; anything older is reachable by typing its sha, which
+ * resolves against the whole object database.
  */
 const HISTORY_LIMIT = 300;
 
 /** A revision the reviewer typed that no listed commit matches. */
 const REV_PATTERN = /^[0-9a-f]{4,40}$/i;
 
-/** Stage-two rows: a listed commit, or the escape hatch for a typed sha. */
+/** Rows: a commit from the review branch's history, or a typed sha to resolve. */
 type CommitRow =
   | { kind: "commit"; commit: CommitInfo }
   | { kind: "resolve"; rev: string };
@@ -32,10 +29,10 @@ function errorMessage(error: unknown): string {
 }
 
 /**
- * Two-stage commit picker: choose the branch, then the commit on it, and review that
- * commit against its first parent. Nothing is fetched, checked out, or staged.
+ * Picks one commit off the branch under review and diffs it against its first parent.
+ * The branch comes from the app's review branch (`:checkout`), so this is a single
+ * choice; nothing is fetched, checked out, or staged.
  *
- * `Esc` in the second stage returns to branch selection; a second `Esc` closes.
  * Errors (an unknown revision, a commit outside this repo) are shown inline without
  * closing, so the reviewer can pick again.
  */
@@ -44,32 +41,25 @@ export default function CommitPickHost() {
   const closePicker = useUIStore((s) => s.closePicker);
   const requestFocus = useUIStore((s) => s.requestFocus);
   const repoPath = useRepoStore((s) => s.repoPath);
+  const reviewBranch = useRepoStore((s) => s.reviewBranch);
 
-  const [branches, setBranches] = useState<BranchInfo[]>([]);
   const [commits, setCommits] = useState<CommitInfo[]>([]);
-  const [stage, setStage] = useState<Stage>("branch");
-  const [branch, setBranch] = useState<BranchInfo | null>(null);
   const [loading, setLoading] = useState(false);
   const [query, setQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [applying, setApplying] = useState(false);
-  /** Guards against an older branch's history landing after a newer selection. */
-  const historyRequest = useRef(0);
 
-  // Fresh ref list on every open — branches move between reviews.
+  // Fresh history on every open — the branch moves between reviews.
   useEffect(() => {
-    if (!open || !repoPath) return;
+    if (!open || !repoPath || !reviewBranch) return;
     let cancelled = false;
-    historyRequest.current += 1; // a reopen owes nothing to the last session
-    setStage("branch");
-    setBranch(null);
-    setCommits([]);
     setQuery("");
     setError(null);
+    setCommits([]);
     setLoading(true);
-    void listBranches(repoPath)
+    void listCommits(repoPath, reviewBranch.ref, HISTORY_LIMIT)
       .then((next) => {
-        if (!cancelled) setBranches(next);
+        if (!cancelled) setCommits(next);
       })
       .catch((e) => {
         if (!cancelled) setError(errorMessage(e));
@@ -80,15 +70,9 @@ export default function CommitPickHost() {
     return () => {
       cancelled = true;
     };
-  }, [open, repoPath]);
+  }, [open, repoPath, reviewBranch]);
 
-  const branchRows = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    if (!needle) return branches;
-    return branches.filter((b) => b.display.toLowerCase().includes(needle));
-  }, [branches, query]);
-
-  const commitRows = useMemo<CommitRow[]>(() => {
+  const rows = useMemo<CommitRow[]>(() => {
     const needle = query.trim().toLowerCase();
     const matches = needle
       ? commits.filter((c) =>
@@ -98,61 +82,16 @@ export default function CommitPickHost() {
         )
       : commits;
     if (matches.length === 0 && REV_PATTERN.test(needle)) {
-      // Older than the window, or on no branch at all — resolve it directly.
+      // Older than the window, or on another branch entirely — resolve it directly.
       return [{ kind: "resolve", rev: needle }];
     }
     return matches.map((commit) => ({ kind: "commit", commit }));
   }, [commits, query]);
 
-  // The commit worth reviewing is usually on the branch you're on, so start there
-  // and fall back to the repo's default branch.
-  const initialBranch = useMemo(() => {
-    const preferred = branchRows.findIndex((row) => row.isCurrent);
-    if (preferred >= 0) return preferred;
-    const fallback = branchRows.findIndex((row) => row.isDefault);
-    return fallback >= 0 ? fallback : 0;
-  }, [branchRows]);
-
   const close = useCallback(() => {
     closePicker();
     requestFocus();
   }, [closePicker, requestFocus]);
-
-  // Esc unwinds one stage at a time rather than throwing away the branch choice.
-  const onClose = useCallback(() => {
-    if (stage === "commit") {
-      historyRequest.current += 1; // drop whatever history is still in flight
-      setStage("branch");
-      setCommits([]);
-      setQuery("");
-      setError(null);
-      return;
-    }
-    close();
-  }, [close, stage]);
-
-  const pickBranch = useCallback(
-    async (row: BranchInfo) => {
-      if (!repoPath) return;
-      const ticket = ++historyRequest.current;
-      setBranch(row);
-      setStage("commit");
-      setQuery("");
-      setError(null);
-      setLoading(true);
-      try {
-        const history = await listCommits(repoPath, row.name, HISTORY_LIMIT);
-        // A slower earlier branch must not paint its history under a newer choice.
-        if (ticket !== historyRequest.current) return;
-        setCommits(history);
-      } catch (e) {
-        if (ticket === historyRequest.current) setError(errorMessage(e));
-      } finally {
-        if (ticket === historyRequest.current) setLoading(false);
-      }
-    },
-    [repoPath],
-  );
 
   const review = useCallback(
     async (oid: string, branchRef: string | null) => {
@@ -172,14 +111,14 @@ export default function CommitPickHost() {
     [close],
   );
 
-  const pickCommit = useCallback(
+  const activate = useCallback(
     async (row: CommitRow) => {
       if (applying || !repoPath) return;
       if (row.kind === "commit") {
-        await review(row.commit.oid, branch?.name ?? null);
+        await review(row.commit.oid, reviewBranch?.ref ?? null);
         return;
       }
-      // A typed revision may not live on the branch that was picked, so it carries no
+      // A typed revision needn't live on the branch under review, so it carries no
       // branch context — and the spec needs the full oid, never the abbreviation.
       setApplying(true);
       setError(null);
@@ -192,69 +131,33 @@ export default function CommitPickHost() {
         setApplying(false);
       }
     },
-    [applying, branch, repoPath, review],
+    [applying, repoPath, review, reviewBranch],
   );
 
   if (!open) return null;
 
-  const title = stage === "branch" ? "Review a commit" : "Pick a commit";
   const footer = error ? (
     <span className="branch-error">{error}</span>
-  ) : stage === "branch" ? (
-    "↑↓ move · ↵ pick branch · Esc cancel"
   ) : (
     <>
-      <span className="branch-base">on {branch?.display}</span>
-      {" · ↵ review commit · Esc back"}
+      <span className="branch-base">on {reviewBranch?.display ?? "no branch"}</span>
+      {" · ↵ review commit · Esc cancel"}
     </>
   );
-
-  if (stage === "branch") {
-    return (
-      <NeoPicker<BranchInfo>
-        open={open}
-        title={title}
-        className="commit-pick"
-        query={query}
-        onQueryChange={setQuery}
-        placeholder="branch…"
-        rows={branchRows}
-        rowKey={(row) => row.name}
-        rowClassName={() => "branch-row"}
-        initialSelected={initialBranch}
-        onActivate={(row) => void pickBranch(row)}
-        onClose={onClose}
-        renderCount={(_s, total) => `${total} ref${total === 1 ? "" : "s"}`}
-        footer={footer}
-        emptyText={loading ? "loading branches…" : "no matching branches"}
-        renderRow={(row) => (
-          <>
-            <span className="branch-name">{row.display}</span>
-            <span className="branch-badges">
-              {row.isDefault && <span className="branch-badge is-default">default</span>}
-              {row.isCurrent && <span className="branch-badge is-current">current</span>}
-              <span className={`branch-badge is-${row.kind}`}>{row.kind}</span>
-              <span className="branch-oid">{row.shortOid}</span>
-            </span>
-          </>
-        )}
-      />
-    );
-  }
 
   return (
     <NeoPicker<CommitRow>
       open={open}
-      title={title}
+      title="Review a commit"
       className="commit-pick"
       query={query}
       onQueryChange={setQuery}
       placeholder="sha, subject or author…"
-      rows={commitRows}
+      rows={rows}
       rowKey={(row) => (row.kind === "commit" ? row.commit.oid : `rev:${row.rev}`)}
       rowClassName={() => "commit-row"}
-      onActivate={(row) => void pickCommit(row)}
-      onClose={onClose}
+      onActivate={(row) => void activate(row)}
+      onClose={close}
       renderCount={(_s, total) =>
         commits.length >= HISTORY_LIMIT
           ? `${total} of newest ${HISTORY_LIMIT}`

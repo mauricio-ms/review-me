@@ -40,6 +40,7 @@ function comparisonTitle(comparison: Comparison | undefined): string | undefined
 
 export default function BufferStatusBar() {
   const repo = useRepoStore((s) => s.repo);
+  const reviewBranch = useRepoStore((s) => s.reviewBranch);
   const diff = useRepoStore((s) => s.diff);
   const comparison = diff?.comparison;
   const reviewed = useTagsStore((s) => s.reviewed);
@@ -57,6 +58,20 @@ export default function BufferStatusBar() {
       <span className="status-segment status-buffer">{activeBuffer}</span>
       {repo && (
         <>
+          {reviewBranch && (
+            <span
+              className={`status-segment status-review-branch${
+                reviewBranch.display === repo.branch ? "" : " is-elsewhere"
+              }`}
+              title={
+                reviewBranch.display === repo.branch
+                  ? `reviewing ${reviewBranch.ref} (also the checkout)`
+                  : `reviewing ${reviewBranch.ref} — the working tree is on ${repo.branch}`
+              }
+            >
+              ⎇ {reviewBranch.display}
+            </span>
+          )}
           <span
             className={`status-segment status-branch${
               comparison && comparison.kind !== "worktree" ? " is-comparing" : ""

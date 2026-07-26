@@ -289,6 +289,18 @@ kbd {
   font-weight: 600;
 }
 
+/* The branch under review — the app's own "checkout", which drives both the branch
+   comparison and the commit picker. */
+.status-review-branch {
+  color: var(--fg-2);
+}
+
+/* Reviewing a branch that isn't the one on disk: worth flagging, since the
+   working-tree diff still belongs to the real checkout. */
+.status-review-branch.is-elsewhere {
+  color: var(--accent-amber);
+}
+
 .status-changes {
   color: var(--fg-2);
 }
@@ -812,6 +824,14 @@ kbd {
 
 .branch-badge.is-remote {
   color: var(--accent-violet);
+}
+
+.branch-badge.is-reviewing {
+  color: var(--accent-teal);
+}
+
+.neo-row.branch-row.is-reviewing .branch-name {
+  color: var(--accent-teal);
 }
 
 .branch-oid {

@@ -2,7 +2,38 @@ export interface RepoInfo {
   root: string;
   head: string;
   branch: string;
+  /**
+   * The review branch to start on: the canonical ref HEAD is on, else the repo's
+   * default branch. Null when the repo has no branches at all.
+   */
+  reviewBranchRef: string | null;
   isDirty: boolean;
+}
+
+/**
+ * The branch under review — the app's own notion of "checked out", used as the target
+ * of a branch comparison and as the history the commit picker offers. Selecting one
+ * never touches the real checkout, index or working tree, so a branch nobody has
+ * checked out reviews exactly like the current one.
+ */
+export interface ReviewBranch {
+  /** Canonical ref (`refs/heads/x`, `refs/remotes/origin/x`). */
+  ref: string;
+  /** Shorthand, for display. */
+  display: string;
+}
+
+/**
+ * Display shorthand of a canonical ref: `refs/heads/x` → `x`,
+ * `refs/remotes/origin/x` → `origin/x`. Mirrors `branches::shorthand` in Rust, for the
+ * one case the backend doesn't hand us a `BranchInfo`: seeding the review branch from
+ * `RepoInfo.reviewBranchRef`.
+ */
+export function branchShorthand(ref: string): string {
+  for (const prefix of ["refs/heads/", "refs/remotes/"]) {
+    if (ref.startsWith(prefix)) return ref.slice(prefix.length);
+  }
+  return ref;
 }
 
 export interface RememberedRepo {
