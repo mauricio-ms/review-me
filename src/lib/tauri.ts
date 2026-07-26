@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { DiffSpec, DiffSummary } from "../types/diff";
 import type {
   BranchInfo,
+  CommitInfo,
   DirectoryListing,
   FileMatch,
   FileSystemListing,
@@ -34,6 +35,20 @@ export function computeDiff(repo: string, spec: DiffSpec): Promise<DiffSummary> 
 
 export function listBranches(repo: string): Promise<BranchInfo[]> {
   return invoke<BranchInfo[]>("list_branches", { repo });
+}
+
+/** `refName`'s history, newest first, capped at `limit`. */
+export function listCommits(
+  repo: string,
+  refName: string,
+  limit: number,
+): Promise<CommitInfo[]> {
+  return invoke<CommitInfo[]>("list_commits", { repo, refName, limit });
+}
+
+/** Expand a typed revision (short sha, `HEAD~2`, a ref) to a full commit. */
+export function resolveCommit(repo: string, rev: string): Promise<CommitInfo> {
+  return invoke<CommitInfo>("resolve_commit", { repo, rev });
 }
 
 export function listRecentRepos(): Promise<RememberedRepo[]> {

@@ -45,6 +45,26 @@ export interface BranchInfo {
   isDefault: boolean;
 }
 
+/**
+ * One selectable commit in the commit picker. `oid` is the full 40-char id — diff
+ * specs and review scopes carry it, never `shortOid`, so an abbreviation can never
+ * split one commit's review in two.
+ */
+export interface CommitInfo {
+  oid: string;
+  shortOid: string;
+  /** First line of the message. */
+  summary: string;
+  authorName: string;
+  /** Author time, seconds since the epoch. */
+  timestamp: number;
+  parentCount: number;
+  /** More than one parent — reviewed against the first. */
+  isMerge: boolean;
+  /** The commit HEAD points at. */
+  isHead: boolean;
+}
+
 export type FileSystemEntryKind = "directory" | "file";
 
 export interface FileSystemEntry {

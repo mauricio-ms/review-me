@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use crate::branches::{self, BranchInfo};
+use crate::commits::{self, CommitInfo};
 use crate::diff::{self, DiffSpec, DiffSummary};
 use crate::error::AppResult;
 use crate::fs_browse::{self, DirectoryListing, FileSystemListing};
@@ -45,6 +46,21 @@ pub fn compute_diff(repo: String, spec: DiffSpec) -> AppResult<DiffSummary> {
 pub fn list_branches(repo: String) -> AppResult<Vec<BranchInfo>> {
     let repository = repo::open(&PathBuf::from(repo))?;
     branches::list(&repository)
+}
+
+/// `ref_name`'s history, newest first, for the commit picker's second stage.
+#[tauri::command]
+pub fn list_commits(repo: String, ref_name: String, limit: u32) -> AppResult<Vec<CommitInfo>> {
+    let repository = repo::open(&PathBuf::from(repo))?;
+    commits::list(&repository, &ref_name, limit as usize)
+}
+
+/// Resolve a typed revision (abbreviated sha, `HEAD~2`, a ref) to a full commit, so
+/// the picker can hand `compute_diff` a canonical 40-char oid.
+#[tauri::command]
+pub fn resolve_commit(repo: String, rev: String) -> AppResult<CommitInfo> {
+    let repository = repo::open(&PathBuf::from(repo))?;
+    Ok(commits::resolve(&repository, &rev)?.info)
 }
 
 #[tauri::command]
