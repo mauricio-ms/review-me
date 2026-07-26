@@ -40,7 +40,7 @@ layer and `lib.rs` is the module list + `invoke_handler!`. Each command is **sta
 it receives `repo` (the repo root path), opens the repo fresh via `repo::open` (cheap
 with libgit2), and returns. The one exception is `xref.rs`, which caches a parsed
 symbol index in a global `Mutex`.
-- `repo.rs` open/validate, `RepoInfo`. `branches.rs` local/remote ref discovery + `resolve()` → (base tip, target tip, merge base).
+- `repo.rs` open/validate, `RepoInfo` (incl. `review_branch_ref`, the branch the UI starts reviewing). `branches.rs` local/remote ref discovery + `resolve()` → (base tip, target tip, merge base).
 - `commits.rs` `list(repo, ref, limit)` → newest-first `CommitInfo`s and `resolve(repo, rev)` → (oid, **first** parent oid, info). Any revision resolves (full oid, abbreviation, `HEAD~2`), but only full oids may reach a `DiffSpec`/`ReviewScope`.
 - `diff.rs` `compute(repo, &DiffSpec)` → `DiffSummary { comparison, files }` (`ChangedFile`/`Hunk`/`DiffLine`). See "Comparisons" below.
 - `revision.rs` `ProjectSource` (worktree | commit) and tree-backed content/listing/file-list reads.
@@ -51,8 +51,8 @@ symbol index in a global `Mutex`.
 mounted and toggles visibility with `display:none` (preserves cursor/scroll). A single
 **`components/useCommands.ts`** registry feeds both the `Space` transient palette
 (`CommandTransient`) and the `:` command line (`CommandLine`); commands carry a `buffer`
-scope and chord `prefix`/`key`. Modal pickers (open-repo, recent, fuzzy, branch-compare,
-commit-pick, xref) are gated
+scope and chord `prefix`/`key`. Modal pickers (open-repo, recent, fuzzy, checkout-branch,
+branch-compare, commit-pick, xref) are gated
 by `useUIStore.picker` or a dedicated store and use `useModalFocus`.
 
 **State** is Zustand in `src/state/` (`ui`, `repo`, `tags`, `project`, `xref`). Cross-cutting
@@ -62,6 +62,24 @@ conventions that will bite if ignored:
   (not optional `?`).
 - **Selectors must not return fresh `[]`/`{}`** — use module-level `EMPTY_*` constants
   (Zustand infinite-rerender trap).
+
+### The branch under review
+
+`useRepoStore.reviewBranch` (`ReviewBranch { ref, display }`) is the app's own notion of a
+checkout and the **single place a branch is chosen**: `:compare` collects only a base and
+targets it, `:log` lists its history. It is seeded on open from `RepoInfo.reviewBranchRef`
+(HEAD's branch, else the repo's default branch, else `None` — a repo with no branches
+disables both commands) and changed by `:checkout` (`Space g s`, `CheckoutBranchHost`).
+
+It is **app-level only**: nothing fetches, checks out, stages, or writes to the working
+tree, so a branch that isn't checked out reviews like any other. Worktree mode still means
+the real checkout — that's why the status bar shows the review branch separately and turns
+it amber when the two differ.
+
+`lib/open-repo.ts`'s **`switchReviewBranch`** re-targets an active branch comparison so the
+concept stays live (same base, new target), falling back to the worktree diff when the new
+branch is that comparison's own base. A commit comparison is left alone: a commit belongs
+to no branch in particular, which is also why `DiffSpec::Commit.branchRef` is display-only.
 
 ### Comparisons
 
@@ -188,7 +206,8 @@ warmed in the background on repo open/refresh.
 - **New comparison mode:** a `DiffSpec` variant needs a matching `Comparison` variant
   (metadata for the header/status bar/clean state), a `ReviewScope` variant, a `Snapshot`
   arm in `tags.rs`, `sameSpec`/`comparisonLabel`/`scopeForSpec` cases, and
-  `ambientSource`/`baseSource` cases so project mode follows it.
+  `ambientSource`/`baseSource` cases so project mode follows it. If it involves a branch,
+  take it from `useRepoStore.reviewBranch` rather than adding another branch picker.
 
 ## CodeMirror gotchas (carried from video-studio)
 

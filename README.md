@@ -34,12 +34,16 @@ Reviewing agent-generated code has a different shape than reviewing a human PR:
   as **reviewed** (`✓`, "I've checked this") or **flagged** (`⚑`, "come back to this").
   Tags persist across restarts and *re-anchor* to the code as it moves, and each
   comparison keeps its own independent set of marks.
-- **Branch comparison** — review a whole branch's work (`master...feature`) without
-  fetching, checking out, or touching the index. Project mode follows: files open at the
+- **A branch under review** — the app has its own notion of "checked out": pick the
+  branch you're reviewing once, and both committed-history views derive from it. Nothing
+  is fetched, checked out, or staged, so you can review a branch you don't have checked
+  out at all.
+- **Branch comparison** — review that branch's whole body of work (`master...feature`)
+  by choosing only what to compare it against. Project mode follows: files open at the
   compared revision, not whatever happens to be checked out.
-- **Commit review** — pick a branch, then one commit on it, and review just that
-  commit's change (`git show` semantics). Its marks are keyed to the commit's oid, so
-  they can never drift and never mix with the branch-wide review.
+- **Commit review** — step through the review branch's history and review one commit's
+  change (`git show` semantics). Its marks are keyed to the commit's oid, so they can
+  never drift and never mix with the branch-wide review.
 - **Fuzzy file finder** — jump to any (non-ignored) file in the repo.
 - **Project mode** — a read-only, IDE-like browser over the *entire* repo, not just the
   changed files. You can't mark things reviewed here (reviewing is diff-only), but you can
@@ -63,6 +67,27 @@ Both stay mounted; you toggle between them and keep your cursor/scroll position.
 | **Diff** (default) | The active comparison as a navigable file/hunk/line list. | Review **and** flag |
 | **Project** | Read-only file tree + syntax-highlighted viewer over the whole repo, at the compared revision. | Flag only |
 
+### The branch under review
+
+The app keeps its own "checkout": the **branch under review**, shown in the status bar as
+`⎇ <branch>`. It starts as whatever the working tree is on (or the repo's default branch
+if HEAD is detached), and `Space g s` / `:checkout` switches it — to a local branch or a
+remote-tracking one.
+
+This is app-level only. Switching **never** fetches, checks out, stages, or writes
+anything: the working tree stays exactly where it was, so reviewing a branch you don't
+have checked out works like any other. When the two differ, the status-bar segment turns
+amber — a reminder that the working-tree diff still belongs to the real checkout.
+
+Both committed-history views derive from it, so you name a branch once:
+
+- `:compare` asks only for a **base** and shows `base...reviewBranch`.
+- `:log` lists the **review branch's** history.
+
+Switching while comparing branches re-targets the comparison, so you can walk several
+branches against the same base. (If the new branch *is* that base, there's nothing to
+compare and the view drops back to the working-tree diff.)
+
 ### Three comparisons
 
 The diff buffer shows one of three things, and always says which in its header and the
@@ -71,8 +96,8 @@ status bar:
 | Comparison | What it shows | Switch with |
 | --- | --- | --- |
 | **Working tree** (default) | Everything uncommitted vs `HEAD`, staged or not, including untracked files. | `Space g w` / `:worktree` |
-| **Branches** | `git diff base...target` — the target branch's work since it forked from the base. | `Space g b` / `:compare` |
-| **Commit** | `git show <commit>` — one commit against its first parent. | `Space g l` / `:log` |
+| **Branches** | `git diff base...reviewBranch` — the review branch's work since it forked from the base. | `Space g b` / `:compare` |
+| **Commit** | `git show <commit>` — one commit of the review branch against its first parent. | `Space g l` / `:log` |
 
 Both committed-history modes are strictly read-only: they never fetch, check out, stage,
 or write to the working tree. Only refs and objects your clone already has are offered,
@@ -187,8 +212,9 @@ chase a definition.
 | `o r` | `:recent` | Open a recent repository |
 | `f` | `:find` | Fuzzy file finder → opens in project mode |
 | `r` | `:refresh` | Recompute the active comparison |
-| `g b` | `:compare` | Compare two branches (`base...target`) |
-| `g l` | `:log` | Review a single commit (`git show`) |
+| `g s` | `:checkout` | Choose the branch under review (app-level; no real checkout) |
+| `g b` | `:compare` | Compare the review branch against a base (`base...review`) |
+| `g l` | `:log` | Review a single commit of the review branch (`git show`) |
 | `g w` | `:worktree` | Return to the working-tree diff |
 | `g c` | `:commit` | Commit the reviewed working-tree changes |
 | `c` | `:close` | Close the repository |
@@ -225,28 +251,30 @@ reviewed commit) for added/modified content, the merge base (or that commit's fi
 parent) for a deletion. The project modeline names that revision whenever it isn't the
 working tree.
 
-### Branch comparison picker
+### Branch pickers
 
-`Space g b` opens a two-stage picker: choose the **base**, then the **branch being
-reviewed**. It defaults to the repo's default branch (from `refs/remotes/*/HEAD`, else
-`master`, else `main`) as the base and the current checkout as the target. Rows show
-`default` / `current`, `local` / `remote`, and the short oid; picking the same ref on both
-sides is disabled. `Esc` in the second stage goes back to base selection, a second `Esc`
-closes. Errors (an unknown ref, two branches with no common ancestor) show inline without
-closing the picker.
+`Space g s` (**Branch to review**) lists every local and remote-tracking branch — rows
+badged `reviewing`, `default`, `checkout`, `local`/`remote`, plus the short oid — and
+selection starts on the branch already under review. `origin/HEAD` is never listed (it's
+an alias for a branch that is).
+
+`Space g b` (**Compare against**) collects just the base, defaulting to the repo's default
+branch (from `refs/remotes/*/HEAD`, else `master`, else `main`). The branch under review is
+dimmed and unselectable — it can't be its own base. Errors (an unknown ref, two branches
+with no common ancestor) show inline without closing the picker.
+
+Neither picker fetches, so remote-tracking branches are as fresh as your last `git fetch`.
 
 ### Commit picker
 
-`Space g l` opens a two-stage picker: choose the **branch**, then the **commit** on it.
-Selection starts on the checked-out branch, then on the newest commit; rows show the short
-oid, subject, `merge` / `HEAD` badges, author and relative age. `Enter` reviews that commit
-against its first parent, `Esc` in the second stage goes back to branch selection, and a
-second `Esc` closes.
+`Space g l` lists the review branch's history, newest first: short oid, subject,
+`merge` / `HEAD` badges, author and relative age. `Enter` reviews that commit against its
+first parent.
 
-History is listed 300 commits deep. Anything older — or a commit on no branch at all — is
-reachable by typing its sha: when no listed commit matches, the picker offers to resolve
-what you typed against the whole object database. A commit reached that way shows no
-branch context, since it needn't be on the branch you picked.
+History is listed 300 commits deep. Anything older — or a commit on another branch
+entirely — is reachable by typing its sha: when no listed commit matches, the picker offers
+to resolve what you typed against the whole object database. A commit reached that way
+shows no branch context, since it needn't be on the review branch.
 
 ### Project buffer
 
