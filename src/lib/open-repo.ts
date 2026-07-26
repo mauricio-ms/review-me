@@ -2,6 +2,7 @@ import { useRepoStore } from "../state/repo";
 import { useTagsStore } from "../state/tags";
 import { useUIStore } from "../state/ui";
 import { WORKTREE_SPEC, type DiffSpec } from "../types/diff";
+import { scopeForSpec } from "../types/tags";
 import { buildSymbolIndex, computeDiff, loadTags, openRepo } from "./tauri";
 
 /**
@@ -24,7 +25,7 @@ export async function applyComparison(spec: DiffSpec): Promise<void> {
   repoStore.setStatus({ kind: "loading" });
   try {
     const diff = await computeDiff(path, spec);
-    const tags = await loadTags(path);
+    const tags = await loadTags(path, scopeForSpec(spec));
     if (ticket !== requestSeq) return; // a newer selection already won
     useRepoStore.getState().applyComparison(spec, diff);
     useTagsStore.getState().setStore(tags);

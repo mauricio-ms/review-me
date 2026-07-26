@@ -10,7 +10,7 @@ use crate::repo_library::{self, RememberedRepo};
 use crate::review_commit::{
     self, PreparedReviewedCommit, ReviewedCommitPreflight, ReviewedCommitResult,
 };
-use crate::tags::{self, AnchorKind, AnchorSide, TagStore};
+use crate::tags::{self, AnchorKind, AnchorSide, ReviewScope, TagStore};
 use crate::tree::{self, TreeListing};
 use crate::xref::{self, IndexStats, SymbolRef, XrefResult};
 
@@ -79,31 +79,37 @@ pub fn read_file(repo: String, path: String) -> AppResult<String> {
     Ok(std::fs::read_to_string(canonical)?)
 }
 
+/// Tags belonging to `scope` (the active comparison), re-anchored against it.
 #[tauri::command]
-pub fn load_tags(repo: String) -> AppResult<TagStore> {
-    tags::load(&repo_root(repo)?)
-}
-
-#[tauri::command]
-pub fn save_tags(repo: String, store: TagStore) -> AppResult<()> {
-    tags::save(&repo_root(repo)?, &store)
+pub fn load_tags(repo: String, scope: ReviewScope) -> AppResult<TagStore> {
+    tags::load(&repo_root(repo)?, &scope)
 }
 
 #[tauri::command]
 pub fn add_reviewed_tag(
     repo: String,
+    scope: ReviewScope,
     file: String,
     start_line: u32,
     end_line: u32,
     kind: AnchorKind,
     side: AnchorSide,
 ) -> AppResult<TagStore> {
-    tags::add_reviewed(&repo_root(repo)?, &file, start_line, end_line, kind, side)
+    tags::add_reviewed(
+        &repo_root(repo)?,
+        &scope,
+        &file,
+        start_line,
+        end_line,
+        kind,
+        side,
+    )
 }
 
 #[tauri::command]
 pub fn add_flag_tag(
     repo: String,
+    scope: ReviewScope,
     file: String,
     start_line: u32,
     end_line: u32,
@@ -112,30 +118,50 @@ pub fn add_flag_tag(
     note: Option<String>,
     severity: Option<String>,
 ) -> AppResult<TagStore> {
-    tags::add_flag(&repo_root(repo)?, &file, start_line, end_line, kind, side, note, severity)
+    tags::add_flag(
+        &repo_root(repo)?,
+        &scope,
+        &file,
+        start_line,
+        end_line,
+        kind,
+        side,
+        note,
+        severity,
+    )
 }
 
 #[tauri::command]
 pub fn add_ignored_tag(
     repo: String,
+    scope: ReviewScope,
     file: String,
     start_line: u32,
     end_line: u32,
     kind: AnchorKind,
     side: AnchorSide,
 ) -> AppResult<TagStore> {
-    tags::add_ignored(&repo_root(repo)?, &file, start_line, end_line, kind, side)
+    tags::add_ignored(
+        &repo_root(repo)?,
+        &scope,
+        &file,
+        start_line,
+        end_line,
+        kind,
+        side,
+    )
 }
 
 #[tauri::command]
-pub fn remove_tag(repo: String, id: String) -> AppResult<TagStore> {
-    tags::remove(&repo_root(repo)?, &id)
+pub fn remove_tag(repo: String, scope: ReviewScope, id: String) -> AppResult<TagStore> {
+    tags::remove(&repo_root(repo)?, &scope, &id)
 }
 
-/// Remove every reviewed, flag, and ignore tag in the repo.
+/// Remove every reviewed, flag, and ignore tag in the active comparison. Marks made
+/// against other comparisons are untouched.
 #[tauri::command]
-pub fn clear_tags(repo: String) -> AppResult<TagStore> {
-    tags::clear_all(&repo_root(repo)?)
+pub fn clear_tags(repo: String, scope: ReviewScope) -> AppResult<TagStore> {
+    tags::clear_scope(&repo_root(repo)?, &scope)
 }
 
 /// Fuzzy-rank repo files for the file finder.
@@ -192,12 +218,13 @@ pub fn find_references(repo: String, symbol: SymbolRef) -> AppResult<Vec<XrefRes
 #[tauri::command]
 pub fn unmark_range(
     repo: String,
+    scope: ReviewScope,
     file: String,
     start_line: u32,
     end_line: u32,
     side: AnchorSide,
 ) -> AppResult<TagStore> {
-    tags::unmark_range(&repo_root(repo)?, &file, start_line, end_line, side)
+    tags::unmark_range(&repo_root(repo)?, &scope, &file, start_line, end_line, side)
 }
 
 #[tauri::command]

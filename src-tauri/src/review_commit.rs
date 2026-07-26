@@ -9,7 +9,7 @@ use serde::Serialize;
 
 use crate::error::{AppError, AppResult};
 use crate::repo;
-use crate::tags::{self, Anchor, AnchorSide, ReviewedTag, TagStore};
+use crate::tags::{self, Anchor, AnchorSide, ReviewScope, ReviewedTag, TagStore};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -174,15 +174,19 @@ pub fn commit(
         &parents,
     )?;
 
-    let tag_store = tags::remove_reviewed_by_ids(&root, reviewed_tag_ids)?;
+    let tag_store = tags::remove_reviewed_by_ids(&root, &ReviewScope::Worktree, reviewed_tag_ids)?;
     Ok(ReviewedCommitResult {
         commit: short_oid(&commit_id.to_string()),
         tag_store,
     })
 }
 
+/// Reviewed units that can be staged from the working tree. Deliberately loads only
+/// **worktree-scoped** tags: a branch review marks commits that are already in
+/// history, and must never be able to stage working-tree content that happens to
+/// share a path and line range.
 fn reviewed_hunks(repo: &Repository, root: &Path) -> AppResult<Eligibility> {
-    let store = tags::load(root)?;
+    let store = tags::load(root, &ReviewScope::Worktree)?;
     let mut diff = workdir_diff(repo)?;
     diff.find_similar(Some(DiffFindOptions::new().renames(true)))?;
 
@@ -628,7 +632,7 @@ mod tests {
         let (dir, repo) = init_repo();
         let root = dir.path();
         write_changed_two_hunks(root);
-        tags::add_reviewed(root, "a.txt", 1, 5, tags::AnchorKind::Hunk, tags::AnchorSide::New).unwrap();
+        tags::add_reviewed(root, &ReviewScope::Worktree, "a.txt", 1, 5, tags::AnchorKind::Hunk, tags::AnchorSide::New).unwrap();
 
         let prepared = prepare(&repo, false).unwrap();
         assert_eq!(prepared.hunk_count, 1);
@@ -642,8 +646,8 @@ mod tests {
         let (dir, repo) = init_repo();
         let root = dir.path();
         write_changed_two_hunks(root);
-        tags::add_reviewed(root, "a.txt", 1, 5, tags::AnchorKind::Hunk, tags::AnchorSide::New).unwrap();
-        tags::add_flag(root, "a.txt", 2, 2, tags::AnchorKind::Range, tags::AnchorSide::New, None, None).unwrap();
+        tags::add_reviewed(root, &ReviewScope::Worktree, "a.txt", 1, 5, tags::AnchorKind::Hunk, tags::AnchorSide::New).unwrap();
+        tags::add_flag(root, &ReviewScope::Worktree, "a.txt", 2, 2, tags::AnchorKind::Range, tags::AnchorSide::New, None, None).unwrap();
 
         let prepared = prepare(&repo, false).unwrap();
         assert_eq!(prepared.hunk_count, 0);
@@ -656,7 +660,7 @@ mod tests {
         let (dir, repo) = init_repo();
         let root = dir.path();
         write_changed_two_hunks(root);
-        tags::add_reviewed(root, "a.txt", 1, 5, tags::AnchorKind::Hunk, tags::AnchorSide::New).unwrap();
+        tags::add_reviewed(root, &ReviewScope::Worktree, "a.txt", 1, 5, tags::AnchorKind::Hunk, tags::AnchorSide::New).unwrap();
         prepare(&repo, false).unwrap();
 
         let cached = run(root, &["diff", "--cached", "--", "a.txt"]);
@@ -671,7 +675,7 @@ mod tests {
         let (dir, repo) = init_repo();
         let root = dir.path();
         write_changed_two_hunks(root);
-        tags::add_reviewed(root, "a.txt", 1, 5, tags::AnchorKind::Hunk, tags::AnchorSide::New).unwrap();
+        tags::add_reviewed(root, &ReviewScope::Worktree, "a.txt", 1, 5, tags::AnchorKind::Hunk, tags::AnchorSide::New).unwrap();
         let prepared = prepare(&repo, false).unwrap();
 
         let err = commit(&repo, "\n# comment only\n", &prepared.reviewed_tag_ids)
@@ -685,15 +689,15 @@ mod tests {
         let (dir, repo) = init_repo();
         let root = dir.path();
         write_changed_two_hunks(root);
-        tags::add_reviewed(root, "a.txt", 1, 5, tags::AnchorKind::Hunk, tags::AnchorSide::New).unwrap();
-        tags::add_reviewed(root, "a.txt", 15, 20, tags::AnchorKind::Hunk, tags::AnchorSide::New).unwrap();
-        tags::add_flag(root, "a.txt", 18, 18, tags::AnchorKind::Range, tags::AnchorSide::New, None, None).unwrap();
+        tags::add_reviewed(root, &ReviewScope::Worktree, "a.txt", 1, 5, tags::AnchorKind::Hunk, tags::AnchorSide::New).unwrap();
+        tags::add_reviewed(root, &ReviewScope::Worktree, "a.txt", 15, 20, tags::AnchorKind::Hunk, tags::AnchorSide::New).unwrap();
+        tags::add_flag(root, &ReviewScope::Worktree, "a.txt", 18, 18, tags::AnchorKind::Range, tags::AnchorSide::New, None, None).unwrap();
         let prepared = prepare(&repo, false).unwrap();
         assert_eq!(prepared.hunk_count, 1);
 
         let result = commit(&repo, "review first hunk", &prepared.reviewed_tag_ids).unwrap();
         assert_eq!(result.commit.len(), 7);
-        let store = tags::load(root).unwrap();
+        let store = tags::load(root, &ReviewScope::Worktree).unwrap();
         assert_eq!(store.reviewed.len(), 1);
         assert_eq!(store.flags.len(), 1);
         assert_eq!(store.reviewed[0].anchor.start_line, 15);
@@ -715,7 +719,7 @@ mod tests {
         let root = dir.path();
         delete_lines_five_to_seven(root);
         // Old-side anchor over the removed block (HEAD lines 5..7).
-        tags::add_reviewed(root, "a.txt", 5, 7, tags::AnchorKind::Hunk, tags::AnchorSide::Old)
+        tags::add_reviewed(root, &ReviewScope::Worktree, "a.txt", 5, 7, tags::AnchorKind::Hunk, tags::AnchorSide::Old)
             .unwrap();
 
         let prepared = prepare(&repo, false).unwrap();
@@ -731,10 +735,10 @@ mod tests {
         let (dir, repo) = init_repo();
         let root = dir.path();
         delete_lines_five_to_seven(root);
-        tags::add_reviewed(root, "a.txt", 5, 7, tags::AnchorKind::Hunk, tags::AnchorSide::Old)
+        tags::add_reviewed(root, &ReviewScope::Worktree, "a.txt", 5, 7, tags::AnchorKind::Hunk, tags::AnchorSide::Old)
             .unwrap();
         // A flag on the same old-side range is an active concern → not staged.
-        tags::add_flag(root, "a.txt", 6, 6, tags::AnchorKind::Range, tags::AnchorSide::Old, None, None)
+        tags::add_flag(root, &ReviewScope::Worktree, "a.txt", 6, 6, tags::AnchorKind::Range, tags::AnchorSide::Old, None, None)
             .unwrap();
 
         let prepared = prepare(&repo, false).unwrap();
@@ -747,13 +751,13 @@ mod tests {
         let (dir, repo) = init_repo();
         let root = dir.path();
         delete_lines_five_to_seven(root);
-        tags::add_reviewed(root, "a.txt", 5, 7, tags::AnchorKind::Hunk, tags::AnchorSide::Old)
+        tags::add_reviewed(root, &ReviewScope::Worktree, "a.txt", 5, 7, tags::AnchorKind::Hunk, tags::AnchorSide::Old)
             .unwrap();
         let prepared = prepare(&repo, false).unwrap();
         assert_eq!(prepared.reviewed_tag_ids.len(), 1);
 
         commit(&repo, "drop lines 5-7", &prepared.reviewed_tag_ids).unwrap();
-        let store = tags::load(root).unwrap();
+        let store = tags::load(root, &ReviewScope::Worktree).unwrap();
         assert!(store.reviewed.is_empty(), "old-side tag cleared after commit");
     }
 
@@ -767,7 +771,7 @@ mod tests {
         run(root, &["commit", "-qm", "add b"]);
         fs::remove_file(root.join("b.txt")).unwrap();
 
-        tags::add_reviewed(root, "b.txt", 1, 3, tags::AnchorKind::Hunk, tags::AnchorSide::Old)
+        tags::add_reviewed(root, &ReviewScope::Worktree, "b.txt", 1, 3, tags::AnchorKind::Hunk, tags::AnchorSide::Old)
             .unwrap();
 
         let prepared = prepare(&repo, false).unwrap();
@@ -789,7 +793,7 @@ mod tests {
         run(root, &["commit", "-qm", "add bin"]);
         write_bin(root, "logo.bin", &[0, 1, 2, 3, 159, 146, 150]);
 
-        tags::add_reviewed(root, "logo.bin", 0, 0, tags::AnchorKind::File, tags::AnchorSide::File)
+        tags::add_reviewed(root, &ReviewScope::Worktree, "logo.bin", 0, 0, tags::AnchorKind::File, tags::AnchorSide::File)
             .unwrap();
 
         let prepared = prepare(&repo, false).unwrap();
@@ -808,7 +812,7 @@ mod tests {
         run(root, &["commit", "-qm", "add bin"]);
         fs::remove_file(root.join("logo.bin")).unwrap();
 
-        tags::add_reviewed(root, "logo.bin", 0, 0, tags::AnchorKind::File, tags::AnchorSide::File)
+        tags::add_reviewed(root, &ReviewScope::Worktree, "logo.bin", 0, 0, tags::AnchorKind::File, tags::AnchorSide::File)
             .unwrap();
 
         let prepared = prepare(&repo, false).unwrap();
@@ -826,9 +830,9 @@ mod tests {
         run(root, &["commit", "-qm", "add bin"]);
         write_bin(root, "logo.bin", &[0, 1, 2, 3]);
 
-        tags::add_reviewed(root, "logo.bin", 0, 0, tags::AnchorKind::File, tags::AnchorSide::File)
+        tags::add_reviewed(root, &ReviewScope::Worktree, "logo.bin", 0, 0, tags::AnchorKind::File, tags::AnchorSide::File)
             .unwrap();
-        tags::add_ignored(root, "logo.bin", 0, 0, tags::AnchorKind::File, tags::AnchorSide::File)
+        tags::add_ignored(root, &ReviewScope::Worktree, "logo.bin", 0, 0, tags::AnchorKind::File, tags::AnchorSide::File)
             .unwrap();
 
         let prepared = prepare(&repo, false).unwrap();

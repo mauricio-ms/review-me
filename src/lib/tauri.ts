@@ -15,7 +15,12 @@ import type {
   ReviewedCommitPreflight,
   ReviewedCommitResult,
 } from "../types/review-commit";
-import type { AnchorKind, AnchorSide, TagStore } from "../types/tags";
+import type {
+  AnchorKind,
+  AnchorSide,
+  ReviewScope,
+  TagStore,
+} from "../types/tags";
 import type { IndexStats, SymbolRef, XrefResult } from "../types/xref";
 
 export function openRepo(path: string): Promise<RepoInfo> {
@@ -57,12 +62,13 @@ export function readFile(repo: string, path: string): Promise<string> {
   return invoke<string>("read_file", { repo, path });
 }
 
-export function loadTags(repo: string): Promise<TagStore> {
-  return invoke<TagStore>("load_tags", { repo });
+export function loadTags(repo: string, scope: ReviewScope): Promise<TagStore> {
+  return invoke<TagStore>("load_tags", { repo, scope });
 }
 
 export function addReviewedTag(
   repo: string,
+  scope: ReviewScope,
   file: string,
   startLine: number,
   endLine: number,
@@ -71,6 +77,7 @@ export function addReviewedTag(
 ): Promise<TagStore> {
   return invoke<TagStore>("add_reviewed_tag", {
     repo,
+    scope,
     file,
     startLine,
     endLine,
@@ -81,6 +88,7 @@ export function addReviewedTag(
 
 export function addFlagTag(
   repo: string,
+  scope: ReviewScope,
   file: string,
   startLine: number,
   endLine: number,
@@ -91,6 +99,7 @@ export function addFlagTag(
 ): Promise<TagStore> {
   return invoke<TagStore>("add_flag_tag", {
     repo,
+    scope,
     file,
     startLine,
     endLine,
@@ -103,6 +112,7 @@ export function addFlagTag(
 
 export function addIgnoredTag(
   repo: string,
+  scope: ReviewScope,
   file: string,
   startLine: number,
   endLine: number,
@@ -111,6 +121,7 @@ export function addIgnoredTag(
 ): Promise<TagStore> {
   return invoke<TagStore>("add_ignored_tag", {
     repo,
+    scope,
     file,
     startLine,
     endLine,
@@ -119,16 +130,25 @@ export function addIgnoredTag(
   });
 }
 
-export function removeTag(repo: string, id: string): Promise<TagStore> {
-  return invoke<TagStore>("remove_tag", { repo, id });
+export function removeTag(
+  repo: string,
+  scope: ReviewScope,
+  id: string,
+): Promise<TagStore> {
+  return invoke<TagStore>("remove_tag", { repo, scope, id });
 }
 
-export function clearTags(repo: string): Promise<TagStore> {
-  return invoke<TagStore>("clear_tags", { repo });
+/** Clears the active comparison's marks only; other comparisons keep theirs. */
+export function clearTags(
+  repo: string,
+  scope: ReviewScope,
+): Promise<TagStore> {
+  return invoke<TagStore>("clear_tags", { repo, scope });
 }
 
 export function unmarkRange(
   repo: string,
+  scope: ReviewScope,
   file: string,
   startLine: number,
   endLine: number,
@@ -136,6 +156,7 @@ export function unmarkRange(
 ): Promise<TagStore> {
   return invoke<TagStore>("unmark_range", {
     repo,
+    scope,
     file,
     startLine,
     endLine,

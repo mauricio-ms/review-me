@@ -1,7 +1,13 @@
 import { useRepoStore } from "../state/repo";
 import { useTagsStore } from "../state/tags";
 import type { ChangedFile } from "../types/diff";
-import type { AnchorKind, AnchorSide, TagStore } from "../types/tags";
+import {
+  scopeForSpec,
+  type AnchorKind,
+  type AnchorSide,
+  type ReviewScope,
+  type TagStore,
+} from "../types/tags";
 import {
   addFlagTag,
   addIgnoredTag,
@@ -11,8 +17,13 @@ import {
 } from "./tauri";
 import { hunkTarget } from "./coverage";
 
-function repoPath(): string | null {
-  return useRepoStore.getState().repoPath;
+/**
+ * The repo and the comparison every mark below belongs to. Reading both together
+ * keeps a mark from ever landing in a scope other than the one on screen.
+ */
+function target(): { repo: string; scope: ReviewScope } | null {
+  const { repoPath, comparison } = useRepoStore.getState();
+  return repoPath ? { repo: repoPath, scope: scopeForSpec(comparison) } : null;
 }
 
 function apply(store: TagStore) {
@@ -26,9 +37,9 @@ export async function reviewLines(
   kind: AnchorKind,
   side: AnchorSide,
 ): Promise<void> {
-  const repo = repoPath();
-  if (!repo) return;
-  apply(await addReviewedTag(repo, file, lo, hi, kind, side));
+  const t = target();
+  if (!t) return;
+  apply(await addReviewedTag(t.repo, t.scope, file, lo, hi, kind, side));
 }
 
 /**
@@ -36,16 +47,24 @@ export async function reviewLines(
  * every reviewable hunk on its own side (new for edits, old for pure deletions).
  */
 export async function reviewWholeFile(file: ChangedFile): Promise<void> {
-  const repo = repoPath();
-  if (!repo) return;
+  const t = target();
+  if (!t) return;
   let store: TagStore | null = null;
   if (file.binary) {
-    store = await addReviewedTag(repo, file.path, 0, 0, "file", "file");
+    store = await addReviewedTag(t.repo, t.scope, file.path, 0, 0, "file", "file");
   } else {
     for (const hunk of file.hunks) {
-      const t = hunkTarget(hunk);
-      if (!t) continue;
-      store = await addReviewedTag(repo, file.path, t.lo, t.hi, "hunk", t.side);
+      const target = hunkTarget(hunk);
+      if (!target) continue;
+      store = await addReviewedTag(
+        t.repo,
+        t.scope,
+        file.path,
+        target.lo,
+        target.hi,
+        "hunk",
+        target.side,
+      );
     }
   }
   if (store) apply(store);
@@ -57,9 +76,9 @@ export async function unmarkLines(
   hi: number,
   side: AnchorSide,
 ): Promise<void> {
-  const repo = repoPath();
-  if (!repo) return;
-  apply(await unmarkRange(repo, file, lo, hi, side));
+  const t = target();
+  if (!t) return;
+  apply(await unmarkRange(t.repo, t.scope, file, lo, hi, side));
 }
 
 export async function addFlag(
@@ -69,9 +88,9 @@ export async function addFlag(
   kind: AnchorKind,
   side: AnchorSide,
 ): Promise<void> {
-  const repo = repoPath();
-  if (!repo) return;
-  apply(await addFlagTag(repo, file, lo, hi, kind, side));
+  const t = target();
+  if (!t) return;
+  apply(await addFlagTag(t.repo, t.scope, file, lo, hi, kind, side));
 }
 
 export async function addIgnore(
@@ -81,14 +100,14 @@ export async function addIgnore(
   kind: AnchorKind,
   side: AnchorSide,
 ): Promise<void> {
-  const repo = repoPath();
-  if (!repo) return;
-  apply(await addIgnoredTag(repo, file, lo, hi, kind, side));
+  const t = target();
+  if (!t) return;
+  apply(await addIgnoredTag(t.repo, t.scope, file, lo, hi, kind, side));
 }
 
-/** Drop every reviewed, flag, and ignore tag in the repo. */
-export async function clearAllTags(): Promise<void> {
-  const repo = repoPath();
-  if (!repo) return;
-  apply(await clearTags(repo));
+/** Drop every reviewed, flag, and ignore tag in the active comparison. */
+export async function clearActiveComparisonTags(): Promise<void> {
+  const t = target();
+  if (!t) return;
+  apply(await clearTags(t.repo, t.scope));
 }

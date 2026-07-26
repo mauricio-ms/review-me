@@ -261,7 +261,7 @@ export function useCommands(rawClose: CommandClose): {
       id: "clear",
       name: "clear",
       aliases: ["clear-tags", "reset-tags"],
-      label: "clear all review, flag & ignore tags",
+      label: "clear this comparison's review, flag & ignore tags",
       group: "tag",
       // Command-line only — no Space chord for this destructive action.
       prefix: null,

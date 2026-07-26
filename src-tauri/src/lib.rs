@@ -24,7 +24,6 @@ pub fn run() {
             commands::create_directory,
             commands::read_file,
             commands::load_tags,
-            commands::save_tags,
             commands::add_reviewed_tag,
             commands::add_flag_tag,
             commands::add_ignored_tag,
