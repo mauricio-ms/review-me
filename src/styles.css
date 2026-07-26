@@ -755,8 +755,8 @@ kbd {
   height: min(620px, 84vh);
 }
 
-.fz-row {
-  grid-template-columns: 24px 1fr;
+.neo-row.fz-row {
+  grid-template-columns: 24px minmax(0, 1fr);
 }
 
 .fz-path {
@@ -777,8 +777,9 @@ kbd {
   height: min(560px, 82vh);
 }
 
-/* Name on the left, badges hugging the right edge. */
-.branch-row {
+/* Name on the left, badges hugging the right edge. Qualified with `.neo-row` so it
+   beats the base row's 3-column template regardless of source order. */
+.neo-row.branch-row {
   grid-template-columns: minmax(0, 1fr) auto;
 }
 
