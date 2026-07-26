@@ -2,10 +2,11 @@ use std::path::{Path, PathBuf};
 use std::collections::HashSet;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use git2::{ObjectType, Oid, Repository};
+use git2::{ObjectType, Oid, Repository, Tree};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use crate::branches;
 use crate::error::AppResult;
 use crate::repo;
 
@@ -41,6 +42,108 @@ impl Default for AnchorSide {
     }
 }
 
+/// Which comparison a tag was made against. Marks are scoped so reviewing
+/// `master...feature` never marks the same lines as reviewed in the working-tree
+/// diff (or in a different branch pair). Ref names — not oids — are the durable
+/// identity: a branch that moves is still the same review.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum ReviewScope {
+    Worktree,
+    #[serde(rename_all = "camelCase")]
+    Branches { base_ref: String, target_ref: String },
+}
+
+impl Default for ReviewScope {
+    fn default() -> Self {
+        ReviewScope::Worktree
+    }
+}
+
+/// Where an anchor's content is read from: the working tree and HEAD for a worktree
+/// scope, or the merge-base and target trees for a branch scope. Built once per
+/// operation and shared by anchoring and re-anchoring so both agree.
+enum Snapshot<'r> {
+    Worktree {
+        root: &'r Path,
+        /// `None` when the path isn't a usable git repo — old/file sides can't be
+        /// read at all then.
+        repo: Option<&'r Repository>,
+    },
+    Trees {
+        repo: &'r Repository,
+        /// The merge-base tree — what branch-mode "old side" content means.
+        old: Tree<'r>,
+        /// The target tree — what branch-mode "new side" content means.
+        new: Tree<'r>,
+    },
+}
+
+impl<'r> Snapshot<'r> {
+    /// Whether this snapshot can read `side` at all. A side it *can* read but doesn't
+    /// find is a genuinely missing anchor (stale); a side it can't read is unknown, and
+    /// the anchor is left exactly as stored.
+    fn readable(&self, side: AnchorSide) -> bool {
+        match self {
+            Snapshot::Worktree { repo, .. } => {
+                side == AnchorSide::New || repo.is_some()
+            }
+            Snapshot::Trees { .. } => true,
+        }
+    }
+
+    fn lines(&self, side: AnchorSide, file: &str) -> Option<Vec<String>> {
+        match self {
+            Snapshot::Worktree { root, repo } => match side {
+                AnchorSide::New => read_file_lines(root, file),
+                _ => repo.and_then(|repo| head_lines(repo, file)),
+            },
+            Snapshot::Trees { repo, old, new } => {
+                let tree = if side == AnchorSide::New { new } else { old };
+                tree_lines(repo, tree, file)
+            }
+        }
+    }
+
+    /// `(old, new)` blob oids for a whole-file (binary) anchor.
+    fn blob_oids(&self, file: &str) -> (Option<Oid>, Option<Oid>) {
+        match self {
+            Snapshot::Worktree { root, repo } => (
+                repo.and_then(|repo| head_blob_oid(repo, file)),
+                working_blob_oid(root, file),
+            ),
+            Snapshot::Trees { old, new, .. } => {
+                (tree_blob_oid(old, file), tree_blob_oid(new, file))
+            }
+        }
+    }
+}
+
+/// Resolve `scope` against the repo. `None` means the scope can't be read right now
+/// (no repo, or a branch that no longer exists) — anchors are then left untouched
+/// rather than being declared stale on missing evidence.
+fn snapshot<'r>(
+    root: &'r Path,
+    repo: Option<&'r Repository>,
+    scope: &ReviewScope,
+) -> Option<Snapshot<'r>> {
+    match scope {
+        ReviewScope::Worktree => Some(Snapshot::Worktree { root, repo }),
+        ReviewScope::Branches {
+            base_ref,
+            target_ref,
+        } => {
+            let repo = repo?;
+            let resolved = branches::resolve(repo, base_ref, target_ref).ok()?;
+            Some(Snapshot::Trees {
+                repo,
+                old: repo.find_commit(resolved.merge_base).ok()?.tree().ok()?,
+                new: repo.find_commit(resolved.target_oid).ok()?.tree().ok()?,
+            })
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Anchor {
@@ -62,6 +165,10 @@ pub struct Anchor {
     /// before deletion/binary support existed.
     #[serde(default)]
     pub side: AnchorSide,
+    /// The comparison this mark belongs to. Defaults to `Worktree`, so every tag
+    /// written before branch comparison existed keeps meaning exactly what it did.
+    #[serde(default)]
+    pub scope: ReviewScope,
     /// Set during re-anchoring when the captured content can no longer be found.
     #[serde(default)]
     pub stale: bool,
@@ -125,26 +232,32 @@ impl Default for TagStore {
     }
 }
 
-/// Load the store and re-anchor every tag against the repo's current file contents.
-/// Old-side and file anchors need git data (HEAD content / blob oids), so the repo is
-/// opened once up front; new-side anchors only touch the working tree.
-pub fn load(root: &Path) -> AppResult<TagStore> {
+/// Load `scope`'s tags, re-anchored against that comparison's current content. Tags
+/// belonging to other comparisons stay on disk but are never returned — they must not
+/// mark identical paths and line ranges as reviewed here.
+pub fn load(root: &Path, scope: &ReviewScope) -> AppResult<TagStore> {
     let mut store = read(root)?;
+    store.reviewed.retain(|t| t.anchor.scope == *scope);
+    store.flags.retain(|t| t.anchor.scope == *scope);
+    store.ignored.retain(|t| t.anchor.scope == *scope);
+
     let git = repo::open(root).ok();
+    let snap = snapshot(root, git.as_ref(), scope);
     for tag in &mut store.reviewed {
-        reanchor(root, git.as_ref(), &mut tag.anchor);
+        reanchor(snap.as_ref(), &mut tag.anchor);
     }
     for tag in &mut store.flags {
-        reanchor(root, git.as_ref(), &mut tag.anchor);
+        reanchor(snap.as_ref(), &mut tag.anchor);
     }
     for tag in &mut store.ignored {
-        reanchor(root, git.as_ref(), &mut tag.anchor);
+        reanchor(snap.as_ref(), &mut tag.anchor);
     }
     Ok(store)
 }
 
 pub fn add_reviewed(
     root: &Path,
+    scope: &ReviewScope,
     file: &str,
     start_line: u32,
     end_line: u32,
@@ -152,12 +265,12 @@ pub fn add_reviewed(
     side: AnchorSide,
 ) -> AppResult<TagStore> {
     let mut store = read(root)?;
-    let git = repo::open(root).ok();
-    let anchor = build_anchor(root, git.as_ref(), file, start_line, end_line, kind, side);
-    // Replace any existing reviewed tag with the same range + side (toggle-friendly).
+    let anchor = build_anchor(root, scope, file, start_line, end_line, kind, side);
+    // Replace any existing reviewed tag with the same range + side in this scope
+    // (toggle-friendly).
     store
         .reviewed
-        .retain(|t| !same_range(&t.anchor, file, start_line, end_line, side));
+        .retain(|t| !same_range(&t.anchor, scope, file, start_line, end_line, side));
     store.reviewed.push(ReviewedTag {
         id: new_id("rev", file, start_line, end_line),
         anchor,
@@ -165,11 +278,12 @@ pub fn add_reviewed(
         note: None,
     });
     write(root, &store)?;
-    load(root)
+    load(root, scope)
 }
 
 pub fn add_flag(
     root: &Path,
+    scope: &ReviewScope,
     file: &str,
     start_line: u32,
     end_line: u32,
@@ -179,11 +293,10 @@ pub fn add_flag(
     severity: Option<String>,
 ) -> AppResult<TagStore> {
     let mut store = read(root)?;
-    let git = repo::open(root).ok();
-    let anchor = build_anchor(root, git.as_ref(), file, start_line, end_line, kind, side);
+    let anchor = build_anchor(root, scope, file, start_line, end_line, kind, side);
     store
         .flags
-        .retain(|t| !same_range(&t.anchor, file, start_line, end_line, side));
+        .retain(|t| !same_range(&t.anchor, scope, file, start_line, end_line, side));
     store.flags.push(FlagTag {
         id: new_id("flag", file, start_line, end_line),
         anchor,
@@ -192,11 +305,12 @@ pub fn add_flag(
         severity,
     });
     write(root, &store)?;
-    load(root)
+    load(root, scope)
 }
 
 pub fn add_ignored(
     root: &Path,
+    scope: &ReviewScope,
     file: &str,
     start_line: u32,
     end_line: u32,
@@ -204,11 +318,10 @@ pub fn add_ignored(
     side: AnchorSide,
 ) -> AppResult<TagStore> {
     let mut store = read(root)?;
-    let git = repo::open(root).ok();
-    let anchor = build_anchor(root, git.as_ref(), file, start_line, end_line, kind, side);
+    let anchor = build_anchor(root, scope, file, start_line, end_line, kind, side);
     store
         .ignored
-        .retain(|t| !same_range(&t.anchor, file, start_line, end_line, side));
+        .retain(|t| !same_range(&t.anchor, scope, file, start_line, end_line, side));
     store.ignored.push(IgnoredTag {
         id: new_id("ign", file, start_line, end_line),
         anchor,
@@ -216,48 +329,56 @@ pub fn add_ignored(
         note: None,
     });
     write(root, &store)?;
-    load(root)
+    load(root, scope)
 }
 
-pub fn remove(root: &Path, id: &str) -> AppResult<TagStore> {
+pub fn remove(root: &Path, scope: &ReviewScope, id: &str) -> AppResult<TagStore> {
     let mut store = read(root)?;
     store.reviewed.retain(|t| t.id != id);
     store.flags.retain(|t| t.id != id);
     store.ignored.retain(|t| t.id != id);
     write(root, &store)?;
-    load(root)
+    load(root, scope)
 }
 
 /// Remove only reviewed tags with ids in `ids`, preserving flag and ignore tags.
 /// Used after committing reviewed content so unresolved flagged/ignored sections
 /// keep their markers.
-pub fn remove_reviewed_by_ids(root: &Path, ids: &[String]) -> AppResult<TagStore> {
+pub fn remove_reviewed_by_ids(
+    root: &Path,
+    scope: &ReviewScope,
+    ids: &[String],
+) -> AppResult<TagStore> {
     if ids.is_empty() {
-        return load(root);
+        return load(root, scope);
     }
     let ids: HashSet<&str> = ids.iter().map(String::as_str).collect();
     let mut store = read(root)?;
     store.reviewed.retain(|t| !ids.contains(t.id.as_str()));
     write(root, &store)?;
-    load(root)
+    load(root, scope)
 }
 
-/// Drop every reviewed, flag, and ignore tag, persisting an empty store. Clearing
-/// in place preserves the store `version`.
-pub fn clear_all(root: &Path) -> AppResult<TagStore> {
+/// Drop every reviewed, flag, and ignore tag **in `scope`**. Other comparisons' marks
+/// survive — clearing the branch review you just finished must not wipe the
+/// working-tree review you have in progress. Clearing in place preserves the store
+/// `version`.
+pub fn clear_scope(root: &Path, scope: &ReviewScope) -> AppResult<TagStore> {
     let mut store = read(root)?;
-    store.reviewed.clear();
-    store.flags.clear();
-    store.ignored.clear();
+    store.reviewed.retain(|t| t.anchor.scope != *scope);
+    store.flags.retain(|t| t.anchor.scope != *scope);
+    store.ignored.retain(|t| t.anchor.scope != *scope);
     write(root, &store)?;
-    load(root)
+    load(root, scope)
 }
 
-/// Remove every same-side tag in `file` whose range overlaps `[start, end]`. This is
-/// the `u` unmark action: it clears reviewed, flag, and ignore markers for the scope.
-/// A `File`-side scope clears every file anchor on the path (line numbers are unused).
+/// Remove every same-scope, same-side tag in `file` whose range overlaps
+/// `[start, end]`. This is the `u` unmark action: it clears reviewed, flag, and ignore
+/// markers for the target. A `File` side clears every file anchor on the path (line
+/// numbers are unused).
 pub fn unmark_range(
     root: &Path,
+    scope: &ReviewScope,
     file: &str,
     start: u32,
     end: u32,
@@ -265,7 +386,7 @@ pub fn unmark_range(
 ) -> AppResult<TagStore> {
     let mut store = read(root)?;
     let overlaps = |anchor: &Anchor| {
-        if anchor.file != file || anchor.side != side {
+        if anchor.file != file || anchor.side != side || anchor.scope != *scope {
             return false;
         }
         match side {
@@ -277,15 +398,19 @@ pub fn unmark_range(
     store.flags.retain(|t| !overlaps(&t.anchor));
     store.ignored.retain(|t| !overlaps(&t.anchor));
     write(root, &store)?;
-    load(root)
+    load(root, scope)
 }
 
-pub fn save(root: &Path, store: &TagStore) -> AppResult<()> {
-    write(root, store)
-}
-
-fn same_range(anchor: &Anchor, file: &str, start: u32, end: u32, side: AnchorSide) -> bool {
-    anchor.side == side
+fn same_range(
+    anchor: &Anchor,
+    scope: &ReviewScope,
+    file: &str,
+    start: u32,
+    end: u32,
+    side: AnchorSide,
+) -> bool {
+    anchor.scope == *scope
+        && anchor.side == side
         && anchor.file == file
         && anchor.start_line == start
         && anchor.end_line == end
@@ -316,32 +441,37 @@ fn write(root: &Path, store: &TagStore) -> AppResult<()> {
     Ok(())
 }
 
+/// Capture the content a new tag anchors to, read from whichever snapshot `scope`
+/// resolves to. Add and re-anchor share `Snapshot`, so a tag is always compared
+/// against the same bytes it was created from.
 fn build_anchor(
     root: &Path,
-    git: Option<&Repository>,
+    scope: &ReviewScope,
     file: &str,
     start: u32,
     end: u32,
     kind: AnchorKind,
     side: AnchorSide,
 ) -> Anchor {
+    let git = repo::open(root).ok();
+    let snap = snapshot(root, git.as_ref(), scope);
     let (hash, before, after) = match side {
-        AnchorSide::New => match read_file_lines(root, file) {
-            Some(lines) => capture(&lines, start, end),
-            None => (String::new(), Vec::new(), Vec::new()),
-        },
-        AnchorSide::Old => match git.and_then(|repo| head_lines(repo, file)) {
-            Some(lines) => capture(&lines, start, end),
-            None => (String::new(), Vec::new(), Vec::new()),
-        },
         // A binary file change is identified by its (old, new) blob oids, not by line
         // content. Line numbers are meaningless here.
         AnchorSide::File => {
-            let hash = git
-                .map(|repo| oid_pair(head_blob_oid(repo, file), working_blob_oid(root, file)))
+            let hash = snap
+                .as_ref()
+                .map(|snap| {
+                    let (old, new) = snap.blob_oids(file);
+                    oid_pair(old, new)
+                })
                 .unwrap_or_default();
             (hash, Vec::new(), Vec::new())
         }
+        side => match snap.as_ref().and_then(|snap| snap.lines(side, file)) {
+            Some(lines) => capture(&lines, start, end),
+            None => (String::new(), Vec::new(), Vec::new()),
+        },
     };
     Anchor {
         file: file.to_string(),
@@ -352,6 +482,7 @@ fn build_anchor(
         context_after: after,
         kind,
         side,
+        scope: scope.clone(),
         stale: false,
     }
 }
@@ -370,21 +501,17 @@ fn capture(lines: &[String], start: u32, end: u32) -> (String, Vec<String>, Vec<
     }
 }
 
-fn reanchor(root: &Path, git: Option<&Repository>, anchor: &mut Anchor) {
+/// Re-anchor against `snapshot`. A snapshot that can't read the anchor's side — no
+/// git access, or a branch scope whose refs are gone — leaves the stored position
+/// untouched rather than declaring the tag stale on missing evidence.
+fn reanchor(snapshot: Option<&Snapshot>, anchor: &mut Anchor) {
+    let Some(snapshot) = snapshot else { return };
+    if !snapshot.readable(anchor.side) {
+        return;
+    }
     match anchor.side {
-        AnchorSide::New => reanchor_lines(read_file_lines(root, &anchor.file), anchor),
-        // Old-side content lives in HEAD; without git access (e.g. tests over a bare
-        // tempdir) we can't verify it, so leave the stored position untouched.
-        AnchorSide::Old => {
-            if let Some(repo) = git {
-                reanchor_lines(head_lines(repo, &anchor.file), anchor);
-            }
-        }
-        AnchorSide::File => {
-            if let Some(repo) = git {
-                reanchor_file(root, repo, anchor);
-            }
-        }
+        AnchorSide::File => reanchor_file(snapshot, anchor),
+        side => reanchor_lines(snapshot.lines(side, &anchor.file), anchor),
     }
 }
 
@@ -448,9 +575,8 @@ fn reanchor_lines(lines: Option<Vec<String>>, anchor: &mut Anchor) {
 /// A file (binary) anchor is live while the path still carries the same (old, new)
 /// blob change it was tagged against. Identical or both-missing oids mean the change
 /// is gone.
-fn reanchor_file(root: &Path, repo: &Repository, anchor: &mut Anchor) {
-    let old = head_blob_oid(repo, &anchor.file);
-    let new = working_blob_oid(root, &anchor.file);
+fn reanchor_file(snapshot: &Snapshot, anchor: &mut Anchor) {
+    let (old, new) = snapshot.blob_oids(&anchor.file);
     anchor.stale = match (old, new) {
         (None, None) => true,
         (a, b) if a == b => true,
@@ -471,6 +597,19 @@ fn head_lines(repo: &Repository, file: &str) -> Option<Vec<String>> {
 /// Oid of HEAD's blob at `file`, or `None` when absent in HEAD.
 fn head_blob_oid(repo: &Repository, file: &str) -> Option<Oid> {
     let tree = repo.head().ok()?.peel_to_commit().ok()?.tree().ok()?;
+    tree.get_path(Path::new(file)).ok().map(|e| e.id())
+}
+
+/// A committed tree's content for `file`, split into lines, or `None` when the path
+/// isn't in that tree or isn't valid UTF-8.
+fn tree_lines(repo: &Repository, tree: &Tree, file: &str) -> Option<Vec<String>> {
+    let entry = tree.get_path(Path::new(file)).ok()?;
+    let blob = entry.to_object(repo).ok()?.peel_to_blob().ok()?;
+    let content = std::str::from_utf8(blob.content()).ok()?;
+    Some(content.lines().map(str::to_string).collect())
+}
+
+fn tree_blob_oid(tree: &Tree, file: &str) -> Option<Oid> {
     tree.get_path(Path::new(file)).ok().map(|e| e.id())
 }
 
@@ -532,6 +671,9 @@ mod tests {
     use super::*;
     use std::fs;
 
+    /// The default comparison, used by every pre-existing anchoring test.
+    const WT: &ReviewScope = &ReviewScope::Worktree;
+
     fn write_lines(path: &Path, lines: &[&str]) {
         fs::write(path, format!("{}\n", lines.join("\n"))).unwrap();
     }
@@ -542,7 +684,7 @@ mod tests {
         let root = dir.path();
         write_lines(&root.join("a.txt"), &["one", "two", "three", "four", "five"]);
 
-        let store = add_reviewed(root, "a.txt", 2, 3, AnchorKind::Hunk, AnchorSide::New).unwrap();
+        let store = add_reviewed(root, WT, "a.txt", 2, 3, AnchorKind::Hunk, AnchorSide::New).unwrap();
         assert_eq!(store.reviewed.len(), 1);
         let anchor = &store.reviewed[0].anchor;
         assert!(!anchor.stale);
@@ -554,14 +696,14 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         write_lines(&root.join("a.txt"), &["one", "two", "three", "four", "five"]);
-        add_reviewed(root, "a.txt", 2, 3, AnchorKind::Hunk, AnchorSide::New).unwrap();
+        add_reviewed(root, WT, "a.txt", 2, 3, AnchorKind::Hunk, AnchorSide::New).unwrap();
 
         // Insert two lines at the top; the captured block "two\nthree" moves to 4..5.
         write_lines(
             &root.join("a.txt"),
             &["x", "y", "one", "two", "three", "four", "five"],
         );
-        let store = load(root).unwrap();
+        let store = load(root, WT).unwrap();
         let anchor = &store.reviewed[0].anchor;
         assert!(!anchor.stale, "should re-find the moved block");
         assert_eq!((anchor.start_line, anchor.end_line), (4, 5));
@@ -572,10 +714,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         write_lines(&root.join("a.txt"), &["one", "two", "three", "four", "five"]);
-        add_reviewed(root, "a.txt", 2, 3, AnchorKind::Hunk, AnchorSide::New).unwrap();
+        add_reviewed(root, WT, "a.txt", 2, 3, AnchorKind::Hunk, AnchorSide::New).unwrap();
 
         write_lines(&root.join("a.txt"), &["completely", "different", "file"]);
-        let store = load(root).unwrap();
+        let store = load(root, WT).unwrap();
         assert!(store.reviewed[0].anchor.stale, "should be stale");
     }
 
@@ -584,9 +726,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         write_lines(&root.join("a.txt"), &["one", "two", "three"]);
-        let store = add_flag(root, "a.txt", 1, 2, AnchorKind::Range, AnchorSide::New, None, None).unwrap();
+        let store = add_flag(root, WT, "a.txt", 1, 2, AnchorKind::Range, AnchorSide::New, None, None).unwrap();
         let id = store.flags[0].id.clone();
-        let after = remove(root, &id).unwrap();
+        let after = remove(root, WT, &id).unwrap();
         assert!(after.flags.is_empty());
     }
 
@@ -595,16 +737,16 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         write_lines(&root.join("a.txt"), &["one", "two", "three", "four", "five"]);
-        add_reviewed(root, "a.txt", 2, 3, AnchorKind::Hunk, AnchorSide::New).unwrap();
-        add_flag(root, "a.txt", 1, 1, AnchorKind::Range, AnchorSide::New, None, None).unwrap();
-        add_ignored(root, "a.txt", 4, 5, AnchorKind::Hunk, AnchorSide::New).unwrap();
+        add_reviewed(root, WT, "a.txt", 2, 3, AnchorKind::Hunk, AnchorSide::New).unwrap();
+        add_flag(root, WT, "a.txt", 1, 1, AnchorKind::Range, AnchorSide::New, None, None).unwrap();
+        add_ignored(root, WT, "a.txt", 4, 5, AnchorKind::Hunk, AnchorSide::New).unwrap();
 
-        let after = clear_all(root).unwrap();
+        let after = clear_scope(root, WT).unwrap();
         assert!(after.reviewed.is_empty());
         assert!(after.flags.is_empty());
         assert!(after.ignored.is_empty());
         // Reloading confirms the empty state was persisted.
-        let reloaded = load(root).unwrap();
+        let reloaded = load(root, WT).unwrap();
         assert!(
             reloaded.reviewed.is_empty()
                 && reloaded.flags.is_empty()
@@ -621,14 +763,14 @@ mod tests {
             &["one", "two", "three", "four", "five", "six", "seven"],
         );
         write_lines(&root.join("b.txt"), &["one", "two", "three"]);
-        add_reviewed(root, "a.txt", 2, 3, AnchorKind::Hunk, AnchorSide::New).unwrap();
-        add_flag(root, "a.txt", 3, 4, AnchorKind::Range, AnchorSide::New, None, None).unwrap();
-        add_ignored(root, "a.txt", 1, 5, AnchorKind::Hunk, AnchorSide::New).unwrap();
-        add_reviewed(root, "a.txt", 7, 7, AnchorKind::Range, AnchorSide::New).unwrap();
-        add_flag(root, "b.txt", 1, 1, AnchorKind::Range, AnchorSide::New, None, None).unwrap();
-        add_ignored(root, "b.txt", 2, 2, AnchorKind::Range, AnchorSide::New).unwrap();
+        add_reviewed(root, WT, "a.txt", 2, 3, AnchorKind::Hunk, AnchorSide::New).unwrap();
+        add_flag(root, WT, "a.txt", 3, 4, AnchorKind::Range, AnchorSide::New, None, None).unwrap();
+        add_ignored(root, WT, "a.txt", 1, 5, AnchorKind::Hunk, AnchorSide::New).unwrap();
+        add_reviewed(root, WT, "a.txt", 7, 7, AnchorKind::Range, AnchorSide::New).unwrap();
+        add_flag(root, WT, "b.txt", 1, 1, AnchorKind::Range, AnchorSide::New, None, None).unwrap();
+        add_ignored(root, WT, "b.txt", 2, 2, AnchorKind::Range, AnchorSide::New).unwrap();
 
-        let after = unmark_range(root, "a.txt", 2, 4, AnchorSide::New).unwrap();
+        let after = unmark_range(root, WT, "a.txt", 2, 4, AnchorSide::New).unwrap();
         assert_eq!(after.reviewed.len(), 1);
         assert_eq!(
             (
@@ -642,7 +784,7 @@ mod tests {
         assert_eq!(after.ignored.len(), 1);
         assert_eq!(after.ignored[0].anchor.file, "b.txt");
 
-        let reloaded = load(root).unwrap();
+        let reloaded = load(root, WT).unwrap();
         assert_eq!(reloaded.reviewed.len(), 1);
         assert_eq!(reloaded.flags.len(), 1);
         assert_eq!(reloaded.ignored.len(), 1);
@@ -654,12 +796,12 @@ mod tests {
         let root = dir.path();
         write_lines(&root.join("a.txt"), &["one", "two", "three", "four", "five"]);
 
-        let store = add_ignored(root, "a.txt", 2, 3, AnchorKind::Hunk, AnchorSide::New).unwrap();
+        let store = add_ignored(root, WT, "a.txt", 2, 3, AnchorKind::Hunk, AnchorSide::New).unwrap();
         assert_eq!(store.ignored.len(), 1);
         assert!(!store.ignored[0].anchor.stale);
         let id = store.ignored[0].id.clone();
 
-        let after = remove(root, &id).unwrap();
+        let after = remove(root, WT, &id).unwrap();
         assert!(after.ignored.is_empty());
     }
 
@@ -697,14 +839,14 @@ mod tests {
         // Delete the "three"/"four" block (HEAD lines 3..4) in the working tree.
         write_lines(&root.join("a.txt"), &["one", "two", "five", "six"]);
 
-        let store = add_reviewed(root, "a.txt", 3, 4, AnchorKind::Hunk, AnchorSide::Old).unwrap();
+        let store = add_reviewed(root, WT, "a.txt", 3, 4, AnchorKind::Hunk, AnchorSide::Old).unwrap();
         let anchor = &store.reviewed[0].anchor;
         assert_eq!(anchor.side, AnchorSide::Old);
         assert!(!anchor.stale, "old-side block still present in HEAD");
         assert_eq!((anchor.start_line, anchor.end_line), (3, 4));
 
         // Reload re-anchors against HEAD, which is unchanged → still live at 3..4.
-        let reloaded = load(root).unwrap();
+        let reloaded = load(root, WT).unwrap();
         assert!(!reloaded.reviewed[0].anchor.stale);
         assert_eq!(
             (
@@ -726,12 +868,12 @@ mod tests {
         write_lines(&root.join("a.txt"), &["a", "d"]);
 
         // Same numeric range, different sides → two distinct tags (no dedup collision).
-        add_reviewed(root, "a.txt", 2, 2, AnchorKind::Range, AnchorSide::New).unwrap();
-        let store = add_reviewed(root, "a.txt", 2, 2, AnchorKind::Range, AnchorSide::Old).unwrap();
+        add_reviewed(root, WT, "a.txt", 2, 2, AnchorKind::Range, AnchorSide::New).unwrap();
+        let store = add_reviewed(root, WT, "a.txt", 2, 2, AnchorKind::Range, AnchorSide::Old).unwrap();
         assert_eq!(store.reviewed.len(), 2);
 
         // Unmarking the old side leaves the new-side tag untouched.
-        let after = unmark_range(root, "a.txt", 2, 2, AnchorSide::Old).unwrap();
+        let after = unmark_range(root, WT, "a.txt", 2, 2, AnchorSide::Old).unwrap();
         assert_eq!(after.reviewed.len(), 1);
         assert_eq!(after.reviewed[0].anchor.side, AnchorSide::New);
     }
@@ -748,7 +890,7 @@ mod tests {
         // Change the binary content in the working tree.
         fs::write(root.join("logo.bin"), [0u8, 1, 2, 3, 159, 146, 150]).unwrap();
 
-        let store = add_reviewed(root, "logo.bin", 0, 0, AnchorKind::File, AnchorSide::File).unwrap();
+        let store = add_reviewed(root, WT, "logo.bin", 0, 0, AnchorKind::File, AnchorSide::File).unwrap();
         let anchor = &store.reviewed[0].anchor;
         assert_eq!(anchor.side, AnchorSide::File);
         assert!(!anchor.stale, "binary change present");
@@ -756,7 +898,7 @@ mod tests {
 
         // Reverting the working file back to HEAD removes the change → stale.
         fs::write(root.join("logo.bin"), [0u8, 159, 146, 150, 0, 1, 2]).unwrap();
-        let reloaded = load(root).unwrap();
+        let reloaded = load(root, WT).unwrap();
         assert!(
             reloaded.reviewed[0].anchor.stale,
             "no change left → file anchor is stale"
@@ -774,8 +916,236 @@ mod tests {
 
         // Delete the binary file → review the deletion (old present, new gone).
         fs::remove_file(root.join("logo.bin")).unwrap();
-        let store = add_reviewed(root, "logo.bin", 0, 0, AnchorKind::File, AnchorSide::File).unwrap();
+        let store = add_reviewed(root, WT, "logo.bin", 0, 0, AnchorKind::File, AnchorSide::File).unwrap();
         assert!(!store.reviewed[0].anchor.stale);
         assert!(store.reviewed[0].anchor.content_hash.ends_with(":none"));
+    }
+
+    fn branch_scope(base: &str, target: &str) -> ReviewScope {
+        ReviewScope::Branches {
+            base_ref: base.to_string(),
+            target_ref: target.to_string(),
+        }
+    }
+
+    /// `master` with one commit; `feature` and `other` each add a line to the same
+    /// place in the same file, so identical (path, range) marks across the two pairs
+    /// must stay apart.
+    fn branchy_repo(root: &Path) {
+        init_repo(root);
+        write_lines(&root.join("a.txt"), &["one", "two", "three"]);
+        git(root, &["add", "."]);
+        git(root, &["commit", "-qm", "init"]);
+
+        git(root, &["checkout", "-qb", "feature"]);
+        write_lines(&root.join("a.txt"), &["one", "FEATURE", "three"]);
+        git(root, &["commit", "-qam", "feature work"]);
+
+        git(root, &["checkout", "-q", "master"]);
+        git(root, &["checkout", "-qb", "other"]);
+        write_lines(&root.join("a.txt"), &["one", "OTHER", "three"]);
+        git(root, &["commit", "-qam", "other work"]);
+        git(root, &["checkout", "-q", "master"]);
+    }
+
+    #[test]
+    fn legacy_tags_load_as_worktree_scope() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        write_lines(&root.join("a.txt"), &["one", "two", "three"]);
+        // A store written before review scopes existed: no `scope` on the anchor.
+        let legacy = r#"{
+          "version": 1,
+          "reviewed": [{
+            "id": "rev:a.txt:1-2@1",
+            "createdAt": 1,
+            "note": null,
+            "anchor": {
+              "file": "a.txt", "startLine": 1, "endLine": 2,
+              "contentHash": "", "contextBefore": [], "contextAfter": [],
+              "kind": "hunk", "side": "new", "stale": false
+            }
+          }],
+          "flags": [], "ignored": []
+        }"#;
+        fs::create_dir_all(root.join(TAGS_DIR)).unwrap();
+        fs::write(root.join(TAGS_DIR).join(TAGS_FILE), legacy).unwrap();
+
+        let store = load(root, WT).unwrap();
+        assert_eq!(store.reviewed.len(), 1, "legacy tag survives migration");
+        assert_eq!(store.reviewed[0].anchor.scope, ReviewScope::Worktree);
+        // …and it belongs to the working-tree diff only.
+        let branch = load(root, &branch_scope("refs/heads/master", "refs/heads/feature")).unwrap();
+        assert!(branch.reviewed.is_empty());
+    }
+
+    #[test]
+    fn branch_pairs_keep_identical_marks_isolated() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        branchy_repo(root);
+        let feature = branch_scope("refs/heads/master", "refs/heads/feature");
+        let other = branch_scope("refs/heads/master", "refs/heads/other");
+
+        // The exact same file and line range, marked in three different comparisons.
+        add_reviewed(root, WT, "a.txt", 2, 2, AnchorKind::Hunk, AnchorSide::New).unwrap();
+        add_reviewed(root, &feature, "a.txt", 2, 2, AnchorKind::Hunk, AnchorSide::New).unwrap();
+        add_reviewed(root, &other, "a.txt", 2, 2, AnchorKind::Hunk, AnchorSide::New).unwrap();
+
+        for scope in [WT, &feature, &other] {
+            let store = load(root, scope).unwrap();
+            assert_eq!(store.reviewed.len(), 1, "each scope sees only its own mark");
+            assert_eq!(store.reviewed[0].anchor.scope, *scope);
+        }
+
+        // Unmarking in one pair leaves the others intact.
+        let after = unmark_range(root, &feature, "a.txt", 2, 2, AnchorSide::New).unwrap();
+        assert!(after.reviewed.is_empty());
+        assert_eq!(load(root, &other).unwrap().reviewed.len(), 1);
+        assert_eq!(load(root, WT).unwrap().reviewed.len(), 1);
+    }
+
+    #[test]
+    fn branch_anchor_hashes_the_target_tree_not_the_worktree() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        branchy_repo(root);
+        let feature = branch_scope("refs/heads/master", "refs/heads/feature");
+
+        // master is checked out, so the working tree says "two" where feature says
+        // "FEATURE". A worktree-scoped anchor and a branch-scoped one over the same
+        // range must therefore capture different content.
+        let wt = add_reviewed(root, WT, "a.txt", 2, 2, AnchorKind::Hunk, AnchorSide::New).unwrap();
+        let br = add_reviewed(root, &feature, "a.txt", 2, 2, AnchorKind::Hunk, AnchorSide::New)
+            .unwrap();
+        assert_ne!(
+            wt.reviewed[0].anchor.content_hash, br.reviewed[0].anchor.content_hash,
+            "branch anchors read the target tree, not the checkout"
+        );
+        assert!(!br.reviewed[0].anchor.stale);
+
+        // Dirtying the working tree can't disturb a branch-scoped anchor.
+        write_lines(&root.join("a.txt"), &["completely", "different", "content"]);
+        let reloaded = load(root, &feature).unwrap();
+        assert!(!reloaded.reviewed[0].anchor.stale);
+        assert_eq!(reloaded.reviewed[0].anchor.start_line, 2);
+    }
+
+    #[test]
+    fn branch_old_side_anchor_reads_the_merge_base() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        init_repo(root);
+        write_lines(&root.join("a.txt"), &["one", "two", "three", "four"]);
+        git(root, &["add", "."]);
+        git(root, &["commit", "-qm", "init"]);
+        git(root, &["checkout", "-qb", "feature"]);
+        // Delete lines 2..3 on the branch → an old-side (merge-base) review target.
+        write_lines(&root.join("a.txt"), &["one", "four"]);
+        git(root, &["commit", "-qam", "trim"]);
+        git(root, &["checkout", "-q", "master"]);
+
+        let feature = branch_scope("refs/heads/master", "refs/heads/feature");
+        let store =
+            add_reviewed(root, &feature, "a.txt", 2, 3, AnchorKind::Hunk, AnchorSide::Old).unwrap();
+        assert!(!store.reviewed[0].anchor.stale);
+
+        // The same lines hashed straight from the merge-base tree.
+        let repo = Repository::open(root).unwrap();
+        let base_tree = repo.head().unwrap().peel_to_commit().unwrap().tree().unwrap();
+        let lines = tree_lines(&repo, &base_tree, "a.txt").unwrap();
+        assert_eq!(
+            store.reviewed[0].anchor.content_hash,
+            hash_lines(&lines[1..3])
+        );
+    }
+
+    #[test]
+    fn branch_anchor_survives_a_moved_branch_but_goes_stale_when_the_content_does() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        branchy_repo(root);
+        let feature = branch_scope("refs/heads/master", "refs/heads/feature");
+        add_reviewed(root, &feature, "a.txt", 2, 2, AnchorKind::Hunk, AnchorSide::New).unwrap();
+
+        // The branch moves but keeps the reviewed line — the mark follows it.
+        git(root, &["checkout", "-q", "feature"]);
+        write_lines(&root.join("a.txt"), &["prefix", "one", "FEATURE", "three"]);
+        git(root, &["commit", "-qam", "insert above"]);
+        git(root, &["checkout", "-q", "master"]);
+        let moved = load(root, &feature).unwrap();
+        assert!(!moved.reviewed[0].anchor.stale);
+        assert_eq!(moved.reviewed[0].anchor.start_line, 3, "re-anchored down one");
+
+        // The reviewed content is rewritten → stale.
+        git(root, &["checkout", "-q", "feature"]);
+        write_lines(&root.join("a.txt"), &["totally", "rewritten", "file"]);
+        git(root, &["commit", "-qam", "rewrite"]);
+        git(root, &["checkout", "-q", "master"]);
+        assert!(load(root, &feature).unwrap().reviewed[0].anchor.stale);
+    }
+
+    #[test]
+    fn unresolvable_branch_scope_leaves_anchors_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        branchy_repo(root);
+        let feature = branch_scope("refs/heads/master", "refs/heads/feature");
+        add_reviewed(root, &feature, "a.txt", 2, 2, AnchorKind::Hunk, AnchorSide::New).unwrap();
+
+        git(root, &["branch", "-qD", "feature"]);
+        let store = load(root, &feature).unwrap();
+        assert_eq!(store.reviewed.len(), 1);
+        assert!(
+            !store.reviewed[0].anchor.stale,
+            "a deleted branch is missing evidence, not proof the mark is stale"
+        );
+    }
+
+    #[test]
+    fn clearing_one_comparison_spares_the_others() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        branchy_repo(root);
+        let feature = branch_scope("refs/heads/master", "refs/heads/feature");
+
+        add_reviewed(root, WT, "a.txt", 1, 1, AnchorKind::Hunk, AnchorSide::New).unwrap();
+        add_flag(root, WT, "a.txt", 3, 3, AnchorKind::Range, AnchorSide::New, None, None).unwrap();
+        add_reviewed(root, &feature, "a.txt", 2, 2, AnchorKind::Hunk, AnchorSide::New).unwrap();
+        add_ignored(root, &feature, "a.txt", 3, 3, AnchorKind::Range, AnchorSide::New).unwrap();
+
+        let cleared = clear_scope(root, &feature).unwrap();
+        assert!(cleared.reviewed.is_empty() && cleared.ignored.is_empty());
+
+        let worktree = load(root, WT).unwrap();
+        assert_eq!(worktree.reviewed.len(), 1);
+        assert_eq!(worktree.flags.len(), 1);
+    }
+
+    #[test]
+    fn branch_file_anchor_uses_the_two_compared_blobs() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        init_repo(root);
+        fs::write(root.join("logo.bin"), [0u8, 1, 2, 3]).unwrap();
+        git(root, &["add", "."]);
+        git(root, &["commit", "-qm", "init"]);
+        git(root, &["checkout", "-qb", "feature"]);
+        fs::write(root.join("logo.bin"), [0u8, 9, 9, 9]).unwrap();
+        git(root, &["commit", "-qam", "new logo"]);
+        git(root, &["checkout", "-q", "master"]);
+
+        let feature = branch_scope("refs/heads/master", "refs/heads/feature");
+        let store =
+            add_reviewed(root, &feature, "logo.bin", 0, 0, AnchorKind::File, AnchorSide::File)
+                .unwrap();
+        let anchor = &store.reviewed[0].anchor;
+        assert!(!anchor.stale, "the two compared blobs differ");
+
+        // The working tree holds master's blob, so a worktree-scoped anchor over the
+        // same path sees no change at all — proving the oids came from the trees.
+        let (old, new) = anchor.content_hash.split_once(':').unwrap();
+        assert_ne!(old, new);
+        assert!(load(root, WT).unwrap().reviewed.is_empty());
     }
 }

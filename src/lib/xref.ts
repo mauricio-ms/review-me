@@ -7,12 +7,13 @@ import { openProjectFile } from "./project";
 import { projectCursor, setProjectCursor } from "./project-view";
 import { findDefinition, findReferences, symbolAt } from "./tauri";
 
+/** Cross-references resolve against the revision the project buffer is showing. */
 function ctx() {
   const repo = useRepoStore.getState().repoPath;
-  const path = useProjectStore.getState().openPath;
+  const { openPath: path, source } = useProjectStore.getState();
   const cursor = projectCursor();
   if (!repo || !path || !cursor) return null;
-  return { repo, path, cursor };
+  return { repo, source, path, cursor };
 }
 
 /** Open a result in the project viewer at its line. */
@@ -33,11 +34,11 @@ export async function navigateTo(result: XrefResult): Promise<void> {
  */
 export async function gotoDefinitionAt(line: number, col: number): Promise<void> {
   const repo = useRepoStore.getState().repoPath;
-  const path = useProjectStore.getState().openPath;
+  const { openPath: path, source } = useProjectStore.getState();
   if (!repo || !path) return;
-  const symbol = await symbolAt(repo, path, line, col);
+  const symbol = await symbolAt(repo, source, path, line, col);
   if (!symbol) return;
-  const defs = await findDefinition(repo, symbol);
+  const defs = await findDefinition(repo, source, symbol);
   if (defs.length === 0) {
     useXrefStore.getState().show(`no definition for ${symbol.name}`, []);
   } else if (defs.length === 1) {
@@ -57,8 +58,8 @@ export async function gotoDefinition(): Promise<void> {
 export async function findUsages(): Promise<void> {
   const c = ctx();
   if (!c) return;
-  const symbol = await symbolAt(c.repo, c.path, c.cursor.line, c.cursor.col);
+  const symbol = await symbolAt(c.repo, c.source, c.path, c.cursor.line, c.cursor.col);
   if (!symbol) return;
-  const refs = await findReferences(c.repo, symbol);
+  const refs = await findReferences(c.repo, c.source, symbol);
   useXrefStore.getState().show(`references: ${symbol.name} (${refs.length})`, refs);
 }

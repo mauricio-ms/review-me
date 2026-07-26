@@ -16,7 +16,7 @@ import {
   sectionForHunk,
   type ReviewSection,
 } from "../lib/coverage";
-import { openFileInProject } from "../lib/project";
+import { openFileFromDiff } from "../lib/project";
 import { setProjectCursor } from "../lib/project-view";
 import {
   addFlag,
@@ -30,7 +30,14 @@ import DiffCleanState from "./DiffCleanState";
 import { useRepoStore } from "../state/repo";
 import { useTagsStore } from "../state/tags";
 import { useUIStore } from "../state/ui";
-import type { ChangedFile, DiffLine, Hunk } from "../types/diff";
+import {
+  comparisonLabel,
+  shortOid,
+  type ChangedFile,
+  type Comparison,
+  type DiffLine,
+  type Hunk,
+} from "../types/diff";
 import type {
   AnchorKind,
   AnchorSide,
@@ -76,6 +83,14 @@ const SECTION_LABEL: Record<ReviewSection, string> = {
   reviewed: "Reviewed",
   ignored: "Ignored",
 };
+
+/** What "nothing to show" means depends on what's being compared. */
+function emptyLabel(comparison: Comparison | undefined): string {
+  if (comparison?.kind === "branches") {
+    return `no changes between ${comparison.baseName} and ${comparison.targetName}`;
+  }
+  return "working tree clean";
+}
 
 function buildRows(
   files: ChangedFile[],
@@ -161,6 +176,8 @@ function buildRows(
 
 export default function DiffBuffer() {
   const diff = useRepoStore((s) => s.diff);
+  const comparison = diff?.comparison;
+  const comparisonEpoch = useRepoStore((s) => s.comparisonEpoch);
   const status = useRepoStore((s) => s.status);
   const expandedFiles = useRepoStore((s) => s.expandedFiles);
   const collapsedHunks = useRepoStore((s) => s.collapsedHunks);
@@ -203,6 +220,13 @@ export default function DiffBuffer() {
   useEffect(() => {
     setCursor((c) => Math.min(Math.max(0, c), Math.max(0, rows.length - 1)));
   }, [rows.length]);
+
+  // A different comparison is a different list of things — row 3 of the old one
+  // means nothing in the new one.
+  useEffect(() => {
+    setCursor(0);
+    setVisualAnchor(null);
+  }, [comparisonEpoch]);
 
   useEffect(() => {
     if (activeBuffer === "diff") rootRef.current?.focus({ preventScroll: true });
@@ -387,14 +411,17 @@ export default function DiffBuffer() {
     if (idx >= 0) setCursor(idx);
   };
 
-  // Open the file under the cursor in project mode, positioned at the new-side
-  // line the cursor maps to (line → that line, hunk → its start, file → first change).
+  // Open the file under the cursor in project mode, positioned at the line the
+  // cursor maps to (line → that line, hunk → its start, file → first change). The
+  // scope's side also picks the revision: old-side content (a deletion) only exists
+  // in the base, so opening it must not fall back to the working tree.
   const openAtCursor = () => {
     const row = rows[cursor];
     if (!row || row.kind === "section") return;
     const scope = cursorScope();
     const line = scope ? scope.lo : 1;
-    void openFileInProject(row.file.path).then(() => {
+    const side = scope?.side === "old" ? "old" : "new";
+    void openFileFromDiff(row.file.path, side).then(() => {
       requestAnimationFrame(() =>
         requestAnimationFrame(() => setProjectCursor(line)),
       );
@@ -569,11 +596,19 @@ export default function DiffBuffer() {
       onKeyDown={onKeyDown}
     >
       <div className="diff-header">
-        <span className="diff-header-branch">{diff?.branch}</span>
-        <span className="diff-header-sha">{diff?.head}</span>
+        <span className="diff-header-branch">
+          {comparison ? comparisonLabel(comparison) : ""}
+        </span>
+        <span className="diff-header-sha">
+          {comparison?.kind === "branches"
+            ? `merge-base ${shortOid(comparison.mergeBase)} → ${shortOid(
+                comparison.targetOid,
+              )}`
+            : (comparison?.head ?? "")}
+        </span>
         <span className="diff-header-count">
           {files.length === 0
-            ? "working tree clean"
+            ? emptyLabel(comparison)
             : `${files.length} changed file${files.length === 1 ? "" : "s"}`}
         </span>
         {visual && <span className="diff-header-visual">VISUAL</span>}
@@ -635,7 +670,11 @@ export default function DiffBuffer() {
                 <span className="diff-file-path">
                   {f.oldPath ? `${f.oldPath} → ${f.path}` : f.path}
                 </span>
-                {f.staged && <span className="diff-staged-dot" title="staged">●</span>}
+                {f.staged === true && (
+                  <span className="diff-staged-dot" title="staged">
+                    ●
+                  </span>
+                )}
                 <span className="diff-file-stat">
                   {f.binary ? (
                     "binary"

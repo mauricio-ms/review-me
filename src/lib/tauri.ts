@@ -1,10 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 
-import type { DiffSummary } from "../types/diff";
+import type { DiffSpec, DiffSummary } from "../types/diff";
 import type {
+  BranchInfo,
   DirectoryListing,
   FileMatch,
   FileSystemListing,
+  ProjectSource,
   RememberedRepo,
   RepoInfo,
   TreeListing,
@@ -14,15 +16,24 @@ import type {
   ReviewedCommitPreflight,
   ReviewedCommitResult,
 } from "../types/review-commit";
-import type { AnchorKind, AnchorSide, TagStore } from "../types/tags";
+import type {
+  AnchorKind,
+  AnchorSide,
+  ReviewScope,
+  TagStore,
+} from "../types/tags";
 import type { IndexStats, SymbolRef, XrefResult } from "../types/xref";
 
 export function openRepo(path: string): Promise<RepoInfo> {
   return invoke<RepoInfo>("open_repo", { path });
 }
 
-export function computeDiff(repo: string): Promise<DiffSummary> {
-  return invoke<DiffSummary>("compute_diff", { repo });
+export function computeDiff(repo: string, spec: DiffSpec): Promise<DiffSummary> {
+  return invoke<DiffSummary>("compute_diff", { repo, spec });
+}
+
+export function listBranches(repo: string): Promise<BranchInfo[]> {
+  return invoke<BranchInfo[]>("list_branches", { repo });
 }
 
 export function listRecentRepos(): Promise<RememberedRepo[]> {
@@ -48,16 +59,21 @@ export function createDirectory(
   return invoke<DirectoryListing>("create_directory", { path, name });
 }
 
-export function readFile(repo: string, path: string): Promise<string> {
-  return invoke<string>("read_file", { repo, path });
+export function readFile(
+  repo: string,
+  source: ProjectSource,
+  path: string,
+): Promise<string> {
+  return invoke<string>("read_file", { repo, source, path });
 }
 
-export function loadTags(repo: string): Promise<TagStore> {
-  return invoke<TagStore>("load_tags", { repo });
+export function loadTags(repo: string, scope: ReviewScope): Promise<TagStore> {
+  return invoke<TagStore>("load_tags", { repo, scope });
 }
 
 export function addReviewedTag(
   repo: string,
+  scope: ReviewScope,
   file: string,
   startLine: number,
   endLine: number,
@@ -66,6 +82,7 @@ export function addReviewedTag(
 ): Promise<TagStore> {
   return invoke<TagStore>("add_reviewed_tag", {
     repo,
+    scope,
     file,
     startLine,
     endLine,
@@ -76,6 +93,7 @@ export function addReviewedTag(
 
 export function addFlagTag(
   repo: string,
+  scope: ReviewScope,
   file: string,
   startLine: number,
   endLine: number,
@@ -86,6 +104,7 @@ export function addFlagTag(
 ): Promise<TagStore> {
   return invoke<TagStore>("add_flag_tag", {
     repo,
+    scope,
     file,
     startLine,
     endLine,
@@ -98,6 +117,7 @@ export function addFlagTag(
 
 export function addIgnoredTag(
   repo: string,
+  scope: ReviewScope,
   file: string,
   startLine: number,
   endLine: number,
@@ -106,6 +126,7 @@ export function addIgnoredTag(
 ): Promise<TagStore> {
   return invoke<TagStore>("add_ignored_tag", {
     repo,
+    scope,
     file,
     startLine,
     endLine,
@@ -114,16 +135,25 @@ export function addIgnoredTag(
   });
 }
 
-export function removeTag(repo: string, id: string): Promise<TagStore> {
-  return invoke<TagStore>("remove_tag", { repo, id });
+export function removeTag(
+  repo: string,
+  scope: ReviewScope,
+  id: string,
+): Promise<TagStore> {
+  return invoke<TagStore>("remove_tag", { repo, scope, id });
 }
 
-export function clearTags(repo: string): Promise<TagStore> {
-  return invoke<TagStore>("clear_tags", { repo });
+/** Clears the active comparison's marks only; other comparisons keep theirs. */
+export function clearTags(
+  repo: string,
+  scope: ReviewScope,
+): Promise<TagStore> {
+  return invoke<TagStore>("clear_tags", { repo, scope });
 }
 
 export function unmarkRange(
   repo: string,
+  scope: ReviewScope,
   file: string,
   startLine: number,
   endLine: number,
@@ -131,6 +161,7 @@ export function unmarkRange(
 ): Promise<TagStore> {
   return invoke<TagStore>("unmark_range", {
     repo,
+    scope,
     file,
     startLine,
     endLine,
@@ -172,39 +203,50 @@ export function commitReviewedChanges(
 
 export function fuzzyFiles(
   repo: string,
+  source: ProjectSource,
   query: string,
   limit: number,
 ): Promise<FileMatch[]> {
-  return invoke<FileMatch[]>("fuzzy_files", { repo, query, limit });
+  return invoke<FileMatch[]>("fuzzy_files", { repo, source, query, limit });
 }
 
-export function listRepoDir(repo: string, path: string): Promise<TreeListing> {
-  return invoke<TreeListing>("list_repo_dir", { repo, path });
+export function listRepoDir(
+  repo: string,
+  source: ProjectSource,
+  path: string,
+): Promise<TreeListing> {
+  return invoke<TreeListing>("list_repo_dir", { repo, source, path });
 }
 
-export function buildSymbolIndex(repo: string): Promise<IndexStats> {
-  return invoke<IndexStats>("build_symbol_index", { repo });
+export function buildSymbolIndex(
+  repo: string,
+  source: ProjectSource,
+): Promise<IndexStats> {
+  return invoke<IndexStats>("build_symbol_index", { repo, source });
 }
 
 export function symbolAt(
   repo: string,
+  source: ProjectSource,
   path: string,
   line: number,
   col: number,
 ): Promise<SymbolRef | null> {
-  return invoke<SymbolRef | null>("symbol_at", { repo, path, line, col });
+  return invoke<SymbolRef | null>("symbol_at", { repo, source, path, line, col });
 }
 
 export function findDefinition(
   repo: string,
+  source: ProjectSource,
   symbol: SymbolRef,
 ): Promise<XrefResult[]> {
-  return invoke<XrefResult[]>("find_definition", { repo, symbol });
+  return invoke<XrefResult[]>("find_definition", { repo, source, symbol });
 }
 
 export function findReferences(
   repo: string,
+  source: ProjectSource,
   symbol: SymbolRef,
 ): Promise<XrefResult[]> {
-  return invoke<XrefResult[]>("find_references", { repo, symbol });
+  return invoke<XrefResult[]>("find_references", { repo, source, symbol });
 }

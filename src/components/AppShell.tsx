@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 
 import { useRepoStore } from "../state/repo";
 import { useUIStore } from "../state/ui";
+import BranchCompareHost from "./BranchCompareHost";
 import BufferStatusBar from "./BufferStatusBar";
 import CommandLine from "./CommandLine";
 import CommandTransient from "./CommandTransient";
@@ -100,6 +101,7 @@ export default function AppShell() {
       <OpenRepoHost />
       <RecentReposHost />
       <FuzzyFinderHost />
+      <BranchCompareHost />
       <ConfirmClearHost />
       <CommitReviewedHost />
       <XrefHost />

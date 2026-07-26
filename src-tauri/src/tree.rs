@@ -5,6 +5,7 @@ use serde::Serialize;
 
 use crate::error::AppResult;
 use crate::repo;
+use crate::revision::{self, ProjectSource};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -23,38 +24,56 @@ pub struct TreeListing {
     pub entries: Vec<TreeEntry>,
 }
 
-/// List the immediate children of a repo-relative directory, skipping `.git` and
-/// any git-ignored paths so project mode mirrors what's under version control.
-pub fn list_dir(repo: &Repository, rel: &str) -> AppResult<TreeListing> {
-    let root = repo::root(repo)?;
+/// List the immediate children of a repo-relative directory in `source`. In the
+/// working tree that means skipping `.git` and git-ignored paths so project mode
+/// mirrors what's under version control; in a committed tree everything present is
+/// by definition tracked.
+pub fn list_dir(repo: &Repository, source: &ProjectSource, rel: &str) -> AppResult<TreeListing> {
     let rel = rel.trim_matches('/');
-    let dir = if rel.is_empty() {
-        root.clone()
-    } else {
-        root.join(rel)
+    let child_path = |name: &str| {
+        if rel.is_empty() {
+            name.to_string()
+        } else {
+            format!("{rel}/{name}")
+        }
     };
 
     let mut entries = Vec::new();
-    if let Ok(read_dir) = std::fs::read_dir(&dir) {
-        for entry in read_dir.flatten() {
-            let name = entry.file_name().to_string_lossy().into_owned();
-            if name == ".git" {
-                continue;
+    match revision::tree(repo, source)? {
+        Some(tree) => {
+            for (name, is_dir) in revision::list_tree_dir(repo, &tree, rel)? {
+                entries.push(TreeEntry {
+                    path: child_path(&name),
+                    name,
+                    is_dir,
+                });
             }
-            let child_rel = if rel.is_empty() {
-                name.clone()
+        }
+        None => {
+            let root = repo::root(repo)?;
+            let dir = if rel.is_empty() {
+                root.clone()
             } else {
-                format!("{rel}/{name}")
+                root.join(rel)
             };
-            if repo.is_path_ignored(Path::new(&child_rel)).unwrap_or(false) {
-                continue;
+            if let Ok(read_dir) = std::fs::read_dir(&dir) {
+                for entry in read_dir.flatten() {
+                    let name = entry.file_name().to_string_lossy().into_owned();
+                    if name == ".git" {
+                        continue;
+                    }
+                    let child_rel = child_path(&name);
+                    if repo.is_path_ignored(Path::new(&child_rel)).unwrap_or(false) {
+                        continue;
+                    }
+                    let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+                    entries.push(TreeEntry {
+                        name,
+                        path: child_rel,
+                        is_dir,
+                    });
+                }
             }
-            let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
-            entries.push(TreeEntry {
-                name,
-                path: child_rel,
-                is_dir,
-            });
         }
     }
 

@@ -1,4 +1,25 @@
+import type { DiffSpec } from "./diff";
+
 export type AnchorKind = "file" | "hunk" | "range";
+
+/**
+ * Which comparison a tag was made against. Marks are scoped so reviewing
+ * `master...feature` never marks the same lines as reviewed in the working-tree diff
+ * (or in a different branch pair). Ref names — not oids — are the durable identity:
+ * a branch that moves is still the same review.
+ */
+export type ReviewScope =
+  | { kind: "worktree" }
+  | { kind: "branches"; baseRef: string; targetRef: string };
+
+export const WORKTREE_SCOPE: ReviewScope = { kind: "worktree" };
+
+/** The review scope a comparison's marks belong to. */
+export function scopeForSpec(spec: DiffSpec): ReviewScope {
+  return spec.kind === "worktree"
+    ? WORKTREE_SCOPE
+    : { kind: "branches", baseRef: spec.baseRef, targetRef: spec.targetRef };
+}
 
 /**
  * Which side of the diff an anchor's content lives on. `new` anchors to the
@@ -21,6 +42,8 @@ export interface Anchor {
   contextAfter: string[];
   kind: AnchorKind;
   side: AnchorSide;
+  /** The comparison this mark belongs to. */
+  scope: ReviewScope;
   /** Set by re-anchoring when the captured content can no longer be found. */
   stale: boolean;
 }

@@ -12,7 +12,8 @@ export type PickerKind =
   | "recentRepos"
   | "fuzzyFiles"
   | "clearTags"
-  | "commitReviewed";
+  | "commitReviewed"
+  | "branchCompare";
 
 type UIState = {
   activeBuffer: BufferName;

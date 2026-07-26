@@ -11,6 +11,40 @@ export interface RememberedRepo {
   lastOpenedAt: number;
 }
 
+/**
+ * Which snapshot of the repo project mode is reading. `worktree` is the checkout on
+ * disk; `commit` is a resolved commit's tree — so opening a file from a
+ * `master...feature` diff shows *that branch's* content, not whatever is checked out.
+ */
+export type ProjectSource =
+  | { kind: "worktree" }
+  | { kind: "commit"; oid: string };
+
+export const WORKTREE_SOURCE: ProjectSource = { kind: "worktree" };
+
+export function sameSource(a: ProjectSource, b: ProjectSource): boolean {
+  if (a.kind === "worktree" || b.kind === "worktree") return a.kind === b.kind;
+  return a.oid === b.oid;
+}
+
+export type BranchKind = "local" | "remote";
+
+/**
+ * One selectable ref in the branch-comparison picker. `name` is the canonical ref
+ * (`refs/heads/x`, `refs/remotes/origin/x`) used in requests and persisted review
+ * scopes; `display` is the shorthand shown to the reviewer.
+ */
+export interface BranchInfo {
+  name: string;
+  display: string;
+  shortOid: string;
+  kind: BranchKind;
+  /** The branch HEAD currently points at. */
+  isCurrent: boolean;
+  /** The repo's inferred default branch (remote HEAD, else master, else main). */
+  isDefault: boolean;
+}
+
 export type FileSystemEntryKind = "directory" | "file";
 
 export interface FileSystemEntry {

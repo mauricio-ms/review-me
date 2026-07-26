@@ -1,3 +1,4 @@
+mod branches;
 mod commands;
 mod diff;
 mod error;
@@ -7,6 +8,7 @@ mod queries;
 mod repo;
 mod repo_library;
 mod review_commit;
+mod revision;
 mod tags;
 mod tree;
 mod xref;
@@ -16,13 +18,13 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::open_repo,
             commands::compute_diff,
+            commands::list_branches,
             commands::list_recent_repos,
             commands::forget_repo,
             commands::list_file_system_entries,
             commands::create_directory,
             commands::read_file,
             commands::load_tags,
-            commands::save_tags,
             commands::add_reviewed_tag,
             commands::add_flag_tag,
             commands::add_ignored_tag,

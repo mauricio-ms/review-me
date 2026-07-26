@@ -1,15 +1,17 @@
 use std::path::PathBuf;
 
-use crate::diff::{self, DiffSummary};
-use crate::error::{AppError, AppResult};
+use crate::branches::{self, BranchInfo};
+use crate::diff::{self, DiffSpec, DiffSummary};
+use crate::error::AppResult;
 use crate::fs_browse::{self, DirectoryListing, FileSystemListing};
 use crate::fuzzy::{self, FileMatch};
 use crate::repo::{self, RepoInfo};
 use crate::repo_library::{self, RememberedRepo};
+use crate::revision::{self, ProjectSource};
 use crate::review_commit::{
     self, PreparedReviewedCommit, ReviewedCommitPreflight, ReviewedCommitResult,
 };
-use crate::tags::{self, AnchorKind, AnchorSide, TagStore};
+use crate::tags::{self, AnchorKind, AnchorSide, ReviewScope, TagStore};
 use crate::tree::{self, TreeListing};
 use crate::xref::{self, IndexStats, SymbolRef, XrefResult};
 
@@ -30,11 +32,19 @@ pub fn open_repo(app: tauri::AppHandle, path: String) -> AppResult<RepoInfo> {
     Ok(info)
 }
 
-/// The working-tree-vs-HEAD diff for the repo rooted at `repo`.
+/// The diff `spec` describes for the repo rooted at `repo`: working-tree-vs-HEAD by
+/// default, or a merge-base branch comparison.
 #[tauri::command]
-pub fn compute_diff(repo: String) -> AppResult<DiffSummary> {
+pub fn compute_diff(repo: String, spec: DiffSpec) -> AppResult<DiffSummary> {
     let repository = repo::open(&PathBuf::from(repo))?;
-    diff::compute(&repository)
+    diff::compute(&repository, &spec)
+}
+
+/// Local and remote-tracking branches for the comparison picker.
+#[tauri::command]
+pub fn list_branches(repo: String) -> AppResult<Vec<BranchInfo>> {
+    let repository = repo::open(&PathBuf::from(repo))?;
+    branches::list(&repository)
 }
 
 #[tauri::command]
@@ -57,44 +67,46 @@ pub fn create_directory(path: String, name: String) -> AppResult<DirectoryListin
     fs_browse::create_directory(path, name)
 }
 
-/// Read a repo-relative file's text content (project mode + tag anchoring).
+/// Read a repo-relative file's text content from `source` — the working tree, or the
+/// commit a branch comparison is showing.
 #[tauri::command]
-pub fn read_file(repo: String, path: String) -> AppResult<String> {
-    let root = repo_root(repo)?;
-    let full = root.join(&path);
-    // Keep reads inside the repo root.
-    let canonical = full.canonicalize()?;
-    if !canonical.starts_with(&root) {
-        return Err(AppError::Repo("path escapes the repository".into()));
-    }
-    Ok(std::fs::read_to_string(canonical)?)
+pub fn read_file(repo: String, source: ProjectSource, path: String) -> AppResult<String> {
+    let repository = repo::open(&PathBuf::from(repo))?;
+    let root = repo::root(&repository)?;
+    revision::read_file(&repository, &source, &root, &path)
 }
 
+/// Tags belonging to `scope` (the active comparison), re-anchored against it.
 #[tauri::command]
-pub fn load_tags(repo: String) -> AppResult<TagStore> {
-    tags::load(&repo_root(repo)?)
-}
-
-#[tauri::command]
-pub fn save_tags(repo: String, store: TagStore) -> AppResult<()> {
-    tags::save(&repo_root(repo)?, &store)
+pub fn load_tags(repo: String, scope: ReviewScope) -> AppResult<TagStore> {
+    tags::load(&repo_root(repo)?, &scope)
 }
 
 #[tauri::command]
 pub fn add_reviewed_tag(
     repo: String,
+    scope: ReviewScope,
     file: String,
     start_line: u32,
     end_line: u32,
     kind: AnchorKind,
     side: AnchorSide,
 ) -> AppResult<TagStore> {
-    tags::add_reviewed(&repo_root(repo)?, &file, start_line, end_line, kind, side)
+    tags::add_reviewed(
+        &repo_root(repo)?,
+        &scope,
+        &file,
+        start_line,
+        end_line,
+        kind,
+        side,
+    )
 }
 
 #[tauri::command]
 pub fn add_flag_tag(
     repo: String,
+    scope: ReviewScope,
     file: String,
     start_line: u32,
     end_line: u32,
@@ -103,92 +115,133 @@ pub fn add_flag_tag(
     note: Option<String>,
     severity: Option<String>,
 ) -> AppResult<TagStore> {
-    tags::add_flag(&repo_root(repo)?, &file, start_line, end_line, kind, side, note, severity)
+    tags::add_flag(
+        &repo_root(repo)?,
+        &scope,
+        &file,
+        start_line,
+        end_line,
+        kind,
+        side,
+        note,
+        severity,
+    )
 }
 
 #[tauri::command]
 pub fn add_ignored_tag(
     repo: String,
+    scope: ReviewScope,
     file: String,
     start_line: u32,
     end_line: u32,
     kind: AnchorKind,
     side: AnchorSide,
 ) -> AppResult<TagStore> {
-    tags::add_ignored(&repo_root(repo)?, &file, start_line, end_line, kind, side)
+    tags::add_ignored(
+        &repo_root(repo)?,
+        &scope,
+        &file,
+        start_line,
+        end_line,
+        kind,
+        side,
+    )
 }
 
 #[tauri::command]
-pub fn remove_tag(repo: String, id: String) -> AppResult<TagStore> {
-    tags::remove(&repo_root(repo)?, &id)
+pub fn remove_tag(repo: String, scope: ReviewScope, id: String) -> AppResult<TagStore> {
+    tags::remove(&repo_root(repo)?, &scope, &id)
 }
 
-/// Remove every reviewed, flag, and ignore tag in the repo.
+/// Remove every reviewed, flag, and ignore tag in the active comparison. Marks made
+/// against other comparisons are untouched.
 #[tauri::command]
-pub fn clear_tags(repo: String) -> AppResult<TagStore> {
-    tags::clear_all(&repo_root(repo)?)
+pub fn clear_tags(repo: String, scope: ReviewScope) -> AppResult<TagStore> {
+    tags::clear_scope(&repo_root(repo)?, &scope)
 }
 
-/// Fuzzy-rank repo files for the file finder.
+/// Fuzzy-rank `source`'s files for the file finder.
 #[tauri::command]
-pub fn fuzzy_files(repo: String, query: String, limit: u32) -> AppResult<Vec<FileMatch>> {
+pub fn fuzzy_files(
+    repo: String,
+    source: ProjectSource,
+    query: String,
+    limit: u32,
+) -> AppResult<Vec<FileMatch>> {
     let repository = repo::open(&PathBuf::from(repo))?;
-    fuzzy::fuzzy_files(&repository, &query, limit as usize)
+    fuzzy::fuzzy_files(&repository, &source, &query, limit as usize)
 }
 
 /// List the children of a repo-relative directory for project-mode navigation.
 #[tauri::command]
-pub fn list_repo_dir(repo: String, path: String) -> AppResult<TreeListing> {
+pub fn list_repo_dir(
+    repo: String,
+    source: ProjectSource,
+    path: String,
+) -> AppResult<TreeListing> {
     let repository = repo::open(&PathBuf::from(repo))?;
-    tree::list_dir(&repository, &path)
+    tree::list_dir(&repository, &source, &path)
 }
 
-/// (Re)build the tree-sitter symbol index for cross-references.
+/// (Re)build the tree-sitter symbol index for cross-references over `source`.
 #[tauri::command]
-pub fn build_symbol_index(repo: String) -> AppResult<IndexStats> {
+pub fn build_symbol_index(repo: String, source: ProjectSource) -> AppResult<IndexStats> {
     let repository = repo::open(&PathBuf::from(repo))?;
     let root = repo::root(&repository)?;
-    let files = fuzzy::repo_files(&repository)?;
-    xref::build_index(&root, &files)
+    let files = fuzzy::repo_files(&repository, &source)?;
+    xref::build_index(&repository, &root, &source, &files)
 }
 
 /// Resolve the symbol under a cursor position (1-based line, 0-based col).
 #[tauri::command]
 pub fn symbol_at(
     repo: String,
+    source: ProjectSource,
     path: String,
     line: u32,
     col: u32,
 ) -> AppResult<Option<SymbolRef>> {
-    xref::symbol_at(&repo_root(repo)?, &path, line, col)
+    let repository = repo::open(&PathBuf::from(repo))?;
+    let root = repo::root(&repository)?;
+    xref::symbol_at(&repository, &root, &source, &path, line, col)
 }
 
 #[tauri::command]
-pub fn find_definition(repo: String, symbol: SymbolRef) -> AppResult<Vec<XrefResult>> {
+pub fn find_definition(
+    repo: String,
+    source: ProjectSource,
+    symbol: SymbolRef,
+) -> AppResult<Vec<XrefResult>> {
     let repository = repo::open(&PathBuf::from(repo))?;
     let root = repo::root(&repository)?;
-    let files = fuzzy::repo_files(&repository)?;
-    xref::find_definition(&root, &files, &symbol)
+    let files = fuzzy::repo_files(&repository, &source)?;
+    xref::find_definition(&repository, &root, &source, &files, &symbol)
 }
 
 #[tauri::command]
-pub fn find_references(repo: String, symbol: SymbolRef) -> AppResult<Vec<XrefResult>> {
+pub fn find_references(
+    repo: String,
+    source: ProjectSource,
+    symbol: SymbolRef,
+) -> AppResult<Vec<XrefResult>> {
     let repository = repo::open(&PathBuf::from(repo))?;
     let root = repo::root(&repository)?;
-    let files = fuzzy::repo_files(&repository)?;
-    xref::find_references(&root, &files, &symbol)
+    let files = fuzzy::repo_files(&repository, &source)?;
+    xref::find_references(&repository, &root, &source, &files, &symbol)
 }
 
 /// Remove every reviewed, flag, and ignore tag overlapping `[start_line, end_line]` in `file`.
 #[tauri::command]
 pub fn unmark_range(
     repo: String,
+    scope: ReviewScope,
     file: String,
     start_line: u32,
     end_line: u32,
     side: AnchorSide,
 ) -> AppResult<TagStore> {
-    tags::unmark_range(&repo_root(repo)?, &file, start_line, end_line, side)
+    tags::unmark_range(&repo_root(repo)?, &scope, &file, start_line, end_line, side)
 }
 
 #[tauri::command]

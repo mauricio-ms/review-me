@@ -1,6 +1,11 @@
 import { create } from "zustand";
 
-import type { TreeEntry } from "../types/repo";
+import {
+  sameSource,
+  WORKTREE_SOURCE,
+  type ProjectSource,
+  type TreeEntry,
+} from "../types/repo";
 
 const EMPTY_ENTRIES: TreeEntry[] = [];
 
@@ -13,11 +18,24 @@ type ProjectState = {
   openPath: string | null;
   content: string | null;
   loadingFile: boolean;
+  /**
+   * The revision the tree, viewer, finder, and xref index all read from. Every
+   * project read goes through it, so the buffer is never a mix of snapshots.
+   */
+  source: ProjectSource;
+  /** How to name `source` in the modeline (e.g. "feature@e780b4a"); null = worktree. */
+  sourceLabel: string | null;
 
   setDir: (path: string, entries: TreeEntry[]) => void;
   setExpanded: (path: string, open: boolean) => void;
   setOpenFile: (path: string, content: string) => void;
   setLoadingFile: (loading: boolean) => void;
+  /**
+   * Point the buffer at a different revision. Cached listings and the open file
+   * belong to the old one, so they're dropped; re-pointing at the same revision is
+   * a no-op that keeps the reviewer's place.
+   */
+  setSource: (source: ProjectSource, label: string | null) => void;
   reset: () => void;
 };
 
@@ -27,6 +45,8 @@ export const useProjectStore = create<ProjectState>((set) => ({
   openPath: null,
   content: null,
   loadingFile: false,
+  source: WORKTREE_SOURCE,
+  sourceLabel: null,
 
   setDir: (path, entries) =>
     set((s) => ({ dirs: { ...s.dirs, [path]: entries } })),
@@ -40,6 +60,20 @@ export const useProjectStore = create<ProjectState>((set) => ({
   setOpenFile: (path, content) =>
     set({ openPath: path, content, loadingFile: false }),
   setLoadingFile: (loading) => set({ loadingFile: loading }),
+  setSource: (source, label) =>
+    set((s) =>
+      sameSource(s.source, source) && s.sourceLabel === label
+        ? {}
+        : {
+            source,
+            sourceLabel: label,
+            dirs: {},
+            expanded: new Set<string>(),
+            openPath: null,
+            content: null,
+            loadingFile: false,
+          },
+    ),
   reset: () =>
     set({
       dirs: {},
@@ -47,6 +81,8 @@ export const useProjectStore = create<ProjectState>((set) => ({
       openPath: null,
       content: null,
       loadingFile: false,
+      source: WORKTREE_SOURCE,
+      sourceLabel: null,
     }),
 }));
 

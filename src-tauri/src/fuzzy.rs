@@ -7,6 +7,7 @@ use serde::Serialize;
 
 use crate::error::AppResult;
 use crate::repo;
+use crate::revision::{self, ProjectSource};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -17,9 +18,14 @@ pub struct FileMatch {
     pub indices: Vec<u32>,
 }
 
-/// Repo-relative paths of all files worth navigating: everything git tracks plus
-/// untracked-but-not-ignored files, restricted to paths that still exist on disk.
-pub fn repo_files(repo: &Repository) -> AppResult<Vec<String>> {
+/// Repo-relative paths of all files worth navigating in `source`. For the working
+/// tree that's everything git tracks plus untracked-but-not-ignored files, restricted
+/// to paths that still exist on disk; for a committed tree it's every blob in it.
+pub fn repo_files(repo: &Repository, source: &ProjectSource) -> AppResult<Vec<String>> {
+    if let Some(tree) = revision::tree(repo, source)? {
+        return revision::tree_files(&tree);
+    }
+
     let mut set: BTreeSet<String> = BTreeSet::new();
 
     let index = repo.index()?;
@@ -49,8 +55,13 @@ pub fn repo_files(repo: &Repository) -> AppResult<Vec<String>> {
 
 /// Fuzzy-rank the repo's files against `query`. Empty query returns the first
 /// `limit` files (path-sorted) so the finder shows content immediately.
-pub fn fuzzy_files(repo: &Repository, query: &str, limit: usize) -> AppResult<Vec<FileMatch>> {
-    let files = repo_files(repo)?;
+pub fn fuzzy_files(
+    repo: &Repository,
+    source: &ProjectSource,
+    query: &str,
+    limit: usize,
+) -> AppResult<Vec<FileMatch>> {
+    let files = repo_files(repo, source)?;
     let query = query.trim();
 
     if query.is_empty() {
@@ -133,12 +144,49 @@ mod tests {
         fs::write(path.join("ignored.txt"), "x").unwrap();
 
         let repo = Repository::open(path).unwrap();
-        let all = repo_files(&repo).unwrap();
+        let all = repo_files(&repo, &ProjectSource::Worktree).unwrap();
         assert!(all.contains(&"src/main/App.java".to_string()));
         assert!(all.contains(&"Untracked.java".to_string()));
         assert!(!all.contains(&"ignored.txt".to_string()), "ignored excluded");
 
-        let hits = fuzzy_files(&repo, "appjava", 10).unwrap();
+        let hits = fuzzy_files(&repo, &ProjectSource::Worktree, "appjava", 10).unwrap();
         assert_eq!(hits.first().map(|m| m.path.as_str()), Some("src/main/App.java"));
+    }
+
+    #[test]
+    fn revision_source_lists_that_commits_files_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path();
+        run(path, &["init", "-q", "-b", "master"]);
+        fs::write(path.join("Base.java"), "x").unwrap();
+        run(path, &["add", "."]);
+        run(path, &["commit", "-qm", "init"]);
+
+        run(path, &["checkout", "-qb", "feature"]);
+        fs::write(path.join("Branch.java"), "x").unwrap();
+        run(path, &["add", "."]);
+        run(path, &["commit", "-qm", "feature"]);
+        run(path, &["checkout", "-q", "master"]);
+
+        // The checkout is on master and carries an untracked file.
+        fs::write(path.join("Scratch.java"), "x").unwrap();
+
+        let repo = Repository::open(path).unwrap();
+        let feature_oid = repo
+            .find_reference("refs/heads/feature")
+            .unwrap()
+            .peel_to_commit()
+            .unwrap()
+            .id()
+            .to_string();
+        let source = ProjectSource::Commit { oid: feature_oid };
+
+        let files = repo_files(&repo, &source).unwrap();
+        assert_eq!(
+            files,
+            vec!["Base.java".to_string(), "Branch.java".to_string()],
+            "the revision's blobs, not the checkout's files"
+        );
+        assert!(!files.contains(&"Scratch.java".to_string()));
     }
 }

@@ -4,10 +4,12 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 use streaming_iterator::StreamingIterator;
+use git2::Repository;
 use tree_sitter::{Language, Parser, Point, Query, QueryCursor, Tree};
 
 use crate::error::{AppError, AppResult};
 use crate::queries;
+use crate::revision::{self, ProjectSource};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -70,13 +72,22 @@ struct FileEntry {
     tree: Tree,
 }
 
-struct JavaIndex {
+/// What a cached index was built from. A branch comparison browses a commit's tree,
+/// so the same repo root can have several distinct indexes.
+#[derive(PartialEq, Eq)]
+struct IndexKey {
     root: PathBuf,
+    source: ProjectSource,
+}
+
+struct JavaIndex {
+    key: IndexKey,
     files: Vec<FileEntry>,
     defs: HashMap<String, Vec<DefRec>>,
 }
 
-// One cached project index. Rebuilt when the root changes or on explicit request.
+// One cached project index. Rebuilt when the root or revision changes, or on
+// explicit request.
 static INDEX: Mutex<Option<JavaIndex>> = Mutex::new(None);
 
 fn java_language() -> Language {
@@ -110,8 +121,15 @@ fn kind_from_capture(name: &str) -> SymbolKind {
     }
 }
 
-/// (Re)build the Java symbol index for `root` over the given repo-relative files.
-pub fn build_index(root: &Path, rel_files: &[String]) -> AppResult<IndexStats> {
+/// (Re)build the Java symbol index for `root` at `source` over the given
+/// repo-relative files. Content is read from `source`, so an index built for a branch
+/// comparison never mixes in the checkout's version of a file.
+pub fn build_index(
+    repo: &Repository,
+    root: &Path,
+    source: &ProjectSource,
+    rel_files: &[String],
+) -> AppResult<IndexStats> {
     let language = java_language();
     let def_query = Query::new(&language, queries::java::DEFINITIONS)
         .map_err(|e| AppError::TreeSitter(e.to_string()))?;
@@ -122,7 +140,7 @@ pub fn build_index(root: &Path, rel_files: &[String]) -> AppResult<IndexStats> {
     let mut symbol_count = 0u32;
 
     for rel in rel_files.iter().filter(|f| is_java(f)) {
-        let source = match std::fs::read_to_string(root.join(rel)) {
+        let source = match revision::read_file(repo, source, root, rel) {
             Ok(s) => s,
             Err(_) => continue,
         };
@@ -162,31 +180,41 @@ pub fn build_index(root: &Path, rel_files: &[String]) -> AppResult<IndexStats> {
         symbols: symbol_count,
     };
     *INDEX.lock().unwrap() = Some(JavaIndex {
-        root: root.to_path_buf(),
+        key: IndexKey {
+            root: root.to_path_buf(),
+            source: source.clone(),
+        },
         files,
         defs,
     });
     Ok(stats)
 }
 
-/// Build the index if it's missing or was built for a different repo root.
-fn ensure_index(root: &Path, rel_files: &[String]) -> AppResult<()> {
+/// Build the index if it's missing or was built for a different repo root/revision.
+fn ensure_index(
+    repo: &Repository,
+    root: &Path,
+    source: &ProjectSource,
+    rel_files: &[String],
+) -> AppResult<()> {
     let needs_build = {
         let guard = INDEX.lock().unwrap();
         match guard.as_ref() {
-            Some(index) => index.root != root,
+            Some(index) => index.key.root != root || index.key.source != *source,
             None => true,
         }
     };
     if needs_build {
-        build_index(root, rel_files)?;
+        build_index(repo, root, source, rel_files)?;
     }
     Ok(())
 }
 
-/// The identifier under `(line, col)` in `root/rel`, parsed fresh from disk.
+/// The identifier under `(line, col)` in `rel`, parsed fresh from `source`.
 pub fn symbol_at(
+    repo: &Repository,
     root: &Path,
+    source: &ProjectSource,
     rel: &str,
     line: u32,
     col: u32,
@@ -194,7 +222,7 @@ pub fn symbol_at(
     if !is_java(rel) {
         return Ok(None);
     }
-    let source = std::fs::read_to_string(root.join(rel))?;
+    let source = revision::read_file(repo, source, root, rel)?;
     let mut parser = java_parser()?;
     let tree = match parser.parse(&source, None) {
         Some(t) => t,
@@ -221,11 +249,13 @@ pub fn symbol_at(
 }
 
 pub fn find_definition(
+    repo: &Repository,
     root: &Path,
+    source: &ProjectSource,
     rel_files: &[String],
     symbol: &SymbolRef,
 ) -> AppResult<Vec<XrefResult>> {
-    ensure_index(root, rel_files)?;
+    ensure_index(repo, root, source, rel_files)?;
     let guard = INDEX.lock().unwrap();
     let index = guard.as_ref().expect("index built");
     let mut results: Vec<XrefResult> = index
@@ -249,11 +279,13 @@ pub fn find_definition(
 }
 
 pub fn find_references(
+    repo: &Repository,
     root: &Path,
+    source: &ProjectSource,
     rel_files: &[String],
     symbol: &SymbolRef,
 ) -> AppResult<Vec<XrefResult>> {
-    ensure_index(root, rel_files)?;
+    ensure_index(repo, root, source, rel_files)?;
     let language = java_language();
     let ref_query = Query::new(&language, queries::java::REFERENCES)
         .map_err(|e| AppError::TreeSitter(e.to_string()))?;
@@ -321,8 +353,12 @@ mod tests {
         )
         .unwrap();
         let files = vec!["Greeter.java".to_string(), "Main.java".to_string()];
+        // The index reads through `revision`, so it needs a repo handle even for the
+        // plain working-tree source.
+        let repo = git2::Repository::init(root).unwrap();
+        let src = ProjectSource::Worktree;
 
-        build_index(root, &files).unwrap();
+        build_index(&repo, root, &src, &files).unwrap();
 
         let sym = SymbolRef {
             name: "Greeter".to_string(),
@@ -331,18 +367,20 @@ mod tests {
             line: 3,
             col: 8,
         };
-        let defs = find_definition(root, &files, &sym).unwrap();
+        let defs = find_definition(&repo, root, &src, &files, &sym).unwrap();
         assert_eq!(defs.len(), 1);
         assert_eq!(defs[0].file, "Greeter.java");
 
-        let refs = find_references(root, &files, &sym).unwrap();
+        let refs = find_references(&repo, root, &src, &files, &sym).unwrap();
         // Two `Greeter` usages in Main.java + the declaration in Greeter.java.
         assert!(refs.len() >= 3, "got {} refs", refs.len());
         assert!(refs.iter().any(|r| r.file == "Greeter.java"));
         assert!(refs.iter().any(|r| r.file == "Main.java"));
 
         // symbol_at lands on the `Greeter` type use in Main.java line 3.
-        let at = symbol_at(root, "Main.java", 3, 8).unwrap().unwrap();
+        let at = symbol_at(&repo, root, &src, "Main.java", 3, 8)
+            .unwrap()
+            .unwrap();
         assert_eq!(at.name, "Greeter");
     }
 }

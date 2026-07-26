@@ -1,11 +1,63 @@
 use std::collections::HashSet;
 use std::path::Path;
 
-use git2::{Delta, Diff, DiffFindOptions, DiffOptions, Patch, Repository, Tree};
-use serde::Serialize;
+use git2::{Delta, Diff, DiffDelta, DiffFindOptions, DiffOptions, Oid, Patch, Repository, Tree};
+use serde::{Deserialize, Serialize};
 
+use crate::branches::{self, ResolvedBranches};
 use crate::error::AppResult;
 use crate::repo;
+
+/// How a branch comparison picks the old side. Only `MergeBase` exists today
+/// (`git diff base...target`), but the tagged shape leaves room for `Direct`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DiffStrategy {
+    MergeBase,
+}
+
+/// What the diff buffer is showing. `Worktree` is the default magit-status view
+/// (working tree vs. HEAD); `Branches` reviews committed history between two refs
+/// and never touches the checkout, index, or working tree.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum DiffSpec {
+    Worktree,
+    #[serde(rename_all = "camelCase")]
+    Branches {
+        base_ref: String,
+        target_ref: String,
+        strategy: DiffStrategy,
+    },
+}
+
+impl Default for DiffSpec {
+    fn default() -> Self {
+        DiffSpec::Worktree
+    }
+}
+
+/// Resolved metadata for the comparison a `DiffSummary` describes. Kept separate from
+/// the file list so the UI never has to infer the mode from overloaded fields.
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum Comparison {
+    #[serde(rename_all = "camelCase")]
+    Worktree { head: String, branch: String },
+    #[serde(rename_all = "camelCase")]
+    Branches {
+        /// Canonical refs — the durable identity of the comparison.
+        base_ref: String,
+        target_ref: String,
+        /// Shorthand names for display.
+        base_name: String,
+        target_name: String,
+        /// Resolved oids — the exact snapshot on screen.
+        base_oid: String,
+        target_oid: String,
+        merge_base: String,
+    },
+}
 
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -51,7 +103,9 @@ pub struct ChangedFile {
     pub path: String,
     pub old_path: Option<String>,
     pub status: ChangeStatus,
-    pub staged: bool,
+    /// Whether the change is present in the index. `None` in branch mode, where both
+    /// sides are committed history and staging is meaningless.
+    pub staged: Option<bool>,
     pub hunks: Vec<Hunk>,
     pub added_lines: u32,
     pub removed_lines: u32,
@@ -62,14 +116,25 @@ pub struct ChangedFile {
 #[serde(rename_all = "camelCase")]
 pub struct DiffSummary {
     pub repo_root: String,
-    pub head: String,
-    pub branch: String,
+    pub comparison: Comparison,
     pub files: Vec<ChangedFile>,
 }
 
-/// Compute the working-tree-vs-HEAD diff: every uncommitted change, staged or not,
-/// including newly created (untracked) files. This is the magit-status view.
-pub fn compute(repo: &Repository) -> AppResult<DiffSummary> {
+/// Compute the diff `spec` asks for. Never mutates the repository.
+pub fn compute(repo: &Repository, spec: &DiffSpec) -> AppResult<DiffSummary> {
+    match spec {
+        DiffSpec::Worktree => compute_worktree(repo),
+        DiffSpec::Branches {
+            base_ref,
+            target_ref,
+            strategy: DiffStrategy::MergeBase,
+        } => compute_branches(repo, &branches::resolve(repo, base_ref, target_ref)?),
+    }
+}
+
+/// The working-tree-vs-HEAD diff: every uncommitted change, staged or not, including
+/// newly created (untracked) files. This is the magit-status view.
+fn compute_worktree(repo: &Repository) -> AppResult<DiffSummary> {
     let head_tree = head_tree(repo)?;
 
     let mut opts = DiffOptions::new();
@@ -85,7 +150,10 @@ pub fn compute(repo: &Repository) -> AppResult<DiffSummary> {
 
     let mut files = Vec::new();
     for idx in 0..diff.deltas().len() {
-        if let Some(file) = changed_file(&diff, idx, &staged, repo, &root)? {
+        let file = changed_file(&diff, idx, Some(&staged), &|_delta, path| {
+            path_change_is_binary(repo, &root, path)
+        })?;
+        if let Some(file) = file {
             files.push(file);
         }
     }
@@ -93,18 +161,56 @@ pub fn compute(repo: &Repository) -> AppResult<DiffSummary> {
     let (head, branch) = repo::head_info(repo);
     Ok(DiffSummary {
         repo_root: root.to_string_lossy().into_owned(),
-        head,
-        branch,
+        comparison: Comparison::Worktree { head, branch },
         files,
     })
 }
 
+/// `git diff base...target`: the merge-base tree against the target tree. The index,
+/// untracked files, and any dirty working-tree content are deliberately ignored —
+/// only committed history is on screen.
+fn compute_branches(repo: &Repository, resolved: &ResolvedBranches) -> AppResult<DiffSummary> {
+    let old_tree = repo.find_commit(resolved.merge_base)?.tree()?;
+    let new_tree = repo.find_commit(resolved.target_oid)?.tree()?;
+
+    let mut opts = DiffOptions::new();
+    opts.context_lines(3);
+    let mut diff =
+        repo.diff_tree_to_tree(Some(&old_tree), Some(&new_tree), Some(&mut opts))?;
+    diff.find_similar(Some(DiffFindOptions::new().renames(true)))?;
+
+    let mut files = Vec::new();
+    for idx in 0..diff.deltas().len() {
+        let file = changed_file(&diff, idx, None, &|delta, _path| {
+            delta_change_is_binary(repo, delta)
+        })?;
+        if let Some(file) = file {
+            files.push(file);
+        }
+    }
+
+    Ok(DiffSummary {
+        repo_root: repo::root(repo)?.to_string_lossy().into_owned(),
+        comparison: Comparison::Branches {
+            base_ref: resolved.base_ref.clone(),
+            target_ref: resolved.target_ref.clone(),
+            base_name: resolved.base_name.clone(),
+            target_name: resolved.target_name.clone(),
+            base_oid: resolved.base_oid.to_string(),
+            target_oid: resolved.target_oid.to_string(),
+            merge_base: resolved.merge_base.to_string(),
+        },
+        files,
+    })
+}
+
+/// Build one `ChangedFile` from delta `idx`. `staged` is `None` in branch mode;
+/// `is_binary` differs per mode (working file vs. the delta's own blobs).
 fn changed_file(
     diff: &Diff,
     idx: usize,
-    staged: &HashSet<String>,
-    repo: &Repository,
-    root: &Path,
+    staged: Option<&HashSet<String>>,
+    is_binary: &dyn Fn(&DiffDelta<'_>, &str) -> bool,
 ) -> AppResult<Option<ChangedFile>> {
     let delta = match diff.get_delta(idx) {
         Some(delta) => delta,
@@ -131,7 +237,7 @@ fn changed_file(
         _ => None,
     };
 
-    let binary = path_change_is_binary(repo, root, &path);
+    let binary = is_binary(&delta, &path);
     let mut hunks = Vec::new();
     let mut added_lines = 0u32;
     let mut removed_lines = 0u32;
@@ -175,7 +281,7 @@ fn changed_file(
     }
 
     Ok(Some(ChangedFile {
-        staged: staged.contains(&path),
+        staged: staged.map(|paths| paths.contains(&path)),
         path,
         old_path: renamed_from,
         status,
@@ -227,8 +333,26 @@ pub(crate) fn path_change_is_binary(repo: &Repository, root: &Path, path: &str) 
         || working_bytes(root, path).as_deref().is_some_and(looks_binary)
 }
 
+/// The branch-mode equivalent: both sides of the change are committed blobs, so probe
+/// the delta's own oids instead of HEAD and the filesystem.
+fn delta_change_is_binary(repo: &Repository, delta: &DiffDelta<'_>) -> bool {
+    blob_bytes(repo, delta.old_file().id())
+        .as_deref()
+        .is_some_and(looks_binary)
+        || blob_bytes(repo, delta.new_file().id())
+            .as_deref()
+            .is_some_and(looks_binary)
+}
+
 fn looks_binary(bytes: &[u8]) -> bool {
     bytes.iter().take(8000).any(|&b| b == 0)
+}
+
+fn blob_bytes(repo: &Repository, oid: Oid) -> Option<Vec<u8>> {
+    if oid.is_zero() {
+        return None;
+    }
+    repo.find_blob(oid).ok().map(|b| b.content().to_vec())
 }
 
 fn head_blob_bytes(repo: &Repository, path: &str) -> Option<Vec<u8>> {
@@ -274,6 +398,14 @@ mod tests {
         assert!(status.status.success(), "git {:?} failed", args);
     }
 
+    fn branch_spec(base: &str, target: &str) -> DiffSpec {
+        DiffSpec::Branches {
+            base_ref: base.to_string(),
+            target_ref: target.to_string(),
+            strategy: DiffStrategy::MergeBase,
+        }
+    }
+
     #[test]
     fn detects_modified_added_and_untracked() {
         let dir = tempfile::tempdir().unwrap();
@@ -288,7 +420,7 @@ mod tests {
         fs::write(path.join("fresh.txt"), "brand new\n").unwrap();
 
         let repo = Repository::open(path).unwrap();
-        let summary = compute(&repo).unwrap();
+        let summary = compute(&repo, &DiffSpec::Worktree).unwrap();
 
         let modified = summary
             .files
@@ -322,8 +454,250 @@ mod tests {
         run(path, &["add", "a.txt"]);
 
         let repo = Repository::open(path).unwrap();
-        let summary = compute(&repo).unwrap();
+        let summary = compute(&repo, &DiffSpec::Worktree).unwrap();
         let file = summary.files.iter().find(|f| f.path == "a.txt").unwrap();
-        assert!(file.staged, "a.txt should be marked staged");
+        assert_eq!(file.staged, Some(true), "a.txt should be marked staged");
+    }
+
+    /// `master` and `feature` both moved past the fork point; `feature` adds, deletes,
+    /// renames and modifies files, and `master` has a change of its own that must not
+    /// leak into `master...feature`.
+    fn diverged_repo(root: &Path) {
+        run(root, &["init", "-q", "-b", "master"]);
+        fs::write(root.join("kept.txt"), "one\ntwo\nthree\n").unwrap();
+        fs::write(root.join("gone.txt"), "delete me\n").unwrap();
+        fs::write(root.join("old-name.txt"), "rename me\nline two\nline three\n").unwrap();
+        run(root, &["add", "."]);
+        run(root, &["commit", "-qm", "init"]);
+
+        run(root, &["checkout", "-qb", "feature"]);
+        fs::write(root.join("kept.txt"), "one\nCHANGED\nthree\n").unwrap();
+        fs::remove_file(root.join("gone.txt")).unwrap();
+        fs::rename(root.join("old-name.txt"), root.join("new-name.txt")).unwrap();
+        fs::write(root.join("added.txt"), "brand new\n").unwrap();
+        run(root, &["add", "-A"]);
+        run(root, &["commit", "-qm", "feature work"]);
+
+        run(root, &["checkout", "-q", "master"]);
+        fs::write(root.join("base-only.txt"), "base side\n").unwrap();
+        run(root, &["add", "."]);
+        run(root, &["commit", "-qm", "master work"]);
+    }
+
+    #[test]
+    fn branch_diff_uses_merge_base_and_reports_every_status() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        diverged_repo(root);
+
+        let repo = Repository::open(root).unwrap();
+        let summary = compute(
+            &repo,
+            &branch_spec("refs/heads/master", "refs/heads/feature"),
+        )
+        .unwrap();
+
+        let by_path = |p: &str| summary.files.iter().find(|f| f.path == p);
+        assert!(matches!(
+            by_path("kept.txt").unwrap().status,
+            ChangeStatus::Modified
+        ));
+        assert!(matches!(
+            by_path("gone.txt").unwrap().status,
+            ChangeStatus::Deleted
+        ));
+        assert!(matches!(
+            by_path("added.txt").unwrap().status,
+            ChangeStatus::Added
+        ));
+        let renamed = by_path("new-name.txt").unwrap();
+        assert!(matches!(renamed.status, ChangeStatus::Renamed));
+        assert_eq!(renamed.old_path.as_deref(), Some("old-name.txt"));
+
+        // master's own post-fork commit is behind the merge base → not in the diff.
+        assert!(
+            by_path("base-only.txt").is_none(),
+            "merge-base semantics exclude base-only commits"
+        );
+
+        // Committed history has no staging state.
+        assert!(summary.files.iter().all(|f| f.staged.is_none()));
+
+        match summary.comparison {
+            Comparison::Branches {
+                ref base_name,
+                ref target_name,
+                ref merge_base,
+                ref base_oid,
+                ..
+            } => {
+                assert_eq!(base_name, "master");
+                assert_eq!(target_name, "feature");
+                assert_ne!(merge_base, base_oid, "both sides moved past the fork");
+            }
+            _ => panic!("expected a branch comparison"),
+        }
+    }
+
+    #[test]
+    fn branch_diff_reverses_with_the_direction() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        diverged_repo(root);
+        let repo = Repository::open(root).unwrap();
+
+        let forward = compute(
+            &repo,
+            &branch_spec("refs/heads/master", "refs/heads/feature"),
+        )
+        .unwrap();
+        let reverse = compute(
+            &repo,
+            &branch_spec("refs/heads/feature", "refs/heads/master"),
+        )
+        .unwrap();
+
+        // Forward reviews feature's work; reverse reviews master's.
+        assert!(forward.files.iter().any(|f| f.path == "added.txt"));
+        assert!(!reverse.files.iter().any(|f| f.path == "added.txt"));
+        assert!(reverse.files.iter().any(|f| f.path == "base-only.txt"));
+    }
+
+    #[test]
+    fn branch_diff_ignores_a_dirty_worktree_and_index() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        diverged_repo(root);
+
+        // Dirty the checkout in every way that shows up in worktree mode.
+        fs::write(root.join("kept.txt"), "wildly different\n").unwrap();
+        fs::write(root.join("untracked.txt"), "not committed\n").unwrap();
+        run(root, &["add", "untracked.txt"]);
+
+        let repo = Repository::open(root).unwrap();
+        let summary = compute(
+            &repo,
+            &branch_spec("refs/heads/master", "refs/heads/feature"),
+        )
+        .unwrap();
+        assert!(!summary.files.iter().any(|f| f.path == "untracked.txt"));
+        let kept = summary.files.iter().find(|f| f.path == "kept.txt").unwrap();
+        assert_eq!(
+            kept.hunks[0]
+                .lines
+                .iter()
+                .filter(|l| matches!(l.kind, DiffLineKind::Added))
+                .map(|l| l.content.as_str())
+                .collect::<Vec<_>>(),
+            vec!["CHANGED"],
+            "the committed change is shown, not the dirty working copy"
+        );
+    }
+
+    #[test]
+    fn branch_diff_detects_binary_changes_from_blobs() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        run(root, &["init", "-q", "-b", "master"]);
+        fs::write(root.join("logo.bin"), [0u8, 1, 2, 3, 4]).unwrap();
+        run(root, &["add", "."]);
+        run(root, &["commit", "-qm", "init"]);
+
+        run(root, &["checkout", "-qb", "feature"]);
+        fs::write(root.join("logo.bin"), [0u8, 9, 9, 9, 9]).unwrap();
+        run(root, &["commit", "-qam", "new logo"]);
+        // Restore the working tree to the base content so a filesystem-based probe
+        // would look at the wrong bytes — the delta's blobs are what matter.
+        run(root, &["checkout", "-q", "master"]);
+
+        let repo = Repository::open(root).unwrap();
+        let summary = compute(
+            &repo,
+            &branch_spec("refs/heads/master", "refs/heads/feature"),
+        )
+        .unwrap();
+        let logo = summary.files.iter().find(|f| f.path == "logo.bin").unwrap();
+        assert!(logo.binary, "binary change detected from the delta blobs");
+        assert!(logo.hunks.is_empty());
+    }
+
+    #[test]
+    fn identical_branches_produce_no_changes_and_bad_refs_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        diverged_repo(root);
+        run(root, &["branch", "twin", "feature"]);
+
+        let repo = Repository::open(root).unwrap();
+        let summary = compute(
+            &repo,
+            &branch_spec("refs/heads/twin", "refs/heads/feature"),
+        )
+        .unwrap();
+        assert!(summary.files.is_empty(), "identical tips → empty diff");
+
+        assert!(compute(
+            &repo,
+            &branch_spec("refs/heads/feature", "refs/heads/feature")
+        )
+        .is_err());
+        assert!(compute(
+            &repo,
+            &branch_spec("refs/heads/master", "refs/heads/ghost")
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn branch_diff_follows_a_moved_branch_on_recompute() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        diverged_repo(root);
+        let spec = branch_spec("refs/heads/master", "refs/heads/feature");
+
+        {
+            let repo = Repository::open(root).unwrap();
+            let before = compute(&repo, &spec).unwrap();
+            assert!(!before.files.iter().any(|f| f.path == "later.txt"));
+        }
+
+        run(root, &["checkout", "-q", "feature"]);
+        fs::write(root.join("later.txt"), "added after the first read\n").unwrap();
+        run(root, &["add", "."]);
+        run(root, &["commit", "-qm", "more feature work"]);
+
+        let repo = Repository::open(root).unwrap();
+        let after = compute(&repo, &spec).unwrap();
+        assert!(after.files.iter().any(|f| f.path == "later.txt"));
+    }
+
+    #[test]
+    fn comparison_never_mutates_the_repository() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        diverged_repo(root);
+        // master is checked out with a dirty file and a staged addition.
+        fs::write(root.join("kept.txt"), "dirty\n").unwrap();
+        fs::write(root.join("staged.txt"), "staged\n").unwrap();
+        run(root, &["add", "staged.txt"]);
+
+        let snapshot = |dir: &Path| {
+            let out = std::process::Command::new("git")
+                .args(["status", "--porcelain=v1", "--branch"])
+                .current_dir(dir)
+                .output()
+                .unwrap();
+            String::from_utf8_lossy(&out.stdout).into_owned()
+        };
+        let before = snapshot(root);
+
+        let repo = Repository::open(root).unwrap();
+        compute(
+            &repo,
+            &branch_spec("refs/heads/master", "refs/heads/feature"),
+        )
+        .unwrap();
+
+        assert_eq!(before, snapshot(root), "checkout/index/worktree untouched");
     }
 }
