@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { applyComparison } from "../lib/open-repo";
 import { listBranches, listCommits, resolveCommit } from "../lib/tauri";
@@ -53,11 +53,14 @@ export default function CommitPickHost() {
   const [query, setQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [applying, setApplying] = useState(false);
+  /** Guards against an older branch's history landing after a newer selection. */
+  const historyRequest = useRef(0);
 
   // Fresh ref list on every open — branches move between reviews.
   useEffect(() => {
     if (!open || !repoPath) return;
     let cancelled = false;
+    historyRequest.current += 1; // a reopen owes nothing to the last session
     setStage("branch");
     setBranch(null);
     setCommits([]);
@@ -118,6 +121,7 @@ export default function CommitPickHost() {
   // Esc unwinds one stage at a time rather than throwing away the branch choice.
   const onClose = useCallback(() => {
     if (stage === "commit") {
+      historyRequest.current += 1; // drop whatever history is still in flight
       setStage("branch");
       setCommits([]);
       setQuery("");
@@ -130,17 +134,21 @@ export default function CommitPickHost() {
   const pickBranch = useCallback(
     async (row: BranchInfo) => {
       if (!repoPath) return;
+      const ticket = ++historyRequest.current;
       setBranch(row);
       setStage("commit");
       setQuery("");
       setError(null);
       setLoading(true);
       try {
-        setCommits(await listCommits(repoPath, row.name, HISTORY_LIMIT));
+        const history = await listCommits(repoPath, row.name, HISTORY_LIMIT);
+        // A slower earlier branch must not paint its history under a newer choice.
+        if (ticket !== historyRequest.current) return;
+        setCommits(history);
       } catch (e) {
-        setError(errorMessage(e));
+        if (ticket === historyRequest.current) setError(errorMessage(e));
       } finally {
-        setLoading(false);
+        if (ticket === historyRequest.current) setLoading(false);
       }
     },
     [repoPath],
@@ -177,7 +185,7 @@ export default function CommitPickHost() {
       setError(null);
       try {
         const resolved = await resolveCommit(repoPath, row.rev);
-        setApplying(false);
+        // `review` owns `applying` from here; leaving it set keeps the guard unbroken.
         await review(resolved.oid, null);
       } catch (e) {
         setError(errorMessage(e));

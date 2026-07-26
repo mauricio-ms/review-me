@@ -1,4 +1,5 @@
 import { reviewProgress } from "../lib/coverage";
+import { timeAgo } from "../lib/time";
 import { useRepoStore } from "../state/repo";
 import { useTagsStore } from "../state/tags";
 import { useUIStore } from "../state/ui";
@@ -28,7 +29,9 @@ function comparisonTitle(comparison: Comparison | undefined): string | undefined
         ? `${shortOid(comparison.parentOid)} → ${comparison.shortOid}`
         : `root commit ${comparison.shortOid}`;
       const where = comparison.branchName ? ` on ${comparison.branchName}` : "";
-      return `${range}${where} · ${comparison.summary} (${comparison.authorName})`;
+      return `${range}${where} · ${comparison.summary} (${
+        comparison.authorName
+      }, ${timeAgo(comparison.timestamp)})`;
     }
     default:
       return undefined;
