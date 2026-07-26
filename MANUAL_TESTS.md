@@ -47,6 +47,36 @@ rm gone.txt                                                 # deleted text file 
 > - **Rename:** `git mv A.java B.java && git add -A` (shows `R`, `old → new`).
 > - **Delete:** `rm kept.txt` (shows `D`).
 
+### Add branches for the comparison tests (§5)
+
+Section 5 needs two branches that have both moved past their fork point, and a
+remote-tracking branch. Build them on top of the fixture above:
+
+```bash
+cd /tmp/air-fixture
+git stash -u                      # park the dirty working tree
+
+git checkout -qb feature
+printf 'one\ntwo\nBRANCH\nfour\nfive\n' > kept.txt
+printf 'public class Extra {}\n' > Extra.java
+rm gone.txt
+printf 'branch\0bytes\n' > logo.bin
+git add -A && git commit -qm "feature work"
+
+git checkout -q master
+printf 'base only\n' > base-only.txt
+git add . && git commit -qm "master work"     # master moves too → real merge base
+
+# A "remote" to exercise remote-tracking refs and origin/HEAD:
+git clone -q /tmp/air-fixture /tmp/air-clone
+
+git stash pop                     # restore the dirty working tree
+git add A.java                    # stash pop doesn't restore the index
+```
+
+`/tmp/air-fixture` is the dirty-worktree repo; `/tmp/air-clone` is the one with
+`origin/*` refs. Use whichever a step calls for.
+
 ---
 
 ## 1. M1 — Open repo & diff view
@@ -305,9 +335,86 @@ rm gone.txt                                                 # deleted text file 
 
 ---
 
-## 5. Regression sanity
+## 5. M5 — Branch comparison
+
+> Uses the branch fixture from §0. Steps that mention `origin/*` need `/tmp/air-clone`.
+
+### 5.1 Open the picker & pick a base
+- [ ] **Steps:** Open `/tmp/air-fixture`, press `Space` → `g` → `b` (or `:compare`).
+- [ ] **Expect:** A **Compare branches** picker listing every local branch, counted as `N refs`. Rows show the branch name plus badges: `default` (amber) on `master`, `current` (green) on the checked-out branch, `local`/`remote`, and the short oid. Selection starts on the **default branch** (`master`). Footer: `↑↓ move · ↵ pick base · Esc cancel`.
+- [ ] **Steps:** Type a few characters of a branch name.
+- [ ] **Expect:** The list filters (substring, case-insensitive) and the count updates; `Esc` closes the picker entirely.
+
+### 5.2 Pick the target & compare
+- [ ] **Steps:** Reopen the picker, `Enter` on `master`.
+- [ ] **Expect:** Title changes to **Review branch**, the query clears, and the footer reads `base: master · ↵ compare · Esc back`. Selection starts on the **current** branch. The `master` row is **dimmed and unselectable** — `↑`/`↓` skip it and `Enter` on it does nothing.
+- [ ] **Steps:** `Enter` on `feature`.
+- [ ] **Expect:** The picker closes and the diff buffer shows `master...feature`, with `merge-base <sha> → <sha>` and the changed-file count in the header. The status bar branch segment turns violet and reads `⇄ master...feature`.
+- [ ] **Expect:** The files are `feature`'s work only: `kept.txt` modified, `Extra.java` added, `gone.txt` deleted, `logo.bin` binary. **`base-only.txt` is absent** (merge-base semantics) and so are the dirty working-tree changes and untracked `fresh.txt`.
+- [ ] **Expect:** No file shows the green staged `●` — committed history has no staging state.
+
+### 5.3 Esc unwinds one stage
+- [ ] **Steps:** Open the picker, `Enter` on a base, then press `Esc`.
+- [ ] **Expect:** Returns to **base** selection (the base choice is discarded, query cleared) rather than closing. A second `Esc` closes.
+
+### 5.4 Errors stay inline
+- [ ] **Steps:** In a repo with two branches that share no history (`git checkout --orphan lonely && git commit -qm x --allow-empty`), compare `master` → `lonely`.
+- [ ] **Expect:** A red message in the footer (`… have no common ancestor`), the picker **stays open**, and the previously shown comparison is still intact behind it.
+
+### 5.5 Remote-tracking branches
+- [ ] **Steps:** Open `/tmp/air-clone` and press `Space` → `g` → `b`.
+- [ ] **Expect:** Locals are listed first, then `origin/…` rows badged `remote` (violet). **`origin/HEAD` is not listed** (it's an alias). `master` is still marked `default`.
+- [ ] **Steps:** Compare `master` → `origin/feature`.
+- [ ] **Expect:** Works exactly like a local pair; the header shows `master...origin/feature`.
+
+### 5.6 Marks are scoped per comparison
+- [ ] **Steps:** In `master...feature`, mark the `kept.txt` hunk reviewed (`r`). Note the status-bar count.
+- [ ] **Steps:** `Space` → `g` → `w` (or `:worktree`) to return to the working-tree diff.
+- [ ] **Expect:** The header/status bar return to the plain branch name; `kept.txt`'s working-tree hunk is **not** reviewed even though it covers the same file and lines.
+- [ ] **Steps:** Mark that working-tree hunk reviewed, then switch back to `master...feature` (`Space g b`).
+- [ ] **Expect:** Both marks exist independently — each comparison shows only its own. Repeat with a second branch pair (`master...<another>`) to confirm pairs don't bleed into each other.
+- [ ] **Steps:** Restart the app, reopen the repo, and switch to `master...feature`.
+- [ ] **Expect:** The branch marks are still there (opening the repo starts on the **working-tree** diff, as designed).
+
+### 5.7 Scoped clear
+- [ ] **Steps:** With marks in both comparisons, switch to `master...feature` and run `:clear`, confirm with `y`.
+- [ ] **Expect:** The dialog title names the comparison (`Clear tags for master...feature?`) and the body says other comparisons keep theirs. After confirming, the branch marks are gone and the **working-tree** marks are untouched (switch with `Space g w` to verify).
+
+### 5.8 Committing is disabled in branch mode
+- [ ] **Steps:** While comparing branches, open the palette (`Space` → `g`).
+- [ ] **Expect:** `commit reviewed changes` is **dimmed/disabled** and labelled `(working-tree diff only)`; `Space g c` does nothing. Typing `:commit` likewise refuses.
+- [ ] **Steps:** Return to the working-tree diff (`Space g w`).
+- [ ] **Expect:** `:commit` works normally, and only the **working-tree** reviewed marks are staged — branch marks never contribute.
+
+### 5.9 Project mode reads the compared revision
+- [ ] **Steps:** In `master...feature`, put the cursor on a `kept.txt` hunk and press `Enter`.
+- [ ] **Expect:** The project viewer shows `feature`'s content (the line reads `BRANCH`), **not** the dirty working tree. The modeline shows the path followed by a violet `@ feature@<sha>`.
+- [ ] **Steps:** Navigate to the deleted `gone.txt` and press `Enter` on it.
+- [ ] **Expect:** The file opens from the **merge base** — the modeline reads `@ master@<sha> (merge-base)` — instead of failing because the path is gone from the working tree.
+- [ ] **Steps:** With a branch comparison active, browse the project tree and run `Space f` (fuzzy find).
+- [ ] **Expect:** Both list the **revision's** files: `Extra.java` is present, and the untracked `fresh.txt` is absent. `gd`/`gr` in a Java file resolve against that same revision.
+- [ ] **Steps:** Switch back to the working-tree diff (`Space g w`).
+- [ ] **Expect:** The modeline revision badge disappears, the tree/finder show the working tree again (`fresh.txt` reappears), and the previously open file is cleared.
+
+### 5.10 Refresh follows the branch
+- [ ] **Steps:** While comparing `master...feature`, add a commit to `feature` in a terminal (`git checkout -q feature && echo x > later.txt && git add . && git commit -qm later && git checkout -q master`), then press `Space` → `r`.
+- [ ] **Expect:** `later.txt` appears in the diff, the header's target sha updates, existing marks re-anchor (not stale), and the project buffer's revision badge shows the new sha.
+
+### 5.11 Nothing is mutated
+- [ ] **Steps:** Before comparing, run `git status --porcelain=v1 --branch` in the fixture and save the output. Do a full comparison session (switch pairs, mark, clear), then run it again.
+- [ ] **Expect:** Identical output — the checkout, index, and working tree are untouched throughout.
+
+### 5.12 Empty comparison
+- [ ] **Steps:** Compare a branch with an identical twin (`git branch twin feature`, then compare `twin` → `feature`).
+- [ ] **Expect:** The empty state says **"no changes between twin and feature"** — *not* "working tree clean" — and the fake terminal shows `git diff --stat twin...feature` rather than `git status`.
+
+---
+
+## 6. Regression sanity
 - [ ] App builds: `npm run build` (frontend) and `cd src-tauri && cargo test` (backend, all green).
 - [ ] No console errors in the dev tools during normal use.
 - [ ] Theme/contrast readable; long file paths truncate rather than overflow.
 - [ ] Cross-buffer flow: open repo → review/flag in diff → `Space f` to a file →
       `gd`/`gr` to navigate → flag in project mode → all marks persist after restart.
+- [ ] Comparison flow: worktree → `Space g b` compare → review → `Space g w` back →
+      marks stay separate, project mode follows the revision, nothing is staged.
