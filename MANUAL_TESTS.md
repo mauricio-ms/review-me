@@ -133,6 +133,19 @@ The fixture's first commit (`initial`) is the **root** commit — §6 reviews th
 - [ ] **Steps:** Press `Tab` (or double-click) on a section header.
 - [ ] **Expect:** The whole section folds (caret flips to `▸`, its files/hunks/lines hide); `Tab` again unfolds it.
 
+### 1.5c Long lines wrap rather than truncate
+- [ ] **Steps:** Give a tracked file a very long line plus one unbreakable token, then refresh (`Space r`):
+  ```bash
+  cd /tmp/air-fixture
+  python3 -c "print('    indented ' + 'word ' * 80)" >> kept.txt
+  python3 -c "print('A' * 600)" >> kept.txt
+  ```
+- [ ] **Expect:** Expanding `kept.txt` shows both added lines **wrapped** over as many visual lines as they need — no `…` anywhere, and no horizontal scrollbar on the diff list. Leading indentation survives, and the 600-char token breaks mid-token instead of forcing the row wider than the window.
+- [ ] **Expect:** The old/new line numbers and the `+` sign sit beside the **first** visual line of a wrapped row, not centred against the block.
+- [ ] **Expect:** `j`/`k` still move one **row** per press (a wrapped line is one row), while `Ctrl-e`/`Ctrl-r` scroll one **visual** line — including over a wrapped row.
+- [ ] **Expect:** Reviewing/flagging a wrapped line tints the whole wrapped block, and word-diff highlighting still lands on the changed segments.
+- [ ] **Steps:** Undo the edit (`git -C /tmp/air-fixture checkout -- kept.txt`, then redo §0's `kept.txt` modification) before continuing.
+
 ### 1.6 Vim navigation
 - [ ] **Steps:** With the diff buffer focused, use the keys below.
 - [ ] **Expect:**
@@ -539,7 +552,8 @@ The fixture's first commit (`initial`) is the **root** commit — §6 reviews th
 ## 7. Regression sanity
 - [ ] App builds: `npm run build` (frontend) and `cd src-tauri && cargo test` (backend, all green).
 - [ ] No console errors in the dev tools during normal use.
-- [ ] Theme/contrast readable; long file paths truncate rather than overflow.
+- [ ] Theme/contrast readable; long diff lines **wrap** (never `…`, never a horizontal
+      scrollbar), while long file paths still truncate in file headers and picker rows.
 - [ ] Cross-buffer flow: open repo → review/flag in diff → `Space f` to a file →
       `gd`/`gr` to navigate → flag in project mode → all marks persist after restart.
 - [ ] Comparison flow: worktree → `Space g b` compare → review → `Space g w` back →

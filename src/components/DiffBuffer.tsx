@@ -464,9 +464,9 @@ export default function DiffBuffer() {
   const scrollByLine = (dir: 1 | -1) => {
     const el = listRef.current;
     if (!el) return;
-    // Rows are uniform .diff-row height; sample the cursor row (fallback: first row).
-    const sample = rowRefs.current[cursor] ?? rowRefs.current.find(Boolean);
-    const lineH = sample?.offsetHeight ?? 24;
+    // One *visual* line, read off the list's line-height — a row that wraps is several
+    // lines tall, so its own height would scroll too far.
+    const lineH = parseFloat(window.getComputedStyle(el).lineHeight) || 24;
     el.scrollTop += dir * lineH;
     keepCursorVisible(el);
   };

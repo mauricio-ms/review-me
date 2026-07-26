@@ -123,6 +123,11 @@ replaced it, LCS over tokens) — on by default; the `diff highlight` command (`
 **project viewer** (`ProjectBuffer.tsx`) uses CodeMirror (read-only + vim + per-file syntax
 highlighting lazy-loaded by extension via `@codemirror/language-data`).
 
+**One row ≠ one visual line.** Line content wraps (`pre-wrap` + `overflow-wrap: anywhere`
+in `styles.css`) rather than truncating, so a row can be several lines tall: keep gutters
+`align-items: start`, and measure a *visual* line from the list's computed `line-height`
+(what `scrollByLine` does for `Ctrl-e`/`Ctrl-r`) instead of a row's `offsetHeight`.
+
 ### Tagging & anchoring (the subtle part)
 
 Reviewed/flag/ignore tags live in `<repo>/.review-me/tags.json` (three parallel arrays:

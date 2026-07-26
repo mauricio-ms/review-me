@@ -563,15 +563,21 @@ kbd {
 
 .diff-hunk-row {
   padding: 2px 14px 2px 22px;
+  align-items: start;
 }
 
 .diff-hunk-row .diff-caret {
   color: var(--fg-3);
 }
 
+/* Hunk headers carry a function-context suffix that can run long; wrap it rather than
+   pushing the row into a horizontal scroll. */
 .diff-hunk-header {
   color: var(--accent-blue);
   opacity: 0.8;
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .diff-line-row {
@@ -579,6 +585,9 @@ kbd {
   grid-template-columns: 44px 44px 14px 1fr;
   gap: 0;
   padding: 0 14px 0 34px;
+  /* A wrapped line is taller than one row; the gutters belong beside its *first*
+     visual line, not centred against the whole block. */
+  align-items: start;
 }
 
 .diff-gutter {
@@ -594,9 +603,14 @@ kbd {
   user-select: none;
 }
 
+/* Long lines wrap instead of being cut off: a review can't be done against content
+   the tool hid. `pre-wrap` keeps indentation and runs of spaces (this is code), and
+   `anywhere` breaks tokens with no break opportunity at all — minified bundles, long
+   URLs, base64 — which would otherwise force the row wider than the buffer. */
 .diff-line-content {
-  overflow: hidden;
-  text-overflow: ellipsis;
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .line-added {
