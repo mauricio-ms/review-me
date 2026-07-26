@@ -22,8 +22,9 @@ Reviewing agent-generated code has a different shape than reviewing a human PR:
 
 `review-me` is built around those needs:
 
-- **Diff mode** — a magit-style view of either the working tree vs `HEAD` *or* two
-  branches (`base...target`, merge-base semantics), grouped into three
+- **Diff mode** — a magit-style view of the working tree vs `HEAD`, two
+  branches (`base...target`, merge-base semantics), *or* a single commit against its
+  first parent, grouped into three
   sections — **To review**, **Flagged**, and **Reviewed** — just as magit splits
   untracked / unstaged / staged. Tagging a hunk moves it between sections so "what's
   left" is always front and center (empty sections are hidden). Expand files into hunks
@@ -36,6 +37,9 @@ Reviewing agent-generated code has a different shape than reviewing a human PR:
 - **Branch comparison** — review a whole branch's work (`master...feature`) without
   fetching, checking out, or touching the index. Project mode follows: files open at the
   compared revision, not whatever happens to be checked out.
+- **Commit review** — pick a branch, then one commit on it, and review just that
+  commit's change (`git show` semantics). Its marks are keyed to the commit's oid, so
+  they can never drift and never mix with the branch-wide review.
 - **Fuzzy file finder** — jump to any (non-ignored) file in the repo.
 - **Project mode** — a read-only, IDE-like browser over the *entire* repo, not just the
   changed files. You can't mark things reviewed here (reviewing is diff-only), but you can
@@ -59,23 +63,28 @@ Both stay mounted; you toggle between them and keep your cursor/scroll position.
 | **Diff** (default) | The active comparison as a navigable file/hunk/line list. | Review **and** flag |
 | **Project** | Read-only file tree + syntax-highlighted viewer over the whole repo, at the compared revision. | Flag only |
 
-### Two comparisons
+### Three comparisons
 
-The diff buffer shows one of two things, and always says which in its header and the
+The diff buffer shows one of three things, and always says which in its header and the
 status bar:
 
 | Comparison | What it shows | Switch with |
 | --- | --- | --- |
 | **Working tree** (default) | Everything uncommitted vs `HEAD`, staged or not, including untracked files. | `Space g w` / `:worktree` |
 | **Branches** | `git diff base...target` — the target branch's work since it forked from the base. | `Space g b` / `:compare` |
+| **Commit** | `git show <commit>` — one commit against its first parent. | `Space g l` / `:log` |
 
-Branch comparison is strictly read-only: it never fetches, checks out, stages, or writes
-to the working tree. Both local and locally-known remote-tracking branches are offered;
-nothing is fetched, so you see what your clone already knows. Because both sides are
-committed history, **committing reviewed changes is disabled** while comparing branches.
+Both committed-history modes are strictly read-only: they never fetch, check out, stage,
+or write to the working tree. Only refs and objects your clone already has are offered,
+and a dirty checkout can't affect what you see. Because both sides are already committed,
+**committing reviewed changes is disabled** in either mode.
+
+Merges are reviewed against their **first parent** (never as a combined diff), and a root
+commit — having no parent — reads as all additions.
 
 Opening a repository always starts on the working-tree diff; `:refresh` recomputes
-whichever comparison is active (picking up new commits on either branch).
+whichever comparison is active (picking up new commits on either branch; a commit
+comparison is immutable, so only its marks are re-read).
 
 ### Reviewed vs. flagged
 
@@ -90,13 +99,15 @@ re-anchor: exact match at the stored position, else a nearby search, else marked
 so small edits above a tagged region don't lose the tag, and a fully rewritten region
 won't silently mark unrelated code as reviewed.
 
-Every tag also records the **comparison it was made in** (the working tree, or a
-`base...target` branch pair, identified by ref name). Marking a hunk reviewed in
-`master...feature` says nothing about the same lines in the working-tree diff or in
-another branch pair, and `:clear` only wipes the comparison you're looking at. Branch
-marks hash the compared trees, so they're unaffected by a dirty checkout and follow their
-branch as it moves. Tags written before branch comparison existed load as working-tree
-marks and keep meaning exactly what they did.
+Every tag also records the **comparison it was made in** (the working tree, a
+`base...target` branch pair identified by ref name, or a single commit identified by its
+oid). Marking a hunk reviewed in `master...feature` says nothing about the same lines in
+the working-tree diff, in another branch pair, or in the individual commit that
+introduced them — and `:clear` only wipes the comparison you're looking at. Branch and
+commit marks hash the compared trees, so they're unaffected by a dirty checkout; branch
+marks follow their branch as it moves, while commit marks can't move at all and survive
+even the deletion of the branch you picked the commit from. Tags written before review
+scopes existed load as working-tree marks and keep meaning exactly what they did.
 
 ---
 
@@ -177,6 +188,7 @@ chase a definition.
 | `f` | `:find` | Fuzzy file finder → opens in project mode |
 | `r` | `:refresh` | Recompute the active comparison |
 | `g b` | `:compare` | Compare two branches (`base...target`) |
+| `g l` | `:log` | Review a single commit (`git show`) |
 | `g w` | `:worktree` | Return to the working-tree diff |
 | `g c` | `:commit` | Commit the reviewed working-tree changes |
 | `c` | `:close` | Close the repository |
@@ -208,9 +220,10 @@ Glyphs: `A`/`M`/`D`/`R` file status, `+adds −dels` counts, a green `●` for s
 (working-tree diff only — committed history has no staging state), `✓` reviewed, `⚑`
 flagged. Edited lines highlight only the characters that changed.
 
-`Enter` opens the file at the revision the diff came from: the target branch for
-added/modified content, the merge base for a deletion. The project modeline names that
-revision whenever it isn't the working tree.
+`Enter` opens the file at the revision the diff came from: the target branch (or the
+reviewed commit) for added/modified content, the merge base (or that commit's first
+parent) for a deletion. The project modeline names that revision whenever it isn't the
+working tree.
 
 ### Branch comparison picker
 
@@ -221,6 +234,19 @@ reviewed**. It defaults to the repo's default branch (from `refs/remotes/*/HEAD`
 sides is disabled. `Esc` in the second stage goes back to base selection, a second `Esc`
 closes. Errors (an unknown ref, two branches with no common ancestor) show inline without
 closing the picker.
+
+### Commit picker
+
+`Space g l` opens a two-stage picker: choose the **branch**, then the **commit** on it.
+Selection starts on the checked-out branch, then on the newest commit; rows show the short
+oid, subject, `merge` / `HEAD` badges, author and relative age. `Enter` reviews that commit
+against its first parent, `Esc` in the second stage goes back to branch selection, and a
+second `Esc` closes.
+
+History is listed 300 commits deep. Anything older — or a commit on no branch at all — is
+reachable by typing its sha: when no listed commit matches, the picker offers to resolve
+what you typed against the whole object database. A commit reached that way shows no
+branch context, since it needn't be on the branch you picked.
 
 ### Project buffer
 
@@ -264,8 +290,9 @@ React component → src/lib/*.ts action → invoke() in src/lib/tauri.ts
 ```
 
 - **Backend (`src-tauri/src/`)** — small, mostly-stateless feature modules: `repo` (open/
-  validate via libgit2), `branches` (ref discovery + merge-base resolution), `diff`
-  (working-tree-vs-`HEAD` or `base...target`), `revision` (reading a commit's tree),
+  validate via libgit2), `branches` (ref discovery + merge-base resolution), `commits`
+  (history listing + revision resolution), `diff` (working-tree-vs-`HEAD`,
+  `base...target`, or one commit vs its first parent), `revision` (reading a commit's tree),
   `tags` (scoped persistence + anchoring), `tree` (ignore-aware listing), `fuzzy` (nucleo
   matcher), `queries` + `xref` (tree-sitter symbol index).
 - **Frontend (`src/`)** — `AppShell` keeps both buffers mounted; a single command registry
@@ -303,5 +330,9 @@ current when adding features.
 - Branch comparison never fetches, so remote-tracking branches are only as fresh as your
   last `git fetch`. Comparison is always merge-base (`base...target`); there's no
   two-dot/direct-diff mode.
+- The commit picker lists the newest **300** commits of the chosen branch; older commits
+  are reachable only by typing a sha. Merge commits are reviewed against their first
+  parent, so changes brought in from the other side of the merge show as that merge's
+  work — there's no combined-diff view.
 - Running the app needs a display (it's a desktop window); `npm run build` smoke-builds the
   frontend without one.

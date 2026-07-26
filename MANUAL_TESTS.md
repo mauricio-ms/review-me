@@ -77,6 +77,28 @@ git add A.java                    # stash pop doesn't restore the index
 `/tmp/air-fixture` is the dirty-worktree repo; `/tmp/air-clone` is the one with
 `origin/*` refs. Use whichever a step calls for.
 
+### Add commits for the commit-review tests (§6)
+
+Section 6 needs a merge commit and an empty commit. Both go on branches of their own so
+`master...feature` (§5) keeps its merge base:
+
+```bash
+cd /tmp/air-fixture
+git stash -u
+
+git checkout -qb merged master
+git merge -q --no-ff -m "merge feature" feature   # first parent = master work
+
+git checkout -qb empties master
+git commit -q --allow-empty -m "an empty commit"
+
+git checkout -q master
+git stash pop
+git add A.java
+```
+
+The fixture's first commit (`initial`) is the **root** commit — §6 reviews that one too.
+
 ---
 
 ## 1. M1 — Open repo & diff view
@@ -410,7 +432,97 @@ git add A.java                    # stash pop doesn't restore the index
 
 ---
 
-## 6. Regression sanity
+## 6. M6 — Commit review
+
+> Uses the fixtures from §0 (including the §6 additions).
+
+### 6.1 Open the picker & pick a branch
+- [ ] **Steps:** Open `/tmp/air-fixture`, press `Space` → `g` → `l` (or `:log`).
+- [ ] **Expect:** A **Review a commit** picker listing every local branch (`N refs`), rows exactly as in §5.1. Selection starts on the **checked-out** branch (`master`, badged `current`), not the default branch.
+- [ ] **Steps:** Type a few characters of a branch name.
+- [ ] **Expect:** The list filters and the count updates; `Esc` closes the picker entirely.
+
+### 6.2 Pick the commit & review it
+- [ ] **Steps:** Reopen the picker and press `Enter` on `feature`.
+- [ ] **Expect:** Title changes to **Pick a commit**, the query clears, and the footer reads `on feature · ↵ review commit · Esc back`. Rows are newest-first: amber short oid, subject, then author and a relative age (`3m ago`); the commit `HEAD` points at is badged `HEAD` (green). Count reads `N commits`. Selection starts on the **newest** commit.
+- [ ] **Steps:** Type `feature` (or part of the author name).
+- [ ] **Expect:** Rows filter on oid + subject + author, case-insensitive.
+- [ ] **Steps:** `Enter` on `feature work`.
+- [ ] **Expect:** The picker closes; the header reads `<sha> feature work` with `parent <sha> → <sha>` and the changed-file count. The status bar segment turns violet: `⊙ <sha> feature work`; hovering it names the range, the branch, the subject and the author.
+- [ ] **Expect:** The files are that commit's own work: `kept.txt` modified, `Extra.java` added, `gone.txt` deleted, `logo.bin` binary. **`base-only.txt` is absent** (it's on master, not in this commit), as are the dirty working-tree changes and untracked `fresh.txt`.
+- [ ] **Expect:** No file shows the green staged `●`.
+- [ ] **Steps:** Tag a hunk reviewed (`r`), a line range flagged (`v j` then `f`), and a hunk ignored (`i`).
+- [ ] **Expect:** Sections behave exactly as in the working-tree diff (§1.5b / §2).
+
+### 6.3 A merge commit is reviewed against its first parent
+- [ ] **Steps:** `Space g l` → branch `merged` → `Enter` on `merge feature`.
+- [ ] **Expect:** The row was badged `merge` (violet). The header says `first parent <sha> → <sha>`, and the diff shows the work merged **in** from `feature` (`Extra.java`, `kept.txt`, …) — but **not** `base-only.txt`, which the first parent already had.
+
+### 6.4 The root commit reads as all additions
+- [ ] **Steps:** `Space g l` → branch `master` → `Enter` on the oldest commit (`initial`).
+- [ ] **Expect:** Every file is status `A` with no removed lines, and the header reads `root commit <sha>` (no parent).
+
+### 6.5 Esc unwinds one stage
+- [ ] **Steps:** Open the picker, `Enter` on a branch, then `Esc`.
+- [ ] **Expect:** Returns to **branch** selection (query cleared, commit list dropped) rather than closing. A second `Esc` closes.
+
+### 6.6 Typing a sha reaches outside the list
+- [ ] **Steps:** In the commit stage, type the full or abbreviated sha (≥4 hex chars) of a commit **not** on the picked branch — e.g. `master`'s `master work` while browsing `feature`.
+- [ ] **Expect:** When no listed commit matches, a single row appears: the typed sha with an italic `resolve this revision…`. `Enter` reviews that commit.
+- [ ] **Expect:** The header shows the resolved commit, and the status-bar tooltip mentions **no branch** (a typed sha carries no branch context).
+- [ ] **Steps:** Type a sha that doesn't exist (e.g. `abcdef1`) and press `Enter`.
+- [ ] **Expect:** A red inline error (`unknown revision …`); the picker stays open and the previous comparison is intact behind it.
+
+### 6.7 Marks are scoped per commit
+- [ ] **Steps:** With `feature work`'s `kept.txt` hunk reviewed (from §6.2), switch to the working-tree diff (`Space g w`).
+- [ ] **Expect:** `kept.txt`'s working-tree hunk is **not** reviewed, even though it covers the same file and lines.
+- [ ] **Steps:** Compare `master...feature` (`Space g b`) — a diff that looks identical to §6.2's.
+- [ ] **Expect:** The branch pair shows **no** marks: a branch review and a commit review are separate scopes even when the diff on screen is the same.
+- [ ] **Steps:** Review a hunk there, then go back to the commit (`Space g l` → `feature` → `feature work`).
+- [ ] **Expect:** Each comparison shows only its own marks. Restart the app, reopen the repo, and return to the commit — its marks are still there (a fresh open starts on the working-tree diff, as designed).
+
+### 6.8 The same commit from another branch is the same review
+- [ ] **Steps:** With marks on `feature work`, open the picker and pick branch **`merged`**, then the same `feature work` commit (it is reachable from both).
+- [ ] **Expect:** The marks are **already there** — the review is keyed to the commit's oid, not the branch it was picked from — and folds/cursor are not reset.
+
+### 6.9 Marks outlive the branch
+- [ ] **Steps:** With marks on `feature work`, delete the branch it was picked from in a terminal: `git -C /tmp/air-fixture branch -D feature`. Reach the commit again through `merged` (it's still in that history) or by typing its sha, then `Space r`.
+- [ ] **Expect:** The marks are intact and **not stale** — a commit can't move, so losing the branch changes nothing. (Recreate it afterwards for the other sections: `git -C /tmp/air-fixture branch feature <sha>`.)
+
+### 6.10 Scoped clear
+- [ ] **Steps:** With marks in the commit and in the working tree, review the commit and run `:clear`, confirm with `y`.
+- [ ] **Expect:** The dialog title names the comparison (`Clear tags for <sha> feature work?`). After confirming, the commit's marks are gone and the working-tree marks are untouched (`Space g w` to verify).
+
+### 6.11 Committing is disabled while reviewing a commit
+- [ ] **Steps:** While reviewing a commit, open the palette (`Space` → `g`).
+- [ ] **Expect:** `commit reviewed changes` is **dimmed/disabled** and labelled `(working-tree diff only)`; `Space g c` does nothing and `:commit` refuses with "This comparison is committed history already".
+- [ ] **Expect:** `working-tree diff` (`g w`) is **enabled** here.
+
+### 6.12 Project mode reads the reviewed commit
+- [ ] **Steps:** Reviewing `feature work`, put the cursor on a `kept.txt` hunk and press `Enter`.
+- [ ] **Expect:** The viewer shows that commit's content (the line reads `BRANCH`), **not** the dirty working tree. The modeline badge reads `@ feature@<sha>` (or just `<sha>` for a commit reached by typing a sha).
+- [ ] **Steps:** Press `Enter` on the deleted `gone.txt`.
+- [ ] **Expect:** It opens from the commit's **first parent** — modeline `@ <sha> (parent of <sha>)` — instead of failing because the path is gone.
+- [ ] **Steps:** Browse the tree, run `Space f`, and use `gd`/`gr` in a Java file.
+- [ ] **Expect:** All three read that commit's revision: `Extra.java` present, untracked `fresh.txt` absent.
+- [ ] **Steps:** `Space g w` back to the working tree.
+- [ ] **Expect:** The revision badge disappears, the tree/finder show the working tree again, and the open file is cleared.
+
+### 6.13 Refresh is stable
+- [ ] **Steps:** While reviewing a commit, press `Space` → `r`.
+- [ ] **Expect:** The same diff and the same header sha (a commit is immutable); marks stay put and are not stale. Adding new commits to the branch in a terminal changes nothing here.
+
+### 6.14 Empty commit
+- [ ] **Steps:** `Space g l` → branch `empties` → `Enter` on `an empty commit`.
+- [ ] **Expect:** The empty state says **`<sha> changes nothing`** — not "working tree clean" — and the fake terminal runs `git show --stat <sha>` followed by the commit's subject.
+
+### 6.15 Nothing is mutated
+- [ ] **Steps:** Save `git status --porcelain=v1 --branch` before a full commit-review session (pick several commits, mark, clear, open files in project mode), then compare after.
+- [ ] **Expect:** Identical output — the checkout, index, and working tree are untouched throughout.
+
+---
+
+## 7. Regression sanity
 - [ ] App builds: `npm run build` (frontend) and `cd src-tauri && cargo test` (backend, all green).
 - [ ] No console errors in the dev tools during normal use.
 - [ ] Theme/contrast readable; long file paths truncate rather than overflow.
@@ -418,3 +530,6 @@ git add A.java                    # stash pop doesn't restore the index
       `gd`/`gr` to navigate → flag in project mode → all marks persist after restart.
 - [ ] Comparison flow: worktree → `Space g b` compare → review → `Space g w` back →
       marks stay separate, project mode follows the revision, nothing is staged.
+- [ ] Three-mode round trip: worktree → `Space g b` branch pair → `Space g l` a commit on
+      that branch → back to worktree. Each mode keeps its own marks, header, status-bar
+      glyph (`⎇` / `⇄` / `⊙`) and project revision; only the worktree allows `:commit`.
