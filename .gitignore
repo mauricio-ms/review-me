@@ -6,6 +6,9 @@ dist/
 
 # local install (./install.sh)
 bin/
+
+# ubuntu packages (./packaging/build-ubuntu.sh)
+dist-linux/
 src-tauri/icons/.gen/master-2048.png
 
 # rust / tauri

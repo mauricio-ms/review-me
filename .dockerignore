@@ -1,0 +1,13 @@
+# Keep the build context small and the container build hermetic: node_modules
+# and target/ are host-built (Arch) and would be wrong inside Ubuntu anyway.
+node_modules/
+dist/
+dist-linux/
+bin/
+src-tauri/target/
+src-tauri/gen/
+sample/
+packaging/
+.git/
+.ai-jail
+*.log

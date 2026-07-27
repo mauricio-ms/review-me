@@ -187,6 +187,51 @@ The PNGs must be RGBA or `tauri::generate_context!` fails the build with
 `icon … is not RGBA` — the script forces this and asserts it. `cd src-tauri && cargo check`
 re-runs that validation in seconds, without the slow release build.
 
+### Distribution
+
+`./packaging/build-ubuntu.sh` produces installable packages for other machines. It builds
+inside a Docker container running the target distribution, so the binary links against
+that release's glibc and webkit2gtk instead of whatever the build host happens to ship —
+which is what makes the output portable. Docker is the only prerequisite, and a build
+touches nothing in the repo: `node_modules/` and `src-tauri/target/` stay out of the build
+context, so the container compiles its own.
+
+```bash
+./packaging/build-ubuntu.sh                 # .deb, built on Ubuntu 22.04
+./packaging/build-ubuntu.sh --appimage      # also emit a single-file AppImage
+./packaging/build-ubuntu.sh --ubuntu 24.04  # build against a newer base
+```
+
+**Supported targets** — all **x86_64**; artifacts land in `dist-linux/` (gitignored):
+
+| Package | Runs on | Size | Notes |
+| --- | --- | --- | --- |
+| **`.deb`** | Ubuntu 22.04 LTS and newer | 5 MB | The default. Declares `libwebkit2gtk-4.1-0` + `libgtk-3-0` so apt resolves them, and registers the same launcher entry and icons `install.sh` does. |
+| **`.AppImage`** | Any glibc 2.35+ desktop with GTK 3 | 81 MB | Built only with `--appimage`. Bundles webkit2gtk, so it needs no package manager and no root — `chmod +x` and run. |
+| **`review-me`** | Same as the `.deb` | 16 MB | The bare executable, to place yourself. Install its libraries manually: `sudo apt install libwebkit2gtk-4.1-0 libgtk-3-0`. |
+
+The base you build on sets the floor, since glibc is backward but not forward compatible:
+22.04 (glibc 2.35) covers every later Ubuntu, while `--ubuntu 24.04` targets 24.04+ only.
+Build against the **oldest** release you need to support. Debian-based derivatives that
+carry webkit2gtk 4.1 should accept the same `.deb`, though only Ubuntu 22.04 and 24.04 are
+tested. arm64 would need a separate cross-build setup.
+
+On the target machine:
+
+```bash
+sudo apt install ./review-me_0.1.0_amd64.deb
+review-me                                    # or find it in the app launcher
+```
+
+Note that the AppImage bundles webkit but still links the host's GTK 3 and graphics stack
+(`libGL`/`libEGL`/`libgbm`) — linuxdeploy deliberately excludes those as system libraries.
+That holds on any desktop install, but not on a minimal or headless box.
+
+To check a build without a spare machine, install it into a stock `ubuntu:22.04` or
+`ubuntu:24.04` container: `ldd -r /usr/bin/review-me` should report no missing libraries
+and no undefined symbols, and running it should reach *"Failed to initialize GTK"* — the
+no-display error, meaning every library loaded and the app started.
+
 ---
 
 ## Usage

@@ -21,6 +21,7 @@ npm run build              # frontend gate: tsc (strict) THEN vite build — run
 cd src-tauri && cargo test # backend tests (all logic modules have unit tests w/ tempfile fixtures)
 cd src-tauri && cargo test diff::tests::marks_staged_files   # single test
 cd src-tauri && cargo check                                  # fast backend typecheck
+./packaging/build-ubuntu.sh # .deb for Ubuntu 22.04+, built in Docker (see README)
 ```
 
 There is no linter/formatter configured (matching video-studio); TypeScript runs in
