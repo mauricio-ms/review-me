@@ -210,10 +210,22 @@ Chained calls recurse through a method's declared return type. Locals aren't ind
 (too many, each visible in one method) — they're `Target::Local`, identified by byte
 offset.
 
-`Unresolved` is a real answer, not a bug: `var`, generic element types, static imports,
-and anything typed by a jar have no source in the repo to point at. `find_definition`
-then falls back to a kind-filtered name match, so **the picker only appears when
-resolution genuinely couldn't decide**.
+Failing to resolve splits into **two different answers**, and conflating them is what
+makes navigation lie:
+
+- **`External`** — resolved to something outside the project: a JDK/jar type, a member
+  of one, a member absent from a type whose supertype chain we fully see, or an
+  unresolvable identifier shaped like a type (`System`, `Math`). Nothing declared here
+  can be the answer, so `find_definition` returns **nothing** rather than falling back,
+  and `find_references` **drops** the occurrence. `books.add(..)` on a `List` must not
+  land on some unrelated `add` in this repo.
+- **`Unresolved`** — genuinely undecidable: `var`, generic element types, static
+  imports, or a member missing from a type that extends something we can't read. Here a
+  kind-filtered name match is still the best guess, so `find_definition` falls back to
+  it and `find_references` keeps the hit as unconfirmed.
+
+So **the picker only appears when resolution genuinely couldn't decide** — never for a
+symbol we know isn't ours.
 
 `find_references` name-matches first (the cheap prefilter) and resolves only the
 survivors. An occurrence proved to be a *different* symbol is **dropped**; one that
@@ -269,3 +281,13 @@ Logic is unit-tested in Rust against `tempfile` git fixtures (`diff`, `tags`, `c
 `fuzzy`, `xref`, `repo_library`). UI/interaction is covered by the manual checklist in
 `MANUAL_TESTS.md` (fixture setup + per-milestone scenarios) — keep it current when adding
 features.
+
+`xref`'s two- and three-file fixtures are too small to catch resolution bugs that only
+appear across packages, so `xref_validate.rs` runs the resolver over a realistic
+multi-package project — 40 assertions covering every tier plus the residue. Build it with
+`./scripts/make-java-sample.sh` (the tree is gitignored); the test skips loudly without
+it. It's also the fixture to open in the app for hand-testing `M-.`/`M-,`/`M-?`.
+
+**`xref`'s symbol index is a process-global `Mutex`**, so any test that builds one must
+hold `xref::TEST_LOCK` for its whole body — otherwise parallel tests clobber each
+other's fixture and fail in ways that vanish under a `cargo test <filter>`.

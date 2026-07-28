@@ -143,6 +143,13 @@ struct JavaIndex {
 // explicit request.
 static INDEX: Mutex<Option<JavaIndex>> = Mutex::new(None);
 
+/// `INDEX` above is process-global, so two tests building their own fixtures in
+/// parallel would clobber each other. Every test that builds or queries an index holds
+/// this for its duration — including `xref_validate`, which lives in another module,
+/// which is why it isn't private to `tests` below.
+#[cfg(test)]
+pub(crate) static TEST_LOCK: Mutex<()> = Mutex::new(());
+
 fn java_language() -> Language {
     tree_sitter_java::LANGUAGE.into()
 }
@@ -509,9 +516,22 @@ enum Resolution {
     Found(Target),
     /// Several candidates, none provably right — this is what surfaces a picker.
     Ambiguous(Vec<DefId>),
-    /// Not decidable: `var`, a generic element type, a static import, or a type that
-    /// lives in a jar rather than in this repo.
+    /// Resolved to something *outside* the project: a JDK or jar type, or a member of
+    /// one. Nothing declared here can be the answer, so falling back to a name match
+    /// would be provably wrong — `books.add(..)` on a `List` must not land on some
+    /// unrelated `add` in this repo. Proof of difference, so references drop it.
+    External,
+    /// Genuinely undecidable: `var`, a generic element type, a static import, or an
+    /// expression form we don't model. A name match is still the best guess.
     Unresolved,
+}
+
+/// What the receiver of a member access turned out to be. Mirrors `Resolution`'s
+/// external/unknown split, which is the distinction that keeps navigation honest.
+enum RecvType {
+    Known(DefId),
+    External,
+    Unknown,
 }
 
 /// Depth cap for the mutually-recursive walks (receiver types, supertype chains).
@@ -548,7 +568,11 @@ fn resolve_at(index: &JavaIndex, file: usize, node: Node, depth: usize) -> Resol
     }
 
     if node.kind() == "type_identifier" {
-        return resolve_type(index, file, name);
+        return match resolve_type(index, file, name) {
+            // Definitely a type, and definitely not one of ours.
+            Resolution::Unresolved => Resolution::External,
+            other => other,
+        };
     }
 
     if let Some(parent) = node.parent() {
@@ -586,12 +610,24 @@ fn resolve_bare(
         });
     }
     if let Some(owner) = enclosing_type_id(index, file, node) {
-        let hits = lookup_member(index, owner, name, false, None, depth);
+        let (hits, _) = lookup_member(index, owner, name, false, None, depth);
         if !hits.is_empty() {
             return finish(hits);
         }
     }
-    resolve_type(index, file, name)
+    match resolve_type(index, file, name) {
+        Resolution::Unresolved if looks_like_type_name(name) => Resolution::External,
+        other => other,
+    }
+}
+
+/// Java capitalises type names and SHOUTS constants. An unresolvable identifier shaped
+/// like a type — `System`, `Math`, `Objects` — is one from the JDK or a jar, and
+/// saying so beats letting a name match send `System.out.println` to some `println`
+/// in this repo. ALL_CAPS is excluded: those are constants, possibly static imports,
+/// where a name match really is the best guess available.
+fn looks_like_type_name(name: &str) -> bool {
+    name.starts_with(char::is_uppercase) && name.chars().any(char::is_lowercase)
 }
 
 /// A member reached through `recv.name(..)` or `recv.field`, or with no receiver at all.
@@ -615,15 +651,27 @@ fn resolve_member(
         // No receiver: the enclosing type, then up its supertype chain.
         None => enclosing_type_id(index, file, access),
         Some(obj) => match expr_type(index, file, obj, depth + 1) {
-            Some(id) => Some(id),
-            // An unknown receiver type is the honest end of the line.
-            None => return Resolution::Unresolved,
+            RecvType::Known(id) => Some(id),
+            RecvType::External => return Resolution::External,
+            RecvType::Unknown => return Resolution::Unresolved,
         },
     };
     let Some(owner) = owner else {
         return Resolution::Unresolved;
     };
-    finish(lookup_member(index, owner, name, want_method, arity, depth))
+
+    let (hits, chain_complete) = lookup_member(index, owner, name, want_method, arity, depth);
+    if hits.is_empty() {
+        // We searched a type we fully understand and the member isn't in it, so it
+        // must come from outside — unless part of the supertype chain was itself
+        // invisible, in which case we genuinely can't tell.
+        return if chain_complete {
+            Resolution::External
+        } else {
+            Resolution::Unresolved
+        };
+    }
+    finish(hits)
 }
 
 /// Resolve a type *name* against a file's imports, then its package, then wildcards,
@@ -674,54 +722,84 @@ fn resolve_type(index: &JavaIndex, file: usize, name: &str) -> Resolution {
     )
 }
 
-/// The type of an expression, as a definition id — the heart of receiver resolution.
-fn expr_type(index: &JavaIndex, file: usize, node: Node, depth: usize) -> Option<DefId> {
+/// Classify a type *name* mentioned in `file`: ours, someone else's, or unknowable.
+fn recv_from_type_name(index: &JavaIndex, file: usize, name: &str) -> RecvType {
+    match named_type(index, file, name) {
+        Some(id) => RecvType::Known(id),
+        // `var` is the one name that means "inference we don't do" rather than a type.
+        None if name == "var" => RecvType::Unknown,
+        None => RecvType::External,
+    }
+}
+
+/// The type of an expression — the heart of receiver resolution.
+fn expr_type(index: &JavaIndex, file: usize, node: Node, depth: usize) -> RecvType {
     if depth > MAX_DEPTH {
-        return None;
+        return RecvType::Unknown;
     }
     let src = &index.files[file].source;
+    let declared_of = |id: DefId| match &index.defs[id].declared_type {
+        Some(name) => recv_from_type_name(index, index.defs[id].file, name),
+        None => RecvType::Unknown,
+    };
     match node.kind() {
         "identifier" => match resolve_at(index, file, node, depth) {
-            Resolution::Found(Target::Def(id)) => {
-                // A type used statically (`Files.readString(..)`) is already the owner.
-                if is_type_kind(index.defs[id].kind) {
-                    Some(id)
-                } else {
-                    let declared = index.defs[id].declared_type.clone()?;
-                    named_type(index, index.defs[id].file, &declared)
+            // A type used statically (`Files.readString(..)`) is already the owner.
+            Resolution::Found(Target::Def(id)) if is_type_kind(index.defs[id].kind) => {
+                RecvType::Known(id)
+            }
+            Resolution::Found(Target::Def(id)) => declared_of(id),
+            Resolution::Found(Target::Local { file: lf, byte }) => {
+                match local_declared_type(index, lf, byte) {
+                    Some(declared) => recv_from_type_name(index, lf, &declared),
+                    None => RecvType::Unknown,
                 }
             }
-            Resolution::Found(Target::Local { file: lf, byte }) => {
-                let declared = local_declared_type(index, lf, byte)?;
-                named_type(index, lf, &declared)
-            }
-            _ => None,
+            Resolution::External => RecvType::External,
+            _ => RecvType::Unknown,
         },
-        "this" => enclosing_type_id(index, file, node),
-        "super" => enclosing_type_id(index, file, node)
-            .and_then(|id| supertype_ids(index, id).into_iter().next()),
+        "this" => match enclosing_type_id(index, file, node) {
+            Some(id) => RecvType::Known(id),
+            None => RecvType::Unknown,
+        },
+        "super" => match enclosing_type_id(index, file, node)
+            .and_then(|id| supertype_ids(index, id).into_iter().next())
+        {
+            Some(id) => RecvType::Known(id),
+            None => RecvType::Unknown,
+        },
         "field_access" | "method_invocation" => {
             let name_field = if node.kind() == "field_access" {
                 "field"
             } else {
                 "name"
             };
-            let inner = node.child_by_field_name(name_field)?;
+            let Some(inner) = node.child_by_field_name(name_field) else {
+                return RecvType::Unknown;
+            };
             match resolve_at(index, file, inner, depth) {
-                Resolution::Found(Target::Def(id)) => {
-                    let declared = index.defs[id].declared_type.clone()?;
-                    named_type(index, index.defs[id].file, &declared)
-                }
-                _ => None,
+                Resolution::Found(Target::Def(id)) => declared_of(id),
+                Resolution::External => RecvType::External,
+                _ => RecvType::Unknown,
             }
         }
         "object_creation_expression" | "cast_expression" => {
-            let ty = node.child_by_field_name("type")?;
-            named_type(index, file, &base_type_name(ty, src)?)
+            match node
+                .child_by_field_name("type")
+                .and_then(|ty| base_type_name(ty, src))
+            {
+                Some(name) => recv_from_type_name(index, file, &name),
+                None => RecvType::Unknown,
+            }
         }
-        "parenthesized_expression" => expr_type(index, file, node.named_child(0)?, depth + 1),
-        "string_literal" => named_type(index, file, "String"),
-        _ => None,
+        "parenthesized_expression" => match node.named_child(0) {
+            Some(inner) => expr_type(index, file, inner, depth + 1),
+            None => RecvType::Unknown,
+        },
+        // Every literal's type is a JDK one.
+        "string_literal" | "character_literal" | "decimal_integer_literal"
+        | "decimal_floating_point_literal" | "true" | "false" => RecvType::External,
+        _ => RecvType::Unknown,
     }
 }
 
@@ -735,6 +813,11 @@ fn named_type(index: &JavaIndex, file: usize, name: &str) -> Option<DefId> {
 
 /// Members named `name` on `owner`, then up its supertype chain. Overloads are
 /// narrowed by argument count when that leaves at least one candidate.
+///
+/// Also reports whether the supertype chain was *fully* visible. A miss on a complete
+/// chain proves the member comes from outside the project; a miss on an incomplete one
+/// (something extends a jar class) proves nothing, so the caller must not treat it as
+/// evidence.
 fn lookup_member(
     index: &JavaIndex,
     owner: DefId,
@@ -742,9 +825,9 @@ fn lookup_member(
     want_method: bool,
     arity: Option<usize>,
     depth: usize,
-) -> Vec<DefId> {
+) -> (Vec<DefId>, bool) {
     if depth > MAX_DEPTH {
-        return Vec::new();
+        return (Vec::new(), false);
     }
     let mut hits: Vec<DefId> = index.defs[owner]
         .members
@@ -773,16 +856,27 @@ fn lookup_member(
         }
     }
     if !hits.is_empty() {
-        return hits;
+        return (hits, true);
     }
 
-    for sup in supertype_ids(index, owner) {
-        let inherited = lookup_member(index, sup, name, want_method, arity, depth + 1);
-        if !inherited.is_empty() {
-            return inherited;
+    let file = index.defs[owner].file;
+    let mut chain_complete = true;
+    for super_name in &index.defs[owner].supertypes {
+        match named_type(index, file, super_name) {
+            Some(sup) if sup != owner => {
+                let (inherited, sub_complete) =
+                    lookup_member(index, sup, name, want_method, arity, depth + 1);
+                if !inherited.is_empty() {
+                    return (inherited, true);
+                }
+                chain_complete &= sub_complete;
+            }
+            Some(_) => {}
+            // A supertype we can't see — anything could be hiding in it.
+            None => chain_complete = false,
         }
     }
-    Vec::new()
+    (Vec::new(), chain_complete)
 }
 
 /// Supertypes of `owner`, resolved against the imports of the file that declares it.
@@ -1104,6 +1198,9 @@ pub fn find_definition(
             Resolution::Ambiguous(ids) => {
                 ids.into_iter().map(|id| def_result(index, id)).collect()
             }
+            // Known to live outside the project: a name match here would be a
+            // confident jump to the wrong place, so say nothing instead.
+            Resolution::External => Vec::new(),
             Resolution::Unresolved => name_fallback(index, symbol),
         },
         None => name_fallback(index, symbol),
@@ -1150,8 +1247,9 @@ pub fn find_references(
                     None => false,
                     Some(want) => match resolve(index, fi, node) {
                         Resolution::Found(got) if got == want => true,
-                        // Provably a different symbol that happens to share a name.
-                        Resolution::Found(_) => continue,
+                        // Provably a different symbol that happens to share a name —
+                        // either another declaration here, or one from a jar.
+                        Resolution::Found(_) | Resolution::External => continue,
                         _ => false,
                     },
                 };
@@ -1191,11 +1289,6 @@ mod tests {
     use super::*;
     use std::fs;
     use std::sync::MutexGuard;
-
-    /// `INDEX` is process-global, so a fixture built by one test would otherwise be
-    /// clobbered by another running in parallel. Every test holds this for its
-    /// duration; `fixture` hands the guard back so it lives as long as the test does.
-    static TEST_LOCK: Mutex<()> = Mutex::new(());
 
     /// Build a repo of Java files and index it. Returns the tempdir (keep it alive),
     /// the repo, the file list, and the serialising guard.
@@ -1505,6 +1598,92 @@ mod tests {
             .find(|r| r.file == "Main.java")
             .expect("a var-typed call must never be silently dropped");
         assert!(!hit.confirmed, "it can't be proven, so it stays unconfirmed");
+    }
+
+    #[test]
+    fn receiver_typed_by_a_missing_class_yields_nothing() {
+        // `Widget` isn't in the project, so no `render` here can be the answer —
+        // guessing `Painter.render` would be a confident jump to the wrong place.
+        let (dir, repo, rels, _lock) = fixture(&[
+            ("Painter.java", "class Painter {\n    void render() {}\n}\n"),
+            (
+                "Holder.java",
+                "class Holder {\n    Widget widget;\n    void run() {\n        widget.render();\n    }\n}\n",
+            ),
+        ]);
+        let defs = def_at(&repo, dir.path(), &rels, &sym("render", "Holder.java", 4, 15));
+        assert!(defs.is_empty(), "got {defs:?}");
+    }
+
+    #[test]
+    fn member_missing_from_a_fully_known_type_yields_nothing() {
+        // `Known` has no supertypes, so we've seen all of it: `missing` must come
+        // from outside, and `Other.missing` is not it.
+        let (dir, repo, rels, _lock) = fixture(&[
+            ("Known.java", "class Known {\n    void present() {}\n}\n"),
+            ("Other.java", "class Other {\n    void missing() {}\n}\n"),
+            (
+                "Use.java",
+                "class Use {\n    void run() {\n        Known k = new Known();\n        k.missing();\n    }\n}\n",
+            ),
+        ]);
+        let defs = def_at(&repo, dir.path(), &rels, &sym("missing", "Use.java", 4, 10));
+        assert!(defs.is_empty(), "got {defs:?}");
+    }
+
+    #[test]
+    fn an_invisible_supertype_keeps_the_name_fallback() {
+        // `Sub extends Unseen`, so `ping` could genuinely be inherited from a class we
+        // can't read. That's not proof of anything — fall back rather than deny.
+        let (dir, repo, rels, _lock) = fixture(&[
+            ("Helper.java", "class Helper {\n    void ping() {}\n}\n"),
+            ("Sub.java", "class Sub extends Unseen {\n}\n"),
+            (
+                "Use.java",
+                "class Use {\n    void run() {\n        Sub s = new Sub();\n        s.ping();\n    }\n}\n",
+            ),
+        ]);
+        let defs = def_at(&repo, dir.path(), &rels, &sym("ping", "Use.java", 4, 10));
+        assert_eq!(defs.len(), 1, "an unreadable supertype means we can't rule it out");
+        assert_eq!(defs[0].file, "Helper.java");
+    }
+
+    #[test]
+    fn a_jdk_style_receiver_is_treated_as_external() {
+        // `System` is unresolvable and shaped like a type, so `System.out.println`
+        // must not land on this project's own `println`.
+        let (dir, repo, rels, _lock) = fixture(&[
+            ("Logger.java", "class Logger {\n    void println(String s) {}\n}\n"),
+            (
+                "Use.java",
+                "class Use {\n    void run() {\n        System.out.println(\"x\");\n    }\n}\n",
+            ),
+        ]);
+        let defs = def_at(&repo, dir.path(), &rels, &sym("println", "Use.java", 3, 19));
+        assert!(defs.is_empty(), "got {defs:?}");
+    }
+
+    #[test]
+    fn references_drop_calls_proven_to_be_external() {
+        let (dir, repo, rels, _lock) = fixture(&[
+            ("Painter.java", "class Painter {\n    void render() {}\n}\n"),
+            (
+                "Holder.java",
+                "class Holder {\n    Widget widget;\n    void run() {\n        widget.render();\n    }\n}\n",
+            ),
+        ]);
+        let refs = find_references(
+            &repo,
+            dir.path(),
+            &ProjectSource::Worktree,
+            &rels,
+            &sym("render", "Painter.java", 2, 9),
+        )
+        .unwrap();
+        assert!(
+            !refs.iter().any(|r| r.file == "Holder.java"),
+            "widget.render() belongs to a type we don't have — provably not this one"
+        );
     }
 
     #[test]

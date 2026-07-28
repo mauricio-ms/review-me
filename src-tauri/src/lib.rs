@@ -13,6 +13,8 @@ mod revision;
 mod tags;
 mod tree;
 mod xref;
+#[cfg(test)]
+mod xref_validate;
 
 pub fn run() {
     tauri::Builder::default()

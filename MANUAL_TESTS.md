@@ -344,7 +344,13 @@ The fixture's first commit (`initial`) is the **root** commit — §6 reviews th
 > `A.java`/`B.java`). For a meatier test, add a class that's used across files,
 > e.g. a `Greeter` class referenced from a `Main` class.
 
-> For §4.1–4.3 add a disambiguation fixture: `Dog.java` and `Cat.java` each with a
+> **Easiest setup:** run `./scripts/make-java-sample.sh` and open `sample-java/` — a
+> multi-package project built for exactly these scenarios (two classes sharing the
+> simple name `Book`, three `restock` overloads, a `var` receiver, and jar-typed
+> receivers). `cargo test --lib xref_validate -- --nocapture` asserts the same
+> behaviour headlessly; the steps below are for confirming the *UI* around it.
+>
+> Otherwise add a disambiguation fixture by hand: `Dog.java` and `Cat.java` each with a
 > `void speak() {}`, and a `Main.java` that does `Dog d = new Dog(); d.speak();`.
 
 ### 4.1 Go to definition
@@ -387,10 +393,15 @@ The fixture's first commit (`initial`) is the **root** commit — §6 reviews th
 - [ ] **Steps:** Try `M-.` on whitespace, or in a non-`.java` file.
 - [ ] **Expect:** Nothing happens (no symbol resolved) — no crash.
 
+### 4.8 Symbols from outside the project
+- [ ] **Steps:** In `sample-java`, `M-.` on `add` in `books.add(book)` (`Library.java`), on `getMessage` in `failure.getMessage()`, and on `toString` in `SCIENCE.toString()`.
+- [ ] **Expect:** Each shows "no definition" — their receivers are `List`, `RuntimeException` and `Enum`, which live in jars. Notably `add` must **not** jump to `Library.add`, even though that method exists and matches by name.
+
 > **Known limitation:** resolution covers scopes, imports, and receiver types, but
 > stops at `var`, generic element types, static imports, and anything typed by a jar
 > (no source in the repo). Those cases surface honestly — a picker for `M-.`, the
-> unconfirmed section for `M-?` — rather than guessing.
+> unconfirmed section for `M-?`, or a plain "no definition" when the symbol is known to
+> come from outside — rather than guessing.
 
 ---
 
