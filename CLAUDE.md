@@ -189,15 +189,55 @@ drops cached listings and the open file — they belong to the old snapshot — 
 
 ### Cross-references
 
-`xref.rs` parses every `.java` file once into a cached index (trees + a name→definitions
-map), keyed by `(root, ProjectSource)` so a branch index never mixes in the checkout's
-version of a file. Resolution is **name+kind only** (no type/scope resolution) — navigation-grade, so
-same-named symbols across classes may all appear. `symbol_at` resolves the identifier
-under a cursor; results are ranked same-file-first. The frontend binds `gd`/`gr` as vim
-actions (`editor/vim-xref.ts`) and as `Space g d`/`g r` palette commands; a Ctrl/Cmd+click
-in the viewer (`editor/xref-click.ts`) also jumps to definition. Both the `gd` action and
-the click route through `xref.ts`'s `gotoDefinitionAt(line, col)`. The index is
-warmed in the background on repo open/refresh.
+`xref.rs` parses every `.java` file once into a cached index, keyed by
+`(root, ProjectSource)` so a branch index never mixes in the checkout's version of a
+file. The index stores syntax and *declarations* — each file's `package`/`import`s,
+each type's members, supertype names, method arity, and declared types — but never
+resolved edges. Everything hangs off one primitive:
+
+```rust
+resolve(index, file, node) -> Found(Target) | Ambiguous(Vec<DefId>) | Unresolved
+```
+
+Go-to-definition is `resolve` at the cursor; find-references is `resolve` at every
+occurrence that matches by name. Resolution is **lazy** (per query, never at build
+time), so index warm-up cost doesn't grow with it. It proceeds in three tiers:
+an in-file **scope walk** for locals/parameters/catch-and-for bindings; **type
+resolution** by explicit import → same package → wildcard → project-wide name; and
+**member resolution**, which types the receiver via the first two, looks the member up
+on that type, walks `extends`/`implements`, and splits overloads by argument count.
+Chained calls recurse through a method's declared return type. Locals aren't indexed
+(too many, each visible in one method) — they're `Target::Local`, identified by byte
+offset.
+
+`Unresolved` is a real answer, not a bug: `var`, generic element types, static imports,
+and anything typed by a jar have no source in the repo to point at. `find_definition`
+then falls back to a kind-filtered name match, so **the picker only appears when
+resolution genuinely couldn't decide**.
+
+`find_references` name-matches first (the cheap prefilter) and resolves only the
+survivors. An occurrence proved to be a *different* symbol is **dropped**; one that
+can't be proved either way comes back with `confirmed: false` and is shown in a
+separate section. Nothing is silently omitted — a missed caller is a worse failure than
+a spurious one in a review tool. `rank` puts confirmed hits first, then same-file.
+
+The frontend binds emacs-xref keys in the viewer (`editor/xref-keymap.ts`, an Alt
+keymap rather than vim mappings — codemirror-vim's own `C-o`/`C-i` jump list anchors
+marks into a document the viewer replaces on every file open, so it can't follow a jump
+across files): **`M-.`** definition, **`M-,`** back, **`M-?`** references, plus
+`Space g d`/`g r`/`g o` palette commands. A Ctrl/Cmd+click (`editor/xref-click.ts`) also
+jumps to definition; it and `M-.` both route through `xref.ts`'s
+`gotoDefinitionAt(line, col)`. The index is warmed in the background on repo
+open/refresh (`applyComparison`).
+
+`useJumpStore` (`state/jumps.ts`) is the emacs marker stack: pop-only, no forward.
+`lib/jumps.ts`'s **`recordJump`** is called by the navigation *gestures* — `navigateTo`,
+`openFileInProject`, activating a tree row — and deliberately not by `openProjectFile`,
+which they all share, so `jumpBack` can reuse the same open path without recording the
+position it's leaving (which would make `M-,` ping-pong). Recording inside `navigateTo`
+rather than `gotoDefinitionAt` also means dismissing the picker records nothing.
+Entries are viewer-local (file + cursor, never a revision), so `useProjectSource` clears
+the stack whenever the source changes.
 
 ## Extending
 

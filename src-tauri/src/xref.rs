@@ -1,17 +1,28 @@
+//! Java cross-references: a cached tree-sitter index plus a name/scope/type resolver.
+//!
+//! Everything here hangs off one primitive, [`resolve`], which answers "what
+//! declaration does this identifier occurrence refer to?". Go-to-definition is
+//! `resolve` at the cursor; find-references is `resolve` at every occurrence that
+//! matches by name, keeping the ones that come back pointing at the same declaration.
+//!
+//! Resolution is *lazy* — the index stores syntax and declarations, never resolved
+//! edges — so index build cost doesn't grow, and a query only pays for the
+//! occurrences it actually looks at.
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+use git2::Repository;
 use serde::{Deserialize, Serialize};
 use streaming_iterator::StreamingIterator;
-use git2::Repository;
-use tree_sitter::{Language, Parser, Point, Query, QueryCursor, Tree};
+use tree_sitter::{Language, Node, Parser, Point, Query, QueryCursor, Tree};
 
 use crate::error::{AppError, AppResult};
 use crate::queries;
 use crate::revision::{self, ProjectSource};
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum SymbolKind {
     Class,
@@ -49,6 +60,11 @@ pub struct XrefResult {
     pub snippet: String,
     pub kind: XrefKind,
     pub symbol_kind: SymbolKind,
+    /// True when the resolver *proved* this occurrence refers to the symbol under the
+    /// cursor. False means "matches by name, couldn't be decided" — never "wrong".
+    /// Occurrences proven to mean something else are dropped instead of being flagged,
+    /// so an unconfirmed result is always worth a look.
+    pub confirmed: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -58,18 +74,46 @@ pub struct IndexStats {
     pub symbols: u32,
 }
 
+// ---------------------------------------------------------------------------
+// Index
+// ---------------------------------------------------------------------------
+
+type DefId = usize;
+
 struct DefRec {
+    name: String,
     kind: SymbolKind,
-    file: String,
+    /// Index into `JavaIndex::files`.
+    file: usize,
     line: u32,
     col: u32,
     snippet: String,
+    /// The type declaring this member; `None` for a top-level type.
+    owner: Option<DefId>,
+    /// Members declared directly in this type (types only).
+    members: Vec<DefId>,
+    /// Raw `extends`/`implements` names, resolved on demand against the *declaring*
+    /// file's imports — which is why they're stored unresolved.
+    supertypes: Vec<String>,
+    /// Parameter count, for picking between overloads.
+    arity: Option<usize>,
+    /// A field's type or a method's return type, reduced to a base name (generics and
+    /// array dimensions stripped) so it can be fed straight back into `resolve_type`.
+    declared_type: Option<String>,
+}
+
+struct Import {
+    /// Fully-qualified path, without any trailing `.*`.
+    path: String,
+    wildcard: bool,
 }
 
 struct FileEntry {
     rel: String,
     source: String,
     tree: Tree,
+    package: Option<String>,
+    imports: Vec<Import>,
 }
 
 /// What a cached index was built from. A branch comparison browses a commit's tree,
@@ -83,7 +127,16 @@ struct IndexKey {
 struct JavaIndex {
     key: IndexKey,
     files: Vec<FileEntry>,
-    defs: HashMap<String, Vec<DefRec>>,
+    defs: Vec<DefRec>,
+    /// Name → declarations. The fallback path, used when resolution can't decide.
+    by_name: HashMap<String, Vec<DefId>>,
+    /// Fully-qualified name → type declaration. The backbone of type resolution.
+    by_fqn: HashMap<String, DefId>,
+    /// (file, type declaration node id) → definition; finds the type enclosing a node.
+    type_by_node: HashMap<(usize, usize), DefId>,
+    /// (file, name node id) → definition; recognises "the cursor is on a declaration".
+    def_by_name_node: HashMap<(usize, usize), DefId>,
+    file_index: HashMap<String, usize>,
 }
 
 // One cached project index. Rebuilt when the root or revision changes, or on
@@ -121,6 +174,159 @@ fn kind_from_capture(name: &str) -> SymbolKind {
     }
 }
 
+fn is_type_kind(kind: SymbolKind) -> bool {
+    matches!(
+        kind,
+        SymbolKind::Class | SymbolKind::Interface | SymbolKind::Enum
+    )
+}
+
+/// Node kinds that carry a definition captured by `queries::java::DEFINITIONS`.
+const DECL_KINDS: &[&str] = &[
+    "class_declaration",
+    "interface_declaration",
+    "enum_declaration",
+    "record_declaration",
+    "annotation_type_declaration",
+    "method_declaration",
+    "constructor_declaration",
+    "compact_constructor_declaration",
+    "field_declaration",
+    "enum_constant",
+];
+
+const TYPE_DECL_KINDS: &[&str] = &[
+    "class_declaration",
+    "interface_declaration",
+    "enum_declaration",
+    "record_declaration",
+    "annotation_type_declaration",
+];
+
+// ---------------------------------------------------------------------------
+// Java syntax helpers
+// ---------------------------------------------------------------------------
+
+/// The base name of a type node: `List<Foo>` → `List`, `a.b.C[]` → `C`. Primitives
+/// and `void` yield `None`, since nothing in the project can define them.
+fn base_type_name(node: Node, src: &str) -> Option<String> {
+    match node.kind() {
+        "type_identifier" => Some(src[node.byte_range()].to_string()),
+        "generic_type" | "annotated_type" => {
+            let mut cur = node.walk();
+            let found = node.children(&mut cur).find_map(|c| base_type_name(c, src));
+            found
+        }
+        "array_type" => node
+            .child_by_field_name("element")
+            .and_then(|c| base_type_name(c, src)),
+        "scoped_type_identifier" => {
+            let mut cur = node.walk();
+            let found = node
+                .children(&mut cur)
+                .filter(|c| c.kind() == "type_identifier")
+                .last()
+                .map(|c| src[c.byte_range()].to_string());
+            found
+        }
+        _ => None,
+    }
+}
+
+/// The nearest enclosing declaration node for a captured name.
+fn declaration_of(node: Node) -> Option<Node> {
+    let mut cur = Some(node);
+    while let Some(n) = cur {
+        if DECL_KINDS.contains(&n.kind()) {
+            return Some(n);
+        }
+        cur = n.parent();
+    }
+    None
+}
+
+/// The type declaration a node sits inside, if any (skipping the node itself).
+fn enclosing_type_decl(node: Node) -> Option<Node> {
+    let mut cur = node.parent();
+    while let Some(n) = cur {
+        if TYPE_DECL_KINDS.contains(&n.kind()) {
+            return Some(n);
+        }
+        cur = n.parent();
+    }
+    None
+}
+
+fn collect_type_names(node: Node, src: &str, out: &mut Vec<String>) {
+    let mut cur = node.walk();
+    for child in node.children(&mut cur) {
+        match child.kind() {
+            "type_list" => collect_type_names(child, src, out),
+            _ => {
+                if let Some(name) = base_type_name(child, src) {
+                    out.push(name);
+                }
+            }
+        }
+    }
+}
+
+/// `extends` / `implements` names on a type declaration, left unresolved.
+fn supertype_names(decl: Node, src: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut cur = decl.walk();
+    for child in decl.children(&mut cur) {
+        if matches!(
+            child.kind(),
+            "superclass" | "super_interfaces" | "extends_interfaces"
+        ) {
+            collect_type_names(child, src, &mut out);
+        }
+    }
+    out
+}
+
+fn parameter_count(decl: Node) -> Option<usize> {
+    let params = decl.child_by_field_name("parameters")?;
+    let mut cur = params.walk();
+    Some(params.named_children(&mut cur).count())
+}
+
+/// A file's `package` name and `import`s.
+fn file_header(tree: &Tree, src: &str) -> (Option<String>, Vec<Import>) {
+    let root = tree.root_node();
+    let mut package = None;
+    let mut imports = Vec::new();
+    let mut cur = root.walk();
+    for child in root.children(&mut cur) {
+        let named = || {
+            let mut c = child.walk();
+            let found = child
+                .children(&mut c)
+                .find(|n| matches!(n.kind(), "identifier" | "scoped_identifier"))
+                .map(|n| src[n.byte_range()].to_string());
+            found
+        };
+        match child.kind() {
+            "package_declaration" => package = named(),
+            "import_declaration" => {
+                if let Some(path) = named() {
+                    imports.push(Import {
+                        path,
+                        wildcard: src[child.byte_range()].contains(".*"),
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+    (package, imports)
+}
+
+// ---------------------------------------------------------------------------
+// Index building
+// ---------------------------------------------------------------------------
+
 /// (Re)build the Java symbol index for `root` at `source` over the given
 /// repo-relative files. Content is read from `source`, so an index built for a branch
 /// comparison never mixes in the checkout's version of a file.
@@ -135,49 +341,121 @@ pub fn build_index(
         .map_err(|e| AppError::TreeSitter(e.to_string()))?;
     let mut parser = java_parser()?;
 
-    let mut files = Vec::new();
-    let mut defs: HashMap<String, Vec<DefRec>> = HashMap::new();
-    let mut symbol_count = 0u32;
-
+    let mut files: Vec<FileEntry> = Vec::new();
+    let mut file_index = HashMap::new();
     for rel in rel_files.iter().filter(|f| is_java(f)) {
-        let source = match revision::read_file(repo, source, root, rel) {
+        let text = match revision::read_file(repo, source, root, rel) {
             Ok(s) => s,
             Err(_) => continue,
         };
-        let tree = match parser.parse(&source, None) {
+        let tree = match parser.parse(&text, None) {
             Some(t) => t,
             None => continue,
         };
-
-        let mut cursor = QueryCursor::new();
-        let mut matches = cursor.matches(&def_query, tree.root_node(), source.as_bytes());
-        while let Some(m) = matches.next() {
-            for cap in m.captures {
-                let cap_name = def_query.capture_names()[cap.index as usize];
-                let node = cap.node;
-                let name = source[node.byte_range()].to_string();
-                let pos = node.start_position();
-                defs.entry(name).or_default().push(DefRec {
-                    kind: kind_from_capture(cap_name),
-                    file: rel.clone(),
-                    line: pos.row as u32 + 1,
-                    col: pos.column as u32,
-                    snippet: line_text(&source, pos.row),
-                });
-                symbol_count += 1;
-            }
-        }
-
+        let (package, imports) = file_header(&tree, &text);
+        file_index.insert(rel.clone(), files.len());
         files.push(FileEntry {
             rel: rel.clone(),
-            source,
+            source: text,
             tree,
+            package,
+            imports,
         });
+    }
+
+    // Pass 1: every declaration, with the node it was declared by. Ownership is
+    // resolved afterwards because a query yields matches in no particular order.
+    let mut defs: Vec<DefRec> = Vec::new();
+    let mut type_by_node: HashMap<(usize, usize), DefId> = HashMap::new();
+    let mut def_by_name_node: HashMap<(usize, usize), DefId> = HashMap::new();
+    let mut owner_nodes: Vec<Option<(usize, usize)>> = Vec::new();
+
+    for (fi, entry) in files.iter().enumerate() {
+        let src = &entry.source;
+        let mut cursor = QueryCursor::new();
+        let mut matches = cursor.matches(&def_query, entry.tree.root_node(), src.as_bytes());
+        while let Some(m) = matches.next() {
+            for cap in m.captures {
+                let name_node = cap.node;
+                let Some(decl) = declaration_of(name_node) else {
+                    continue;
+                };
+                let kind = kind_from_capture(def_query.capture_names()[cap.index as usize]);
+                let pos = name_node.start_position();
+                let declared_type = if kind == SymbolKind::Field && decl.kind() == "enum_constant" {
+                    // An enum constant's type is the enum that declares it.
+                    enclosing_type_decl(decl)
+                        .and_then(|t| t.child_by_field_name("name"))
+                        .map(|n| src[n.byte_range()].to_string())
+                } else {
+                    decl.child_by_field_name("type")
+                        .and_then(|t| base_type_name(t, src))
+                };
+
+                let id = defs.len();
+                defs.push(DefRec {
+                    name: src[name_node.byte_range()].to_string(),
+                    kind,
+                    file: fi,
+                    line: pos.row as u32 + 1,
+                    col: pos.column as u32,
+                    snippet: line_text(src, pos.row),
+                    owner: None,
+                    members: Vec::new(),
+                    supertypes: if is_type_kind(kind) {
+                        supertype_names(decl, src)
+                    } else {
+                        Vec::new()
+                    },
+                    arity: if kind == SymbolKind::Method {
+                        parameter_count(decl)
+                    } else {
+                        None
+                    },
+                    declared_type,
+                });
+                owner_nodes.push(enclosing_type_decl(decl).map(|t| (fi, t.id())));
+                def_by_name_node.insert((fi, name_node.id()), id);
+                if is_type_kind(kind) {
+                    type_by_node.insert((fi, decl.id()), id);
+                }
+            }
+        }
+    }
+
+    // Pass 2: link members to the type that declares them.
+    for id in 0..defs.len() {
+        if let Some(owner) = owner_nodes[id].and_then(|k| type_by_node.get(&k).copied()) {
+            defs[id].owner = Some(owner);
+            defs[owner].members.push(id);
+        }
+    }
+
+    // Pass 3: name and fully-qualified-name lookup tables.
+    let mut by_name: HashMap<String, Vec<DefId>> = HashMap::new();
+    let mut by_fqn: HashMap<String, DefId> = HashMap::new();
+    for id in 0..defs.len() {
+        by_name.entry(defs[id].name.clone()).or_default().push(id);
+        if is_type_kind(defs[id].kind) {
+            let mut parts = Vec::new();
+            let mut cur = Some(id);
+            while let Some(i) = cur {
+                parts.push(defs[i].name.as_str());
+                cur = defs[i].owner;
+            }
+            parts.reverse();
+            let path = parts.join(".");
+            let fqn = match &files[defs[id].file].package {
+                Some(pkg) => format!("{pkg}.{path}"),
+                None => path,
+            };
+            by_fqn.insert(fqn, id);
+        }
     }
 
     let stats = IndexStats {
         files: files.len() as u32,
-        symbols: symbol_count,
+        symbols: defs.len() as u32,
     };
     *INDEX.lock().unwrap() = Some(JavaIndex {
         key: IndexKey {
@@ -186,6 +464,11 @@ pub fn build_index(
         },
         files,
         defs,
+        by_name,
+        by_fqn,
+        type_by_node,
+        def_by_name_node,
+        file_index,
     });
     Ok(stats)
 }
@@ -209,6 +492,492 @@ fn ensure_index(
     }
     Ok(())
 }
+
+// ---------------------------------------------------------------------------
+// Resolver
+// ---------------------------------------------------------------------------
+
+/// What an identifier occurrence refers to. Locals aren't indexed — there are far too
+/// many and each is visible inside one method — so they're identified positionally.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Target {
+    Def(DefId),
+    Local { file: usize, byte: usize },
+}
+
+enum Resolution {
+    Found(Target),
+    /// Several candidates, none provably right — this is what surfaces a picker.
+    Ambiguous(Vec<DefId>),
+    /// Not decidable: `var`, a generic element type, a static import, or a type that
+    /// lives in a jar rather than in this repo.
+    Unresolved,
+}
+
+/// Depth cap for the mutually-recursive walks (receiver types, supertype chains).
+const MAX_DEPTH: usize = 16;
+
+fn finish(hits: Vec<DefId>) -> Resolution {
+    match hits.len() {
+        0 => Resolution::Unresolved,
+        1 => Resolution::Found(Target::Def(hits[0])),
+        _ => Resolution::Ambiguous(hits),
+    }
+}
+
+fn resolve(index: &JavaIndex, file: usize, node: Node) -> Resolution {
+    resolve_at(index, file, node, 0)
+}
+
+fn resolve_at(index: &JavaIndex, file: usize, node: Node, depth: usize) -> Resolution {
+    if depth > MAX_DEPTH {
+        return Resolution::Unresolved;
+    }
+    let src = &index.files[file].source;
+    let name = &src[node.byte_range()];
+
+    // The cursor is on a declaration's own name.
+    if let Some(&id) = index.def_by_name_node.get(&(file, node.id())) {
+        return Resolution::Found(Target::Def(id));
+    }
+    if is_local_declaration_name(node) {
+        return Resolution::Found(Target::Local {
+            file,
+            byte: node.start_byte(),
+        });
+    }
+
+    if node.kind() == "type_identifier" {
+        return resolve_type(index, file, name);
+    }
+
+    if let Some(parent) = node.parent() {
+        let is_field = |field: &str| {
+            parent.child_by_field_name(field).map(|n| n.id()) == Some(node.id())
+        };
+        match parent.kind() {
+            "method_invocation" if is_field("name") => {
+                return resolve_member(index, file, parent, name, true, depth);
+            }
+            "field_access" if is_field("field") => {
+                return resolve_member(index, file, parent, name, false, depth);
+            }
+            _ => {}
+        }
+    }
+
+    resolve_bare(index, file, node, name, depth)
+}
+
+/// A bare identifier: a local/parameter, then a field of the enclosing type (or one of
+/// its supertypes), then a type name used statically.
+fn resolve_bare(
+    index: &JavaIndex,
+    file: usize,
+    node: Node,
+    name: &str,
+    depth: usize,
+) -> Resolution {
+    let src = &index.files[file].source;
+    if let Some(decl) = find_local(node, src, name) {
+        return Resolution::Found(Target::Local {
+            file,
+            byte: decl.start_byte(),
+        });
+    }
+    if let Some(owner) = enclosing_type_id(index, file, node) {
+        let hits = lookup_member(index, owner, name, false, None, depth);
+        if !hits.is_empty() {
+            return finish(hits);
+        }
+    }
+    resolve_type(index, file, name)
+}
+
+/// A member reached through `recv.name(..)` or `recv.field`, or with no receiver at all.
+fn resolve_member(
+    index: &JavaIndex,
+    file: usize,
+    access: Node,
+    name: &str,
+    want_method: bool,
+    depth: usize,
+) -> Resolution {
+    let arity = if want_method {
+        access.child_by_field_name("arguments").map(|args| {
+            let mut cur = args.walk();
+            args.named_children(&mut cur).count()
+        })
+    } else {
+        None
+    };
+    let owner = match access.child_by_field_name("object") {
+        // No receiver: the enclosing type, then up its supertype chain.
+        None => enclosing_type_id(index, file, access),
+        Some(obj) => match expr_type(index, file, obj, depth + 1) {
+            Some(id) => Some(id),
+            // An unknown receiver type is the honest end of the line.
+            None => return Resolution::Unresolved,
+        },
+    };
+    let Some(owner) = owner else {
+        return Resolution::Unresolved;
+    };
+    finish(lookup_member(index, owner, name, want_method, arity, depth))
+}
+
+/// Resolve a type *name* against a file's imports, then its package, then wildcards,
+/// falling back to a project-wide name match.
+fn resolve_type(index: &JavaIndex, file: usize, name: &str) -> Resolution {
+    let entry = &index.files[file];
+
+    for import in entry.imports.iter().filter(|i| !i.wildcard) {
+        if import.path.rsplit('.').next() == Some(name) {
+            if let Some(&id) = index.by_fqn.get(&import.path) {
+                return Resolution::Found(Target::Def(id));
+            }
+        }
+    }
+
+    match &entry.package {
+        Some(pkg) => {
+            if let Some(&id) = index.by_fqn.get(&format!("{pkg}.{name}")) {
+                return Resolution::Found(Target::Def(id));
+            }
+        }
+        None => {
+            if let Some(&id) = index.by_fqn.get(name) {
+                return Resolution::Found(Target::Def(id));
+            }
+        }
+    }
+
+    for import in entry.imports.iter().filter(|i| i.wildcard) {
+        if let Some(&id) = index.by_fqn.get(&format!("{}.{}", import.path, name)) {
+            return Resolution::Found(Target::Def(id));
+        }
+    }
+
+    // Nested types referenced by their simple name, and anything else that only a
+    // plain name match can reach.
+    finish(
+        index
+            .by_name
+            .get(name)
+            .map(|ids| {
+                ids.iter()
+                    .copied()
+                    .filter(|&id| is_type_kind(index.defs[id].kind))
+                    .collect()
+            })
+            .unwrap_or_default(),
+    )
+}
+
+/// The type of an expression, as a definition id — the heart of receiver resolution.
+fn expr_type(index: &JavaIndex, file: usize, node: Node, depth: usize) -> Option<DefId> {
+    if depth > MAX_DEPTH {
+        return None;
+    }
+    let src = &index.files[file].source;
+    match node.kind() {
+        "identifier" => match resolve_at(index, file, node, depth) {
+            Resolution::Found(Target::Def(id)) => {
+                // A type used statically (`Files.readString(..)`) is already the owner.
+                if is_type_kind(index.defs[id].kind) {
+                    Some(id)
+                } else {
+                    let declared = index.defs[id].declared_type.clone()?;
+                    named_type(index, index.defs[id].file, &declared)
+                }
+            }
+            Resolution::Found(Target::Local { file: lf, byte }) => {
+                let declared = local_declared_type(index, lf, byte)?;
+                named_type(index, lf, &declared)
+            }
+            _ => None,
+        },
+        "this" => enclosing_type_id(index, file, node),
+        "super" => enclosing_type_id(index, file, node)
+            .and_then(|id| supertype_ids(index, id).into_iter().next()),
+        "field_access" | "method_invocation" => {
+            let name_field = if node.kind() == "field_access" {
+                "field"
+            } else {
+                "name"
+            };
+            let inner = node.child_by_field_name(name_field)?;
+            match resolve_at(index, file, inner, depth) {
+                Resolution::Found(Target::Def(id)) => {
+                    let declared = index.defs[id].declared_type.clone()?;
+                    named_type(index, index.defs[id].file, &declared)
+                }
+                _ => None,
+            }
+        }
+        "object_creation_expression" | "cast_expression" => {
+            let ty = node.child_by_field_name("type")?;
+            named_type(index, file, &base_type_name(ty, src)?)
+        }
+        "parenthesized_expression" => expr_type(index, file, node.named_child(0)?, depth + 1),
+        "string_literal" => named_type(index, file, "String"),
+        _ => None,
+    }
+}
+
+/// `resolve_type`, but only accepting an unambiguous answer.
+fn named_type(index: &JavaIndex, file: usize, name: &str) -> Option<DefId> {
+    match resolve_type(index, file, name) {
+        Resolution::Found(Target::Def(id)) if is_type_kind(index.defs[id].kind) => Some(id),
+        _ => None,
+    }
+}
+
+/// Members named `name` on `owner`, then up its supertype chain. Overloads are
+/// narrowed by argument count when that leaves at least one candidate.
+fn lookup_member(
+    index: &JavaIndex,
+    owner: DefId,
+    name: &str,
+    want_method: bool,
+    arity: Option<usize>,
+    depth: usize,
+) -> Vec<DefId> {
+    if depth > MAX_DEPTH {
+        return Vec::new();
+    }
+    let mut hits: Vec<DefId> = index.defs[owner]
+        .members
+        .iter()
+        .copied()
+        .filter(|&m| {
+            index.defs[m].name == name
+                && if want_method {
+                    index.defs[m].kind == SymbolKind::Method
+                } else {
+                    index.defs[m].kind == SymbolKind::Field
+                }
+        })
+        .collect();
+
+    if want_method && hits.len() > 1 {
+        if let Some(n) = arity {
+            let exact: Vec<DefId> = hits
+                .iter()
+                .copied()
+                .filter(|&m| index.defs[m].arity == Some(n))
+                .collect();
+            if !exact.is_empty() {
+                hits = exact;
+            }
+        }
+    }
+    if !hits.is_empty() {
+        return hits;
+    }
+
+    for sup in supertype_ids(index, owner) {
+        let inherited = lookup_member(index, sup, name, want_method, arity, depth + 1);
+        if !inherited.is_empty() {
+            return inherited;
+        }
+    }
+    Vec::new()
+}
+
+/// Supertypes of `owner`, resolved against the imports of the file that declares it.
+fn supertype_ids(index: &JavaIndex, owner: DefId) -> Vec<DefId> {
+    let file = index.defs[owner].file;
+    index.defs[owner]
+        .supertypes
+        .iter()
+        .filter_map(|name| named_type(index, file, name))
+        .filter(|&id| id != owner)
+        .collect()
+}
+
+fn enclosing_type_id(index: &JavaIndex, file: usize, node: Node) -> Option<DefId> {
+    let decl = enclosing_type_decl(node)?;
+    index.type_by_node.get(&(file, decl.id())).copied()
+}
+
+/// True when this identifier *is* a local/parameter declaration's name.
+fn is_local_declaration_name(node: Node) -> bool {
+    let Some(parent) = node.parent() else {
+        return false;
+    };
+    let is_name = parent.child_by_field_name("name").map(|n| n.id()) == Some(node.id());
+    match parent.kind() {
+        "variable_declarator" => {
+            is_name
+                && parent
+                    .parent()
+                    .map(|g| g.kind() != "field_declaration")
+                    .unwrap_or(false)
+        }
+        "formal_parameter" | "catch_formal_parameter" | "enhanced_for_statement" => is_name,
+        "inferred_parameters" => true,
+        "lambda_expression" => {
+            parent.child_by_field_name("parameters").map(|n| n.id()) == Some(node.id())
+        }
+        _ => false,
+    }
+}
+
+/// Walk enclosing scopes for a local, parameter, or catch/for binding named `name`.
+/// Stops at the type boundary — fields are a separate lookup with different rules.
+fn find_local<'t>(node: Node<'t>, src: &str, name: &str) -> Option<Node<'t>> {
+    let mut child = node;
+    let mut cur = node.parent();
+    while let Some(scope) = cur {
+        match scope.kind() {
+            "method_declaration"
+            | "constructor_declaration"
+            | "compact_constructor_declaration"
+            | "lambda_expression" => {
+                if let Some(found) = param_named(scope, src, name) {
+                    return Some(found);
+                }
+            }
+            "enhanced_for_statement" => {
+                if let Some(n) = scope.child_by_field_name("name") {
+                    if src[n.byte_range()] == *name {
+                        return Some(n);
+                    }
+                }
+            }
+            "catch_clause" | "for_statement" | "try_with_resources_statement" => {
+                if let Some(found) = binding_named(scope, src, name) {
+                    return Some(found);
+                }
+            }
+            "block" | "constructor_body" | "switch_block" | "switch_block_statement_group"
+            | "program" => {
+                // Java requires declaration before use, so only look above the cursor.
+                if let Some(found) = local_in_block(scope, src, name, child.start_byte()) {
+                    return Some(found);
+                }
+            }
+            k if TYPE_DECL_KINDS.contains(&k) => return None,
+            _ => {}
+        }
+        child = scope;
+        cur = scope.parent();
+    }
+    None
+}
+
+fn param_named<'t>(scope: Node<'t>, src: &str, name: &str) -> Option<Node<'t>> {
+    let params = scope.child_by_field_name("parameters")?;
+    if params.kind() == "identifier" {
+        return (src[params.byte_range()] == *name).then_some(params);
+    }
+    let mut cur = params.walk();
+    for param in params.named_children(&mut cur) {
+        let candidate = param
+            .child_by_field_name("name")
+            .or(if param.kind() == "identifier" {
+                Some(param)
+            } else {
+                None
+            });
+        if let Some(n) = candidate {
+            if src[n.byte_range()] == *name {
+                return Some(n);
+            }
+        }
+    }
+    None
+}
+
+fn binding_named<'t>(scope: Node<'t>, src: &str, name: &str) -> Option<Node<'t>> {
+    let mut cur = scope.walk();
+    for child in scope.named_children(&mut cur) {
+        match child.kind() {
+            "catch_formal_parameter" | "resource" => {
+                if let Some(n) = child.child_by_field_name("name") {
+                    if src[n.byte_range()] == *name {
+                        return Some(n);
+                    }
+                }
+            }
+            "local_variable_declaration" => {
+                if let Some(n) = declarator_named(child, src, name) {
+                    return Some(n);
+                }
+            }
+            "resource_specification" | "catch_type" => {
+                if let Some(n) = binding_named(child, src, name) {
+                    return Some(n);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn local_in_block<'t>(
+    block: Node<'t>,
+    src: &str,
+    name: &str,
+    before: usize,
+) -> Option<Node<'t>> {
+    let mut cur = block.walk();
+    for stmt in block.named_children(&mut cur) {
+        if stmt.start_byte() > before {
+            break;
+        }
+        if stmt.kind() == "local_variable_declaration" {
+            if let Some(n) = declarator_named(stmt, src, name) {
+                return Some(n);
+            }
+        }
+    }
+    None
+}
+
+fn declarator_named<'t>(decl: Node<'t>, src: &str, name: &str) -> Option<Node<'t>> {
+    let mut cur = decl.walk();
+    for d in decl.named_children(&mut cur) {
+        if d.kind() != "variable_declarator" {
+            continue;
+        }
+        if let Some(n) = d.child_by_field_name("name") {
+            if src[n.byte_range()] == *name {
+                return Some(n);
+            }
+        }
+    }
+    None
+}
+
+/// The declared type of a local found by the scope walk. `var` yields `None`, which is
+/// what makes an inferred receiver honestly unresolvable.
+fn local_declared_type(index: &JavaIndex, file: usize, byte: usize) -> Option<String> {
+    let entry = &index.files[file];
+    let node = entry.tree.root_node().descendant_for_byte_range(byte, byte)?;
+    let mut cur = node.parent();
+    while let Some(n) = cur {
+        if matches!(
+            n.kind(),
+            "local_variable_declaration"
+                | "formal_parameter"
+                | "catch_formal_parameter"
+                | "enhanced_for_statement"
+                | "resource"
+        ) {
+            let ty = n.child_by_field_name("type")?;
+            return base_type_name(ty, &entry.source);
+        }
+        cur = n.parent();
+    }
+    None
+}
+
+// ---------------------------------------------------------------------------
+// Queries
+// ---------------------------------------------------------------------------
 
 /// The identifier under `(line, col)` in `rel`, parsed fresh from `source`.
 pub fn symbol_at(
@@ -248,6 +1017,74 @@ pub fn symbol_at(
     }))
 }
 
+/// The indexed node a `SymbolRef` points at.
+fn locate<'i>(index: &'i JavaIndex, symbol: &SymbolRef) -> Option<(usize, Node<'i>)> {
+    let file = *index.file_index.get(&symbol.file)?;
+    let point = Point::new(
+        symbol.line.saturating_sub(1) as usize,
+        symbol.col as usize,
+    );
+    let node = index.files[file]
+        .tree
+        .root_node()
+        .descendant_for_point_range(point, point)?;
+    Some((file, node))
+}
+
+fn def_result(index: &JavaIndex, id: DefId) -> XrefResult {
+    let def = &index.defs[id];
+    XrefResult {
+        file: index.files[def.file].rel.clone(),
+        line: def.line,
+        col: def.col,
+        snippet: def.snippet.clone(),
+        kind: XrefKind::Definition,
+        symbol_kind: def.kind,
+        confirmed: true,
+    }
+}
+
+fn target_result(index: &JavaIndex, target: Target) -> Option<XrefResult> {
+    match target {
+        Target::Def(id) => Some(def_result(index, id)),
+        Target::Local { file, byte } => {
+            let entry = &index.files[file];
+            let node = entry
+                .tree
+                .root_node()
+                .descendant_for_byte_range(byte, byte)?;
+            let pos = node.start_position();
+            Some(XrefResult {
+                file: entry.rel.clone(),
+                line: pos.row as u32 + 1,
+                col: pos.column as u32,
+                snippet: line_text(&entry.source, pos.row),
+                kind: XrefKind::Definition,
+                symbol_kind: SymbolKind::Identifier,
+                confirmed: true,
+            })
+        }
+    }
+}
+
+/// Every declaration matching by name — the pre-resolution behaviour, kept as the
+/// fallback for symbols the resolver can't decide.
+fn name_fallback(index: &JavaIndex, symbol: &SymbolRef) -> Vec<XrefResult> {
+    index
+        .by_name
+        .get(&symbol.name)
+        .map(|ids| {
+            ids.iter()
+                .copied()
+                .filter(|&id| {
+                    symbol.kind != SymbolKind::Type || is_type_kind(index.defs[id].kind)
+                })
+                .map(|id| def_result(index, id))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 pub fn find_definition(
     repo: &Repository,
     root: &Path,
@@ -258,22 +1095,19 @@ pub fn find_definition(
     ensure_index(repo, root, source, rel_files)?;
     let guard = INDEX.lock().unwrap();
     let index = guard.as_ref().expect("index built");
-    let mut results: Vec<XrefResult> = index
-        .defs
-        .get(&symbol.name)
-        .map(|recs| {
-            recs.iter()
-                .map(|d| XrefResult {
-                    file: d.file.clone(),
-                    line: d.line,
-                    col: d.col,
-                    snippet: d.snippet.clone(),
-                    kind: XrefKind::Definition,
-                    symbol_kind: d.kind,
-                })
-                .collect()
-        })
-        .unwrap_or_default();
+
+    let mut results = match locate(index, symbol) {
+        Some((file, node)) => match resolve(index, file, node) {
+            Resolution::Found(target) => target_result(index, target)
+                .map(|r| vec![r])
+                .unwrap_or_default(),
+            Resolution::Ambiguous(ids) => {
+                ids.into_iter().map(|id| def_result(index, id)).collect()
+            }
+            Resolution::Unresolved => name_fallback(index, symbol),
+        },
+        None => name_fallback(index, symbol),
+    };
     rank(&mut results, &symbol.file);
     Ok(results)
 }
@@ -292,18 +1126,35 @@ pub fn find_references(
 
     let guard = INDEX.lock().unwrap();
     let index = guard.as_ref().expect("index built");
-    let mut results = Vec::new();
 
-    for entry in &index.files {
+    // What the cursor is actually on. Without it every hit stays unconfirmed rather
+    // than being silently dropped.
+    let target = locate(index, symbol).and_then(|(file, node)| match resolve(index, file, node) {
+        Resolution::Found(t) => Some(t),
+        _ => None,
+    });
+
+    let mut results = Vec::new();
+    for (fi, entry) in index.files.iter().enumerate() {
         let mut cursor = QueryCursor::new();
         let mut matches =
             cursor.matches(&ref_query, entry.tree.root_node(), entry.source.as_bytes());
         while let Some(m) = matches.next() {
             for cap in m.captures {
                 let node = cap.node;
-                if &entry.source[node.byte_range()] != symbol.name {
+                // Name equality is the cheap prefilter; only survivors get resolved.
+                if entry.source[node.byte_range()] != symbol.name {
                     continue;
                 }
+                let confirmed = match target {
+                    None => false,
+                    Some(want) => match resolve(index, fi, node) {
+                        Resolution::Found(got) if got == want => true,
+                        // Provably a different symbol that happens to share a name.
+                        Resolution::Found(_) => continue,
+                        _ => false,
+                    },
+                };
                 let pos = node.start_position();
                 results.push(XrefResult {
                     file: entry.rel.clone(),
@@ -312,6 +1163,7 @@ pub fn find_references(
                     snippet: line_text(&entry.source, pos.row),
                     kind: XrefKind::Reference,
                     symbol_kind: symbol.kind,
+                    confirmed,
                 });
             }
         }
@@ -321,13 +1173,14 @@ pub fn find_references(
     Ok(results)
 }
 
-/// Order results: same file as the cursor first, then by path and line.
+/// Order results: proven hits first, then the file the cursor is in, then by path/line.
 fn rank(results: &mut [XrefResult], same_file: &str) {
     results.sort_by(|a, b| {
         let a_same = a.file != same_file;
         let b_same = b.file != same_file;
-        a_same
-            .cmp(&b_same)
+        (!a.confirmed)
+            .cmp(&(!b.confirmed))
+            .then_with(|| a_same.cmp(&b_same))
             .then_with(|| a.file.cmp(&b.file))
             .then_with(|| a.line.cmp(&b.line))
     });
@@ -337,50 +1190,351 @@ fn rank(results: &mut [XrefResult], same_file: &str) {
 mod tests {
     use super::*;
     use std::fs;
+    use std::sync::MutexGuard;
+
+    /// `INDEX` is process-global, so a fixture built by one test would otherwise be
+    /// clobbered by another running in parallel. Every test holds this for its
+    /// duration; `fixture` hands the guard back so it lives as long as the test does.
+    static TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    /// Build a repo of Java files and index it. Returns the tempdir (keep it alive),
+    /// the repo, the file list, and the serialising guard.
+    fn fixture(
+        files: &[(&str, &str)],
+    ) -> (
+        tempfile::TempDir,
+        Repository,
+        Vec<String>,
+        MutexGuard<'static, ()>,
+    ) {
+        let guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let mut rels = Vec::new();
+        for (name, body) in files {
+            let path = root.join(name);
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent).unwrap();
+            }
+            fs::write(&path, body).unwrap();
+            rels.push((*name).to_string());
+        }
+        // The index reads through `revision`, so it needs a repo handle even for the
+        // plain working-tree source.
+        let repo = Repository::init(root).unwrap();
+        build_index(&repo, root, &ProjectSource::Worktree, &rels).unwrap();
+        (dir, repo, rels, guard)
+    }
+
+    fn sym(name: &str, file: &str, line: u32, col: u32) -> SymbolRef {
+        SymbolRef {
+            name: name.to_string(),
+            kind: SymbolKind::Identifier,
+            file: file.to_string(),
+            line,
+            col,
+        }
+    }
+
+    /// Resolve the symbol at a position and return the single definition it lands on.
+    fn def_at(
+        repo: &Repository,
+        root: &Path,
+        rels: &[String],
+        symbol: &SymbolRef,
+    ) -> Vec<XrefResult> {
+        find_definition(repo, root, &ProjectSource::Worktree, rels, symbol).unwrap()
+    }
 
     #[test]
     fn finds_java_definitions_and_references() {
-        let dir = tempfile::tempdir().unwrap();
+        let (dir, repo, rels, _lock) = fixture(&[
+            (
+                "Greeter.java",
+                "class Greeter {\n    String greet() { return \"hi\"; }\n}\n",
+            ),
+            (
+                "Main.java",
+                "class Main {\n    void run() {\n        Greeter g = new Greeter();\n        g.greet();\n    }\n}\n",
+            ),
+        ]);
         let root = dir.path();
-        fs::write(
-            root.join("Greeter.java"),
-            "class Greeter {\n    String greet() { return \"hi\"; }\n}\n",
-        )
-        .unwrap();
-        fs::write(
-            root.join("Main.java"),
-            "class Main {\n    void run() {\n        Greeter g = new Greeter();\n        g.greet();\n    }\n}\n",
-        )
-        .unwrap();
-        let files = vec!["Greeter.java".to_string(), "Main.java".to_string()];
-        // The index reads through `revision`, so it needs a repo handle even for the
-        // plain working-tree source.
-        let repo = git2::Repository::init(root).unwrap();
-        let src = ProjectSource::Worktree;
 
-        build_index(&repo, root, &src, &files).unwrap();
-
-        let sym = SymbolRef {
-            name: "Greeter".to_string(),
-            kind: SymbolKind::Type,
-            file: "Main.java".to_string(),
-            line: 3,
-            col: 8,
-        };
-        let defs = find_definition(&repo, root, &src, &files, &sym).unwrap();
-        assert_eq!(defs.len(), 1);
-        assert_eq!(defs[0].file, "Greeter.java");
-
-        let refs = find_references(&repo, root, &src, &files, &sym).unwrap();
-        // Two `Greeter` usages in Main.java + the declaration in Greeter.java.
-        assert!(refs.len() >= 3, "got {} refs", refs.len());
-        assert!(refs.iter().any(|r| r.file == "Greeter.java"));
-        assert!(refs.iter().any(|r| r.file == "Main.java"));
-
-        // symbol_at lands on the `Greeter` type use in Main.java line 3.
-        let at = symbol_at(&repo, root, &src, "Main.java", 3, 8)
+        // `Greeter` on line 3 of Main.java is a type use.
+        let at = symbol_at(&repo, root, &ProjectSource::Worktree, "Main.java", 3, 8)
             .unwrap()
             .unwrap();
         assert_eq!(at.name, "Greeter");
+
+        let defs = def_at(&repo, root, &rels, &at);
+        assert_eq!(defs.len(), 1);
+        assert_eq!(defs[0].file, "Greeter.java");
+
+        let refs =
+            find_references(&repo, root, &ProjectSource::Worktree, &rels, &at).unwrap();
+        assert!(refs.iter().any(|r| r.file == "Greeter.java"));
+        assert!(refs.iter().any(|r| r.file == "Main.java"));
+    }
+
+    #[test]
+    fn resolves_locals_and_parameters() {
+        let (dir, repo, rels, _lock) = fixture(&[(
+            "A.java",
+            "class A {\n    void run(int width) {\n        int height = 2;\n        int area = width * height;\n    }\n}\n",
+        )]);
+        let root = dir.path();
+
+        // `width` in the expression resolves to the parameter, not to anything global.
+        let defs = def_at(&repo, root, &rels, &sym("width", "A.java", 4, 20));
+        assert_eq!(defs.len(), 1, "parameter should resolve uniquely");
+        assert_eq!(defs[0].line, 2);
+
+        // `height` resolves to the local declared above it.
+        let defs = def_at(&repo, root, &rels, &sym("height", "A.java", 4, 28));
+        assert_eq!(defs.len(), 1, "local should resolve uniquely");
+        assert_eq!(defs[0].line, 3);
+    }
+
+    #[test]
+    fn local_shadows_field_of_same_name() {
+        let (dir, repo, rels, _lock) = fixture(&[(
+            "A.java",
+            "class A {\n    int value = 1;\n    void run() {\n        int value = 2;\n        int x = value;\n    }\n}\n",
+        )]);
+        let root = dir.path();
+
+        let defs = def_at(&repo, root, &rels, &sym("value", "A.java", 5, 16));
+        assert_eq!(defs.len(), 1);
+        assert_eq!(defs[0].line, 4, "the local, not the field on line 2");
+    }
+
+    #[test]
+    fn resolves_type_by_import_over_same_named_class() {
+        let (dir, repo, rels, _lock) = fixture(&[
+            ("a/Thing.java", "package a;\npublic class Thing {}\n"),
+            ("b/Thing.java", "package b;\npublic class Thing {}\n"),
+            (
+                "c/Use.java",
+                "package c;\nimport b.Thing;\nclass Use {\n    Thing t;\n}\n",
+            ),
+        ]);
+        let root = dir.path();
+
+        let defs = def_at(&repo, root, &rels, &sym("Thing", "c/Use.java", 4, 4));
+        assert_eq!(defs.len(), 1, "the import decides between a.Thing and b.Thing");
+        assert_eq!(defs[0].file, "b/Thing.java");
+    }
+
+    #[test]
+    fn resolves_type_in_same_package_without_import() {
+        let (dir, repo, rels, _lock) = fixture(&[
+            ("a/Thing.java", "package a;\npublic class Thing {}\n"),
+            ("b/Thing.java", "package b;\npublic class Thing {}\n"),
+            ("a/Use.java", "package a;\nclass Use {\n    Thing t;\n}\n"),
+        ]);
+        let root = dir.path();
+
+        let defs = def_at(&repo, root, &rels, &sym("Thing", "a/Use.java", 3, 4));
+        assert_eq!(defs.len(), 1);
+        assert_eq!(defs[0].file, "a/Thing.java");
+    }
+
+    #[test]
+    fn resolves_type_by_wildcard_import() {
+        let (dir, repo, rels, _lock) = fixture(&[
+            ("a/Thing.java", "package a;\npublic class Thing {}\n"),
+            ("b/Thing.java", "package b;\npublic class Thing {}\n"),
+            (
+                "c/Use.java",
+                "package c;\nimport a.*;\nclass Use {\n    Thing t;\n}\n",
+            ),
+        ]);
+        let root = dir.path();
+
+        let defs = def_at(&repo, root, &rels, &sym("Thing", "c/Use.java", 4, 4));
+        assert_eq!(defs.len(), 1);
+        assert_eq!(defs[0].file, "a/Thing.java");
+    }
+
+    #[test]
+    fn resolves_method_on_typed_receiver_not_the_same_name_elsewhere() {
+        let (dir, repo, rels, _lock) = fixture(&[
+            ("Dog.java", "class Dog {\n    void speak() {}\n}\n"),
+            ("Cat.java", "class Cat {\n    void speak() {}\n}\n"),
+            (
+                "Main.java",
+                "class Main {\n    void run() {\n        Dog d = new Dog();\n        d.speak();\n    }\n}\n",
+            ),
+        ]);
+        let root = dir.path();
+
+        let defs = def_at(&repo, root, &rels, &sym("speak", "Main.java", 4, 10));
+        assert_eq!(defs.len(), 1, "Cat.speak must not be offered");
+        assert_eq!(defs[0].file, "Dog.java");
+    }
+
+    #[test]
+    fn walks_the_supertype_chain() {
+        let (dir, repo, rels, _lock) = fixture(&[
+            ("Base.java", "class Base {\n    void inherited() {}\n}\n"),
+            ("Child.java", "class Child extends Base {}\n"),
+            (
+                "Main.java",
+                "class Main {\n    void run() {\n        Child c = new Child();\n        c.inherited();\n    }\n}\n",
+            ),
+        ]);
+        let root = dir.path();
+
+        let defs = def_at(&repo, root, &rels, &sym("inherited", "Main.java", 4, 10));
+        assert_eq!(defs.len(), 1);
+        assert_eq!(defs[0].file, "Base.java");
+    }
+
+    #[test]
+    fn picks_the_overload_by_argument_count() {
+        let (dir, repo, rels, _lock) = fixture(&[
+            (
+                "Box.java",
+                "class Box {\n    void put() {}\n    void put(int a) {}\n    void put(int a, int b) {}\n}\n",
+            ),
+            (
+                "Main.java",
+                "class Main {\n    void run() {\n        Box b = new Box();\n        b.put(1, 2);\n    }\n}\n",
+            ),
+        ]);
+        let root = dir.path();
+
+        let defs = def_at(&repo, root, &rels, &sym("put", "Main.java", 4, 10));
+        assert_eq!(defs.len(), 1, "two arguments picks the two-parameter overload");
+        assert_eq!(defs[0].line, 4);
+    }
+
+    #[test]
+    fn follows_a_chained_call_through_its_return_type() {
+        let (dir, repo, rels, _lock) = fixture(&[
+            ("Inner.java", "class Inner {\n    void deep() {}\n}\n"),
+            ("Outer.java", "class Outer {\n    Inner inner() { return null; }\n}\n"),
+            (
+                "Main.java",
+                "class Main {\n    void run() {\n        Outer o = new Outer();\n        o.inner().deep();\n    }\n}\n",
+            ),
+        ]);
+        let root = dir.path();
+
+        let defs = def_at(&repo, root, &rels, &sym("deep", "Main.java", 4, 18));
+        assert_eq!(defs.len(), 1);
+        assert_eq!(defs[0].file, "Inner.java");
+    }
+
+    #[test]
+    fn var_receiver_is_unresolved_and_falls_back_to_name_matching() {
+        let (dir, repo, rels, _lock) = fixture(&[
+            ("Dog.java", "class Dog {\n    void speak() {}\n}\n"),
+            ("Cat.java", "class Cat {\n    void speak() {}\n}\n"),
+            (
+                "Main.java",
+                "class Main {\n    void run() {\n        var d = new Dog();\n        d.speak();\n    }\n}\n",
+            ),
+        ]);
+        let root = dir.path();
+
+        // `var` defeats the resolver, so both candidates come back — the picker case.
+        let defs = def_at(&repo, root, &rels, &sym("speak", "Main.java", 4, 10));
+        assert_eq!(defs.len(), 2, "both speak() declarations are offered");
+    }
+
+    #[test]
+    fn references_drop_same_named_methods_of_other_classes() {
+        let (dir, repo, rels, _lock) = fixture(&[
+            ("Dog.java", "class Dog {\n    void speak() {}\n}\n"),
+            ("Cat.java", "class Cat {\n    void speak() {}\n}\n"),
+            (
+                "Main.java",
+                "class Main {\n    void run() {\n        Dog d = new Dog();\n        d.speak();\n        Cat c = new Cat();\n        c.speak();\n    }\n}\n",
+            ),
+        ]);
+        let root = dir.path();
+
+        // Start from Dog.speak's own declaration.
+        let refs = find_references(
+            &repo,
+            root,
+            &ProjectSource::Worktree,
+            &rels,
+            &sym("speak", "Dog.java", 2, 9),
+        )
+        .unwrap();
+
+        let confirmed: Vec<_> = refs.iter().filter(|r| r.confirmed).collect();
+        assert!(
+            confirmed.iter().any(|r| r.file == "Main.java" && r.line == 4),
+            "d.speak() is a confirmed reference"
+        );
+        assert!(
+            !refs.iter().any(|r| r.file == "Main.java" && r.line == 6),
+            "c.speak() is provably Cat.speak and must be dropped entirely"
+        );
+        assert!(
+            !refs.iter().any(|r| r.file == "Cat.java"),
+            "Cat's own declaration must be dropped"
+        );
+    }
+
+    #[test]
+    fn unprovable_references_are_kept_as_unconfirmed() {
+        let (dir, repo, rels, _lock) = fixture(&[
+            ("Dog.java", "class Dog {\n    void speak() {}\n}\n"),
+            (
+                "Main.java",
+                "class Main {\n    void run() {\n        var d = new Dog();\n        d.speak();\n    }\n}\n",
+            ),
+        ]);
+        let root = dir.path();
+
+        let refs = find_references(
+            &repo,
+            root,
+            &ProjectSource::Worktree,
+            &rels,
+            &sym("speak", "Dog.java", 2, 9),
+        )
+        .unwrap();
+
+        let hit = refs
+            .iter()
+            .find(|r| r.file == "Main.java")
+            .expect("a var-typed call must never be silently dropped");
+        assert!(!hit.confirmed, "it can't be proven, so it stays unconfirmed");
+    }
+
+    #[test]
+    fn confirmed_references_rank_above_unconfirmed() {
+        let (dir, repo, rels, _lock) = fixture(&[
+            ("Dog.java", "class Dog {\n    void speak() {}\n}\n"),
+            (
+                "Zoo.java",
+                "class Zoo {\n    void run() {\n        var a = new Dog();\n        a.speak();\n    }\n}\n",
+            ),
+            (
+                "Aviary.java",
+                "class Aviary {\n    void run() {\n        Dog b = new Dog();\n        b.speak();\n    }\n}\n",
+            ),
+        ]);
+        let root = dir.path();
+
+        let refs = find_references(
+            &repo,
+            root,
+            &ProjectSource::Worktree,
+            &rels,
+            &sym("speak", "Dog.java", 2, 9),
+        )
+        .unwrap();
+
+        let first_unconfirmed = refs.iter().position(|r| !r.confirmed);
+        let last_confirmed = refs.iter().rposition(|r| r.confirmed);
+        if let (Some(first), Some(last)) = (first_unconfirmed, last_confirmed) {
+            assert!(last < first, "every confirmed hit sorts before any unconfirmed");
+        }
     }
 }

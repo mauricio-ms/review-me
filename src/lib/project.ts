@@ -1,8 +1,10 @@
+import { useJumpStore } from "../state/jumps";
 import { useProjectStore } from "../state/project";
 import { useRepoStore } from "../state/repo";
 import { useUIStore } from "../state/ui";
 import { shortOid, type Comparison } from "../types/diff";
-import { WORKTREE_SOURCE, type ProjectSource } from "../types/repo";
+import { sameSource, WORKTREE_SOURCE, type ProjectSource } from "../types/repo";
+import { recordJump } from "./jumps";
 import { listRepoDir, readFile } from "./tauri";
 
 /** The repo + revision every project read below goes through. */
@@ -65,7 +67,11 @@ export function baseSource(comparison: Comparison | undefined): SourceChoice {
 
 /** Point the project buffer at a revision (no-op when it's already there). */
 export function useProjectSource(choice: SourceChoice): void {
-  useProjectStore.getState().setSource(choice.source, choice.label);
+  const store = useProjectStore.getState();
+  // Jump entries name a file and a line in the revision they were recorded in;
+  // nothing they point at survives a change of source.
+  if (!sameSource(store.source, choice.source)) useJumpStore.getState().clear();
+  store.setSource(choice.source, choice.label);
 }
 
 /** Load (or reload) a directory's children into the tree. */
@@ -106,6 +112,7 @@ export async function openProjectFile(path: string): Promise<void> {
 
 /** Open a file and bring the project buffer to the front (used by the finder). */
 export async function openFileInProject(path: string): Promise<void> {
+  recordJump();
   await openProjectFile(path);
   const ui = useUIStore.getState();
   ui.setActiveBuffer("project");

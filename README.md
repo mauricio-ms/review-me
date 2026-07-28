@@ -339,7 +339,8 @@ shows no branch context, since it needn't be on the review branch.
 | Key | Action |
 | --- | --- |
 | `j`/`k`, `gg`/`G`, `w`/`b`, `/search` | Standard vim motions |
-| `gd` / `g r` | Go to definition / find references |
+| `M-.` / `M-?` | Go to definition / find references |
+| `M-,` | Back to where you jumped from |
 | `Ctrl`/`Cmd` + click | Jump to definition of the symbol clicked |
 | `v` + `j`, then `Space t f` | Flag the selected lines |
 | `Ctrl-h` | Return focus to the tree |
@@ -347,9 +348,23 @@ shows no branch context, since it needn't be on the review branch.
 ### Cross-references
 
 Definitions and usages resolve via a tree-sitter index (currently **Java**) that warms in
-the background on open/refresh. Resolution is **name + kind** based (navigation-grade, not
-full type/scope analysis), so identically-named symbols in different classes may all show
-up. A single definition jumps straight there; multiple open a results panel.
+the background on open/refresh. Navigation follows the emacs-xref keys: **`M-.`** go to
+definition, **`M-,`** back, **`M-?`** find references.
+
+Resolution walks scopes for locals and parameters, resolves types through a file's
+`package`/`import`s, and types a call's receiver to find the member on the right class —
+following supertypes and splitting overloads by argument count. So `M-.` **jumps
+straight to the declaration**; a picker appears only where resolution genuinely can't
+decide (`var`, generic element types, static imports, or a type that lives in a jar).
+
+`M-?` applies the same resolution in reverse: occurrences proven to be a *different*
+same-named symbol are dropped, and ones that can't be proven either way are kept in a
+separate **unconfirmed** section rather than hidden — in a review tool, a missed caller
+is worse than a spurious one.
+
+`M-,` pops a viewer-local jump stack that records every file you open — definitions,
+reference picks, Ctrl+click, the fuzzy finder, and the tree. It's emacs-style and
+pop-only (no forward), and it resets when you switch to a different revision.
 
 ---
 

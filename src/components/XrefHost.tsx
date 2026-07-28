@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 
 import { navigateTo } from "../lib/xref";
 import { useUIStore } from "../state/ui";
@@ -42,6 +42,11 @@ export default function XrefHost() {
 
   if (!open) return null;
 
+  // The backend already ranks proven hits first, so the split is a boundary rather
+  // than a regrouping — which keeps `selected` indexing straight into `results`.
+  const firstUnproven = results.findIndex((r) => !r.confirmed);
+  const hasUnproven = firstUnproven >= 0;
+
   return (
     <div className="asset-picker-backdrop">
       <div
@@ -78,20 +83,31 @@ export default function XrefHost() {
             <div className="neo-empty">no results</div>
           ) : (
             results.map((r, idx) => (
-              <div
-                key={`${r.file}:${r.line}:${r.col}`}
-                className={`xref-row ${idx === selected ? "is-selected" : ""}`}
-                onMouseEnter={() => setSelected(idx)}
-                onClick={() => choose(idx)}
-              >
-                <span className="xref-loc">
-                  <span className={`xref-kind kind-${r.kind}`}>
-                    {r.kind === "definition" ? "def" : "ref"}
+              <Fragment key={`${r.file}:${r.line}:${r.col}`}>
+                {hasUnproven && idx === 0 && r.confirmed && (
+                  <div className="xref-group">confirmed</div>
+                )}
+                {idx === firstUnproven && (
+                  <div className="xref-group is-unconfirmed">
+                    unconfirmed — same name, couldn't be proven
+                  </div>
+                )}
+                <div
+                  className={`xref-row ${idx === selected ? "is-selected" : ""} ${
+                    r.confirmed ? "" : "is-unconfirmed"
+                  }`}
+                  onMouseEnter={() => setSelected(idx)}
+                  onClick={() => choose(idx)}
+                >
+                  <span className="xref-loc">
+                    <span className={`xref-kind kind-${r.kind}`}>
+                      {r.kind === "definition" ? "def" : "ref"}
+                    </span>
+                    {r.file}:{r.line}
                   </span>
-                  {r.file}:{r.line}
-                </span>
-                <span className="xref-snippet">{r.snippet}</span>
-              </div>
+                  <span className="xref-snippet">{r.snippet}</span>
+                </div>
+              </Fragment>
             ))
           )}
         </div>

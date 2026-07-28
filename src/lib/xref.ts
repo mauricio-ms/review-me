@@ -1,8 +1,10 @@
+import { useJumpStore } from "../state/jumps";
 import { useProjectStore } from "../state/project";
 import { useRepoStore } from "../state/repo";
 import { useUIStore } from "../state/ui";
 import { useXrefStore } from "../state/xref";
 import type { XrefResult } from "../types/xref";
+import { recordJump } from "./jumps";
 import { openProjectFile } from "./project";
 import { projectCursor, setProjectCursor } from "./project-view";
 import { findDefinition, findReferences, symbolAt } from "./tauri";
@@ -16,15 +18,35 @@ function ctx() {
   return { repo, source, path, cursor };
 }
 
-/** Open a result in the project viewer at its line. */
-export async function navigateTo(result: XrefResult): Promise<void> {
+/** Show a file in the project viewer with the cursor at a position. */
+async function openAt(file: string, line: number, col: number): Promise<void> {
   const ui = useUIStore.getState();
-  await openProjectFile(result.file);
+  await openProjectFile(file);
   ui.setActiveBuffer("project");
   // Let the viewer mount/replace its document before moving the cursor.
   requestAnimationFrame(() =>
-    requestAnimationFrame(() => setProjectCursor(result.line, result.col)),
+    requestAnimationFrame(() => setProjectCursor(line, col)),
   );
+}
+
+/**
+ * Open a result in the project viewer at its line, remembering where we came from.
+ *
+ * Recording here rather than in `gotoDefinitionAt` keeps the stack honest when the
+ * disambiguation panel opens: the panel is modal and doesn't move the cursor, so the
+ * position captured when the reviewer finally picks is still the origin — and
+ * dismissing the panel without picking records nothing at all.
+ */
+export async function navigateTo(result: XrefResult): Promise<void> {
+  recordJump();
+  await openAt(result.file, result.line, result.col);
+}
+
+/** Return to the position before the last jump (`M-,`). Empty stack: no-op. */
+export async function jumpBack(): Promise<void> {
+  const entry = useJumpStore.getState().pop();
+  if (!entry) return;
+  await openAt(entry.file, entry.line, entry.col);
 }
 
 /**
@@ -44,7 +66,10 @@ export async function gotoDefinitionAt(line: number, col: number): Promise<void>
   } else if (defs.length === 1) {
     await navigateTo(defs[0]);
   } else {
-    useXrefStore.getState().show(`definition: ${symbol.name}`, defs);
+    // The backend couldn't decide — otherwise it would have returned exactly one.
+    useXrefStore
+      .getState()
+      .show(`${defs.length} candidates for ${symbol.name}`, defs);
   }
 }
 
@@ -61,5 +86,10 @@ export async function findUsages(): Promise<void> {
   const symbol = await symbolAt(c.repo, c.source, c.path, c.cursor.line, c.cursor.col);
   if (!symbol) return;
   const refs = await findReferences(c.repo, c.source, symbol);
-  useXrefStore.getState().show(`references: ${symbol.name} (${refs.length})`, refs);
+  const proven = refs.filter((r) => r.confirmed).length;
+  const title =
+    proven === refs.length
+      ? `references: ${symbol.name} (${refs.length})`
+      : `references: ${symbol.name} (${proven} confirmed, ${refs.length - proven} unconfirmed)`;
+  useXrefStore.getState().show(title, refs);
 }
