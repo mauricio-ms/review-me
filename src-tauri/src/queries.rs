@@ -14,6 +14,7 @@ pub mod java {
         (method_declaration name: (identifier) @def.method)
         (field_declaration
             declarator: (variable_declarator name: (identifier) @def.field))
+        (enum_constant name: (identifier) @def.field)
     "#;
 
     /// Every identifier/type-name occurrence — usages are resolved by name match.

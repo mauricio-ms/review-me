@@ -936,6 +936,20 @@ kbd {
   white-space: nowrap;
 }
 
+/* Section headers for the confirmed/unconfirmed split. Only rendered when the
+   resolver couldn't prove every hit, so a clean result set looks exactly as before. */
+.xref-group {
+  padding: 10px 12px 4px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent-green);
+}
+
+.xref-group.is-unconfirmed {
+  color: var(--fg-2);
+}
+
 .xref-row {
   display: flex;
   flex-direction: column;
@@ -943,6 +957,12 @@ kbd {
   padding: 6px 12px;
   cursor: pointer;
   font-size: 14px;
+}
+
+/* Dimmed, not struck through: these are name matches the resolver couldn't decide,
+   never ones it proved wrong — those are dropped before they reach the panel. */
+.xref-row.is-unconfirmed .xref-loc {
+  color: var(--fg-2);
 }
 
 .xref-row.is-selected {

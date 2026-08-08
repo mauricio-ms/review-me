@@ -1,11 +1,10 @@
-import { useProjectStore } from "../state/project";
 import { useRepoStore } from "../state/repo";
 import { useTagsStore } from "../state/tags";
 import { useUIStore } from "../state/ui";
 import { WORKTREE_SPEC, type DiffSpec } from "../types/diff";
 import { branchShorthand, type ReviewBranch } from "../types/repo";
 import { scopeForSpec } from "../types/tags";
-import { ambientSource } from "./project";
+import { ambientSource, useProjectSource } from "./project";
 import { buildSymbolIndex, computeDiff, loadTags, openRepo } from "./tauri";
 
 /**
@@ -35,8 +34,10 @@ export async function applyComparison(spec: DiffSpec): Promise<void> {
     // Project mode follows the comparison. Re-pointing it drops listings and the
     // open file when the revision changed — including when a branch has moved
     // under a plain refresh — and is a no-op when it hasn't.
+    // Goes through `useProjectSource` so a changed revision also drops the jump
+    // history, whose entries name files at the *old* revision.
     const ambient = ambientSource(diff.comparison);
-    useProjectStore.getState().setSource(ambient.source, ambient.label);
+    useProjectSource(ambient);
     void buildSymbolIndex(path, ambient.source).catch(() => {});
   } catch (e) {
     if (ticket === requestSeq) {

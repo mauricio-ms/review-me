@@ -11,9 +11,10 @@ import { leaderKeymap, vimEscapeKeymap } from "../editor/cm-shared";
 import { flagDecorations, setFlagLines } from "../editor/flag-decorations";
 import { gruberDarkerTheme } from "../editor/gruber-darker";
 import { defineNavVim } from "../editor/vim-nav";
-import { defineXrefVim } from "../editor/vim-xref";
 import { xrefClick } from "../editor/xref-click";
+import { xrefKeymap } from "../editor/xref-keymap";
 import { fileIcon } from "../lib/file-icons";
+import { recordJump } from "../lib/jumps";
 import { backToDiff, openProjectFile, loadDir, toggleDir } from "../lib/project";
 import { setProjectView } from "../lib/project-view";
 import { useProjectStore } from "../state/project";
@@ -65,9 +66,9 @@ export default function ProjectBuffer() {
 
   const nodes = useMemo(() => buildVisible(dirs, expanded), [dirs, expanded]);
 
-  // Register the project viewer's vim mappings once (gd/gr, q→diff).
+  // Register the project viewer's vim mappings once (q→diff). Code navigation is an
+  // Alt keymap instead — see editor/xref-keymap.ts.
   useEffect(() => {
-    defineXrefVim();
     defineNavVim();
   }, []);
 
@@ -120,6 +121,7 @@ export default function ProjectBuffer() {
       vim(),
       leaderKeymap,
       vimEscapeKeymap,
+      xrefKeymap,
       xrefClick,
       flagDecorations,
       EditorState.readOnly.of(true),
@@ -146,6 +148,8 @@ export default function ProjectBuffer() {
     if (node.entry.isDir) {
       void toggleDir(node.entry.path);
     } else {
+      // Opening from the tree is navigation too — `M-,` should walk back through it.
+      recordJump();
       void openProjectFile(node.entry.path);
       setFocusPane("viewer");
     }

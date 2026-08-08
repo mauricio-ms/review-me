@@ -344,29 +344,64 @@ The fixture's first commit (`initial`) is the **root** commit — §6 reviews th
 > `A.java`/`B.java`). For a meatier test, add a class that's used across files,
 > e.g. a `Greeter` class referenced from a `Main` class.
 
+> **Easiest setup:** run `./scripts/make-java-sample.sh` and open `sample-java/` — a
+> multi-package project built for exactly these scenarios (two classes sharing the
+> simple name `Book`, three `restock` overloads, a `var` receiver, and jar-typed
+> receivers). `cargo test --lib xref_validate -- --nocapture` asserts the same
+> behaviour headlessly; the steps below are for confirming the *UI* around it.
+>
+> Otherwise add a disambiguation fixture by hand: `Dog.java` and `Cat.java` each with a
+> `void speak() {}`, and a `Main.java` that does `Dog d = new Dog(); d.speak();`.
+
 ### 4.1 Go to definition
-- [ ] **Steps:** Open a `.java` file in project mode, put the cursor on a type or method name that's defined elsewhere, press `gd` (or `Space` → `g` → `d`).
-- [ ] **Expect:** If there's a single definition, the viewer jumps straight to it (opening the defining file if needed, cursor on the declaration). If multiple, the **Cross-reference** panel lists them; `Enter` navigates. A symbol with no definition shows a "no definition" panel.
+- [ ] **Steps:** Open a `.java` file in project mode, put the cursor on a type or method name defined elsewhere, press `M-.` (`Alt`+`.`, or `Space` → `g` → `d`).
+- [ ] **Expect:** The viewer jumps **straight** to the declaration (opening the defining file if needed) with no panel. A symbol with no definition shows a "no definition" panel.
 
-### 4.2 Click to definition
+### 4.2 Resolution is unambiguous
+- [ ] **Steps:** In `Main.java`, `M-.` on the `speak` in `d.speak()`.
+- [ ] **Expect:** Jumps directly to `Dog.speak` — `Cat.speak` is **not** offered, even though it matches by name.
+- [ ] **Steps:** `M-.` on a local variable and on a method parameter.
+- [ ] **Expect:** Each jumps to its own declaration a few lines up. (These used to report "no definition".)
+- [ ] **Steps:** Change `Main.java` to `var d = new Dog();` and repeat `M-.` on `d.speak()`.
+- [ ] **Expect:** `var` defeats resolution, so the **Cross-reference** panel opens titled `2 candidates for speak` and lists both. `Enter` navigates. This is the only path that should ever show a picker.
+
+### 4.3 Jump back
+- [ ] **Steps:** From `Main.java`, `M-.` into `Dog.java`, then press `M-,` (`Alt`+`,`, or `Space` → `g` → `o`).
+- [ ] **Expect:** Returns to `Main.java` at the **exact line and column** you jumped from.
+- [ ] **Steps:** Chain several jumps (`M-.`, then `M-.` again from there, then open a file with `Space` → `f`, then a file from the tree), then press `M-,` repeatedly.
+- [ ] **Expect:** Each press walks back one step through *everything* opened in the viewer, in reverse order. Pressing `M-,` with nothing left to pop does nothing (no error, no flicker). There is no forward key — this is a pop-only stack.
+- [ ] **Steps:** Open the picker with `M-.` on a `var`-typed call, then press `Esc` without choosing. Now press `M-,`.
+- [ ] **Expect:** Dismissing the panel recorded nothing, so `M-,` goes back to whatever the previous *real* jump was — not to the line you're already on.
+- [ ] **Steps:** Jump a few times, then switch comparison (`Space` → `g` → `b` or `g` → `l`) and press `M-,`.
+- [ ] **Expect:** Nothing happens — the history was cleared, because its entries name files at the old revision.
+
+### 4.4 Click to definition
 - [ ] **Steps:** In the viewer, hold `Ctrl` (or `Cmd` on macOS) and click directly on a type/method reference that's defined elsewhere.
-- [ ] **Expect:** The cursor turns into a pointer while the modifier is held; clicking jumps to the definition exactly like `gd` (single hit navigates; multiple hits open the Cross-reference panel). A plain click (no modifier) still just places the cursor / selects text. `Ctrl`/`Cmd`+click on whitespace or an unresolved word does nothing.
+- [ ] **Expect:** The cursor turns into a pointer while the modifier is held; clicking jumps to the definition exactly like `M-.` (and is poppable with `M-,`). A plain click (no modifier) still just places the cursor / selects text. `Ctrl`/`Cmd`+click on whitespace or an unresolved word does nothing.
 
-### 4.3 Find references
-- [ ] **Steps:** Cursor on a symbol, press `gr` (or `Space` → `g` → `r`).
-- [ ] **Expect:** The panel lists every occurrence as `file:line` + source snippet, with `def`/`ref` badges; same-file results are ranked first. `↑`/`↓`/`j`/`k` move, `Enter` opens the chosen location in the viewer at that line, `Esc` closes.
+### 4.5 Find references
+- [ ] **Steps:** Cursor on `speak` in `Dog.java`'s declaration, press `M-?` (`Alt`+`Shift`+`/`, or `Space` → `g` → `r`).
+- [ ] **Expect:** The panel lists occurrences as `file:line` + snippet with `def`/`ref` badges. `d.speak()` appears; **`Cat.speak` and `c.speak()` do not** — they were proven to be a different symbol and dropped. `↑`/`↓`/`j`/`k` move, `Enter` opens the location, `Esc` closes.
+- [ ] **Steps:** With the `var d = new Dog();` variant in place, repeat.
+- [ ] **Expect:** The title reads `… (N confirmed, M unconfirmed)` and the list splits into a green **CONFIRMED** section and a dimmed **UNCONFIRMED — same name, couldn't be proven** section. The `var`-typed call is in the second group — present, never silently dropped. When everything is provable, neither header appears and the list looks as it always did.
 
-### 4.4 Index freshness
-- [ ] **Steps:** Open a repo (the index builds in the background). Run `gd`/`gr` — they should work without a manual build step. Add/rename a Java symbol, then `Space` → `r` (refresh).
+### 4.6 Index freshness
+- [ ] **Steps:** Open a repo (the index builds in the background). Run `M-.`/`M-?` — they should work without a manual build step. Add/rename a Java symbol, then `Space` → `r` (refresh).
 - [ ] **Expect:** After refresh, cross-references reflect the updated code.
 
-### 4.5 Non-Java / no symbol
-- [ ] **Steps:** Try `gd` on whitespace, or in a non-`.java` file.
+### 4.7 Non-Java / no symbol
+- [ ] **Steps:** Try `M-.` on whitespace, or in a non-`.java` file.
 - [ ] **Expect:** Nothing happens (no symbol resolved) — no crash.
 
-> **Known limitation:** resolution is name+kind based (no full type/scope
-> resolution), so references to same-named symbols in different classes may all
-> appear. This is intended for navigation, not exact semantic analysis.
+### 4.8 Symbols from outside the project
+- [ ] **Steps:** In `sample-java`, `M-.` on `add` in `books.add(book)` (`Library.java`), on `getMessage` in `failure.getMessage()`, and on `toString` in `SCIENCE.toString()`.
+- [ ] **Expect:** Each shows "no definition" — their receivers are `List`, `RuntimeException` and `Enum`, which live in jars. Notably `add` must **not** jump to `Library.add`, even though that method exists and matches by name.
+
+> **Known limitation:** resolution covers scopes, imports, and receiver types, but
+> stops at `var`, generic element types, static imports, and anything typed by a jar
+> (no source in the repo). Those cases surface honestly — a picker for `M-.`, the
+> unconfirmed section for `M-?`, or a plain "no definition" when the symbol is known to
+> come from outside — rather than guessing.
 
 ---
 
@@ -441,7 +476,7 @@ The fixture's first commit (`initial`) is the **root** commit — §6 reviews th
 - [ ] **Steps:** Navigate to the deleted `gone.txt` and press `Enter` on it.
 - [ ] **Expect:** The file opens from the **merge base** — the modeline reads `@ master@<sha> (merge-base)` — instead of failing because the path is gone from the working tree.
 - [ ] **Steps:** With a branch comparison active, browse the project tree and run `Space f` (fuzzy find).
-- [ ] **Expect:** Both list the **revision's** files: `Extra.java` is present, and the untracked `fresh.txt` is absent. `gd`/`gr` in a Java file resolve against that same revision.
+- [ ] **Expect:** Both list the **revision's** files: `Extra.java` is present, and the untracked `fresh.txt` is absent. `M-.`/`M-?` in a Java file resolve against that same revision.
 - [ ] **Steps:** Switch back to the working-tree diff (`Space g w`).
 - [ ] **Expect:** The modeline revision badge disappears, the tree/finder show the working tree again (`fresh.txt` reappears), and the previously open file is cleared.
 
@@ -530,7 +565,7 @@ The fixture's first commit (`initial`) is the **root** commit — §6 reviews th
 - [ ] **Expect:** The viewer shows that commit's content (the line reads `BRANCH`), **not** the dirty working tree. The modeline badge reads `@ feature@<sha>` (or just `<sha>` for a commit reached by typing a sha).
 - [ ] **Steps:** Press `Enter` on the deleted `gone.txt`.
 - [ ] **Expect:** It opens from the commit's **first parent** — modeline `@ <sha> (parent of <sha>)` — instead of failing because the path is gone.
-- [ ] **Steps:** Browse the tree, run `Space f`, and use `gd`/`gr` in a Java file.
+- [ ] **Steps:** Browse the tree, run `Space f`, and use `M-.`/`M-?` in a Java file.
 - [ ] **Expect:** All three read that commit's revision: `Extra.java` present, untracked `fresh.txt` absent.
 - [ ] **Steps:** `Space g w` back to the working tree.
 - [ ] **Expect:** The revision badge disappears, the tree/finder show the working tree again, and the open file is cleared.
@@ -555,7 +590,7 @@ The fixture's first commit (`initial`) is the **root** commit — §6 reviews th
 - [ ] Theme/contrast readable; long diff lines **wrap** (never `…`, never a horizontal
       scrollbar), while long file paths still truncate in file headers and picker rows.
 - [ ] Cross-buffer flow: open repo → review/flag in diff → `Space f` to a file →
-      `gd`/`gr` to navigate → flag in project mode → all marks persist after restart.
+      `M-.`/`M-?` to navigate → flag in project mode → all marks persist after restart.
 - [ ] Comparison flow: worktree → `Space g b` compare → review → `Space g w` back →
       marks stay separate, project mode follows the revision, nothing is staged.
 - [ ] Three-mode round trip: `Space g s` pick a review branch → `Space g b` compare it

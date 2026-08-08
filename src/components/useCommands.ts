@@ -3,7 +3,8 @@ import { useCallback, useState } from "react";
 import { applyComparison, refreshDiff } from "../lib/open-repo";
 import { projectSelectionRange } from "../lib/project-view";
 import { addFlag } from "../lib/review-actions";
-import { findUsages, gotoDefinition } from "../lib/xref";
+import { findUsages, gotoDefinition, jumpBack } from "../lib/xref";
+import { useJumpStore } from "../state/jumps";
 import { useProjectStore } from "../state/project";
 import { useRepoStore } from "../state/repo";
 import { useTagsStore } from "../state/tags";
@@ -54,6 +55,9 @@ export function useCommands(rawClose: CommandClose): {
   // A branch pair or a single commit: both sides are already committed history.
   const comparingHistory = readsCommittedHistory(comparison);
   const openPath = useProjectStore((s) => s.openPath);
+  // Selecting the length, not the array: the command only needs "is there anywhere
+  // to go back to", and a length never trips the fresh-reference rerender trap.
+  const jumpDepth = useJumpStore((s) => s.stack.length);
   const diffHighlight = useUIStore((s) => s.diffHighlight);
   const toggleDiffHighlight = useUIStore((s) => s.toggleDiffHighlight);
 
@@ -165,6 +169,11 @@ export function useCommands(rawClose: CommandClose): {
     void findUsages();
   }, [close]);
 
+  const handleJumpBack = useCallback(() => {
+    close({ restoreFocus: false });
+    void jumpBack();
+  }, [close]);
+
   const switchTo = useCallback(
     (buffer: BufferName) => {
       close({ restoreFocus: false });
@@ -247,7 +256,7 @@ export function useCommands(rawClose: CommandClose): {
       id: "goto-def",
       name: "definition",
       aliases: ["def", "gd"],
-      label: "go to definition",
+      label: "go to definition (M-.)",
       group: "xref",
       prefix: "g",
       key: "d",
@@ -259,13 +268,26 @@ export function useCommands(rawClose: CommandClose): {
       id: "find-refs",
       name: "references",
       aliases: ["refs", "gr", "usages"],
-      label: "find references",
+      label: "find references (M-?)",
       group: "xref",
       prefix: "g",
       key: "r",
       buffer: "project",
       enabled: !!openPath,
       run: handleFindRefs,
+    },
+    {
+      id: "jump-back",
+      name: "back",
+      aliases: ["pop", "jumpback"],
+      label: "back to where you jumped from (M-,)",
+      group: "xref",
+      // `g b` is the branch comparison; `o` reads as the *older* position.
+      prefix: "g",
+      key: "o",
+      buffer: "project",
+      enabled: jumpDepth > 0,
+      run: handleJumpBack,
     },
     {
       id: "close",
