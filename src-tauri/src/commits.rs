@@ -1,4 +1,6 @@
-use git2::{Commit, Oid, Repository, Sort};
+use std::collections::HashMap;
+
+use git2::{BranchType, Commit, Oid, Repository, Sort};
 use serde::Serialize;
 
 use crate::branches::short_oid;
@@ -22,6 +24,28 @@ pub struct CommitInfo {
     pub is_merge: bool,
     /// The commit `HEAD` points at.
     pub is_head: bool,
+    /// The branches, remote-tracking branches and tags pointing at this commit —
+    /// magit's decorations. Filled by `list` only; empty from `resolve`, which names a
+    /// single commit and has no use for them.
+    pub refs: Vec<Decoration>,
+}
+
+/// A ref pointing at a listed commit, by display name.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Decoration {
+    /// Shorthand: `master`, `origin/master`, `v1.2`.
+    pub name: String,
+    pub kind: DecorationKind,
+}
+
+/// Declaration order is display order: local branches, then remote-tracking, then tags.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DecorationKind {
+    Local,
+    Remote,
+    Tag,
 }
 
 /// A commit resolved against the object database: the commit under review plus the
@@ -34,11 +58,18 @@ pub struct ResolvedCommit {
     pub info: CommitInfo,
 }
 
-/// `ref_name`'s history, newest first, capped at `limit`. Any committish works, so a
-/// remote-tracking ref lists just as well as a local branch.
-pub fn list(repo: &Repository, ref_name: &str, limit: usize) -> AppResult<Vec<CommitInfo>> {
+/// `ref_name`'s history, newest first: `limit` commits after skipping the newest
+/// `skip`, so a long history can be paged in as the reviewer scrolls. Any committish
+/// works, so a remote-tracking ref or a bare `HEAD` lists just as well as a branch.
+pub fn list(
+    repo: &Repository,
+    ref_name: &str,
+    skip: usize,
+    limit: usize,
+) -> AppResult<Vec<CommitInfo>> {
     let tip = resolve(repo, ref_name)?.oid;
     let head_oid = head_oid(repo);
+    let decorations = decorations(repo);
 
     let mut walk = repo.revwalk()?;
     // Reverse-chronological like `git log`, but topological too: commits made within
@@ -47,14 +78,59 @@ pub fn list(repo: &Repository, ref_name: &str, limit: usize) -> AppResult<Vec<Co
     walk.push(tip)?;
 
     let mut out = Vec::new();
-    for oid in walk {
+    for oid in walk.skip(skip) {
         if out.len() >= limit {
             break;
         }
         let commit = repo.find_commit(oid?)?;
-        out.push(info(&commit, head_oid));
+        let mut commit_info = info(&commit, head_oid);
+        if let Some(names) = decorations.get(&commit.id()) {
+            commit_info.refs = names.clone();
+        }
+        out.push(commit_info);
     }
     Ok(out)
+}
+
+/// Every commit some ref points at, mapped to those refs: local branches first, then
+/// remote-tracking branches, then tags, each alphabetically. A remote's symbolic `HEAD`
+/// (`origin/HEAD`) only repeats the branch it points at, so it is left out.
+fn decorations(repo: &Repository) -> HashMap<Oid, Vec<Decoration>> {
+    let mut found: Vec<(DecorationKind, String, Oid)> = Vec::new();
+    for (kind, branch_type) in [
+        (DecorationKind::Local, BranchType::Local),
+        (DecorationKind::Remote, BranchType::Remote),
+    ] {
+        let Ok(branches) = repo.branches(Some(branch_type)) else {
+            continue;
+        };
+        for (branch, _) in branches.flatten() {
+            let reference = branch.get();
+            if reference.symbolic_target().is_some() {
+                continue;
+            }
+            let (Some(name), Ok(commit)) = (reference.shorthand(), reference.peel_to_commit())
+            else {
+                continue;
+            };
+            found.push((kind, name.to_string(), commit.id()));
+        }
+    }
+    if let Ok(tags) = repo.references_glob("refs/tags/*") {
+        for reference in tags.flatten() {
+            let (Some(name), Ok(commit)) = (reference.shorthand(), reference.peel_to_commit())
+            else {
+                continue; // a tag of a tree or blob decorates no commit
+            };
+            found.push((DecorationKind::Tag, name.to_string(), commit.id()));
+        }
+    }
+    found.sort();
+    let mut out: HashMap<Oid, Vec<Decoration>> = HashMap::new();
+    for (kind, name, oid) in found {
+        out.entry(oid).or_default().push(Decoration { name, kind });
+    }
+    out
 }
 
 /// Resolve any revision — a full oid, an abbreviation, `HEAD~2`, a ref name — to the
@@ -96,6 +172,7 @@ fn info(commit: &Commit, head_oid: Option<Oid>) -> CommitInfo {
         parent_count,
         is_merge: parent_count > 1,
         is_head: head_oid == Some(commit.id()),
+        refs: Vec::new(),
     }
 }
 
@@ -163,7 +240,7 @@ mod tests {
         repo_with_history(root);
         let repo = Repository::open(root).unwrap();
 
-        let commits = list(&repo, "refs/heads/master", 100).unwrap();
+        let commits = list(&repo, "refs/heads/master", 0, 100).unwrap();
         let summaries: Vec<&str> = commits.iter().map(|c| c.summary.as_str()).collect();
         assert_eq!(summaries[0], "merge feature");
         assert!(summaries.contains(&"feature work"), "merged-in commits are reachable");
@@ -186,14 +263,76 @@ mod tests {
         repo_with_history(root);
         let repo = Repository::open(root).unwrap();
 
-        assert_eq!(list(&repo, "refs/heads/master", 2).unwrap().len(), 2);
+        assert_eq!(list(&repo, "refs/heads/master", 0, 2).unwrap().len(), 2);
 
         // feature never saw master's "third" commit.
-        let feature = list(&repo, "refs/heads/feature", 100).unwrap();
+        let feature = list(&repo, "refs/heads/feature", 0, 100).unwrap();
         let summaries: Vec<&str> = feature.iter().map(|c| c.summary.as_str()).collect();
         assert_eq!(summaries, vec!["feature work", "second", "first"]);
 
-        assert!(list(&repo, "refs/heads/nope", 10).is_err());
+        assert!(list(&repo, "refs/heads/nope", 0, 10).is_err());
+    }
+
+    #[test]
+    fn pages_through_history_with_skip() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        repo_with_history(root);
+        let repo = Repository::open(root).unwrap();
+
+        let all = list(&repo, "refs/heads/master", 0, 100).unwrap();
+        let first = list(&repo, "refs/heads/master", 0, 2).unwrap();
+        let second = list(&repo, "refs/heads/master", 2, 2).unwrap();
+        let rest = list(&repo, "refs/heads/master", 4, 100).unwrap();
+        let paged: Vec<&str> = first
+            .iter()
+            .chain(&second)
+            .chain(&rest)
+            .map(|c| c.oid.as_str())
+            .collect();
+        let expected: Vec<&str> = all.iter().map(|c| c.oid.as_str()).collect();
+        assert_eq!(paged, expected);
+        assert!(list(&repo, "refs/heads/master", 100, 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn decorates_commits_with_the_refs_pointing_at_them() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        repo_with_history(root);
+        git(root, &["tag", "v1", "HEAD~1"]);
+        git(root, &["tag", "-a", "-m", "annotated", "v2", "HEAD"]);
+        git(root, &["update-ref", "refs/remotes/origin/master", "HEAD"]);
+        git(
+            root,
+            &["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/master"],
+        );
+        let repo = Repository::open(root).unwrap();
+
+        let commits = list(&repo, "HEAD", 0, 100).unwrap();
+        let names = |summary: &str| -> Vec<(String, DecorationKind)> {
+            let commit = commits.iter().find(|c| c.summary == summary).unwrap();
+            commit.refs.iter().map(|r| (r.name.clone(), r.kind)).collect()
+        };
+        // Local branch, then remote-tracking (without the symbolic origin/HEAD), then
+        // tags — an annotated tag peels to its commit.
+        assert_eq!(
+            names("merge feature"),
+            vec![
+                ("master".to_string(), DecorationKind::Local),
+                ("origin/master".to_string(), DecorationKind::Remote),
+                ("v2".to_string(), DecorationKind::Tag),
+            ]
+        );
+        assert_eq!(
+            names("feature work"),
+            vec![("feature".to_string(), DecorationKind::Local)]
+        );
+        assert_eq!(names("third"), vec![("v1".to_string(), DecorationKind::Tag)]);
+        assert!(names("first").is_empty());
+
+        // `resolve` names one commit and carries no decorations.
+        assert!(resolve(&repo, "HEAD").unwrap().info.refs.is_empty());
     }
 
     #[test]
@@ -203,7 +342,7 @@ mod tests {
         repo_with_history(root);
         let repo = Repository::open(root).unwrap();
 
-        let commits = list(&repo, "refs/heads/master", 100).unwrap();
+        let commits = list(&repo, "refs/heads/master", 0, 100).unwrap();
         let merge = &commits[0];
         let resolved = resolve(&repo, &merge.short_oid).unwrap();
         assert_eq!(resolved.oid.to_string(), merge.oid, "short oid expands");

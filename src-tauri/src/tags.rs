@@ -285,6 +285,20 @@ pub fn load(root: &Path, scope: &ReviewScope) -> AppResult<TagStore> {
     Ok(store)
 }
 
+/// Every scope that holds at least one mark, read without re-anchoring anything — the
+/// cheap first pass for summaries that only care about scopes someone has touched.
+pub fn marked_scopes(root: &Path) -> AppResult<HashSet<ReviewScope>> {
+    let store = read(root)?;
+    Ok(store
+        .reviewed
+        .iter()
+        .map(|t| &t.anchor)
+        .chain(store.flags.iter().map(|t| &t.anchor))
+        .chain(store.ignored.iter().map(|t| &t.anchor))
+        .map(|anchor| anchor.scope.clone())
+        .collect())
+}
+
 pub fn add_reviewed(
     root: &Path,
     scope: &ReviewScope,

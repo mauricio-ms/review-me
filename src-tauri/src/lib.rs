@@ -1,6 +1,7 @@
 mod branches;
 mod commands;
 mod commits;
+mod coverage;
 mod diff;
 mod error;
 mod fs_browse;
@@ -24,6 +25,7 @@ pub fn run() {
             commands::compute_diff,
             commands::list_branches,
             commands::list_commits,
+            commands::commit_reviews,
             commands::resolve_commit,
             commands::list_recent_repos,
             commands::forget_repo,

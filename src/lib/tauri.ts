@@ -4,6 +4,7 @@ import type { DiffSpec, DiffSummary } from "../types/diff";
 import type {
   BranchInfo,
   CommitInfo,
+  CommitReview,
   DirectoryListing,
   FileMatch,
   FileSystemListing,
@@ -37,13 +38,19 @@ export function listBranches(repo: string): Promise<BranchInfo[]> {
   return invoke<BranchInfo[]>("list_branches", { repo });
 }
 
-/** `refName`'s history, newest first, capped at `limit`. */
+/** A page of `refName`'s history, newest first: `limit` commits after the newest `skip`. */
 export function listCommits(
   repo: string,
   refName: string,
+  skip: number,
   limit: number,
 ): Promise<CommitInfo[]> {
-  return invoke<CommitInfo[]>("list_commits", { repo, refName, limit });
+  return invoke<CommitInfo[]>("list_commits", { repo, refName, skip, limit });
+}
+
+/** Review progress for whichever of `oids` have a mark; untouched commits are omitted. */
+export function commitReviews(repo: string, oids: string[]): Promise<CommitReview[]> {
+  return invoke<CommitReview[]>("commit_reviews", { repo, oids });
 }
 
 /** Expand a typed revision (short sha, `HEAD~2`, a ref) to a full commit. */

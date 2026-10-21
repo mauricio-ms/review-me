@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use crate::branches::{self, BranchInfo};
 use crate::commits::{self, CommitInfo};
+use crate::coverage::{self, CommitReview};
 use crate::diff::{self, DiffSpec, DiffSummary};
 use crate::error::AppResult;
 use crate::fs_browse::{self, DirectoryListing, FileSystemListing};
@@ -48,11 +49,25 @@ pub fn list_branches(repo: String) -> AppResult<Vec<BranchInfo>> {
     branches::list(&repository)
 }
 
-/// `ref_name`'s history, newest first, for the commit picker's second stage.
+/// A page of `ref_name`'s history, newest first, for the commits buffer and the commit
+/// picker.
 #[tauri::command]
-pub fn list_commits(repo: String, ref_name: String, limit: u32) -> AppResult<Vec<CommitInfo>> {
+pub fn list_commits(
+    repo: String,
+    ref_name: String,
+    skip: u32,
+    limit: u32,
+) -> AppResult<Vec<CommitInfo>> {
     let repository = repo::open(&PathBuf::from(repo))?;
-    commits::list(&repository, &ref_name, limit as usize)
+    commits::list(&repository, &ref_name, skip as usize, limit as usize)
+}
+
+/// Review progress for whichever of `oids` have been marked, for the commits buffer.
+#[tauri::command]
+pub fn commit_reviews(repo: String, oids: Vec<String>) -> AppResult<Vec<CommitReview>> {
+    let repository = repo::open(&PathBuf::from(repo))?;
+    let root = repo::root(&repository)?;
+    coverage::commit_reviews(&repository, &root, &oids)
 }
 
 /// Resolve a typed revision (abbreviated sha, `HEAD~2`, a ref) to a full commit, so
