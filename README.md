@@ -1,5 +1,19 @@
 # review-me
 
+> [!WARNING]
+> ### This is a vibecoded project
+>
+> **review-me** was built almost entirely by prompting an LLM coding agent ("vibe
+> coding"). It is an **experiment to test an idea** — whether a tool like this fits my
+> own workflow for reviewing agent-generated code — **not a maintained product**.
+>
+> - Expect bugs, rough edges, and design decisions that were never revisited.
+> - Nothing is stable: keybindings, behavior, and the on-disk `.review-me/` format may
+>   change or break without notice.
+> - It may be abandoned at any time, and issues or pull requests may go unanswered.
+>
+> It's public in case the idea is useful to someone else. **Use it at your own risk.**
+
 A magit-style, vim-driven desktop tool for **reviewing code produced by LLM agents**.
 
 When an AI agent rewrites half your project in one shot, the hard part isn't reading
