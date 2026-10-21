@@ -9,6 +9,7 @@ mod queries;
 mod repo;
 mod repo_library;
 mod review_commit;
+mod review_dir;
 mod revision;
 mod tags;
 mod tree;

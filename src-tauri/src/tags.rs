@@ -10,8 +10,8 @@ use crate::branches;
 use crate::commits;
 use crate::error::AppResult;
 use crate::repo;
+use crate::review_dir;
 
-const TAGS_DIR: &str = ".review-me";
 const TAGS_FILE: &str = "tags.json";
 const CONTEXT_LINES: usize = 3;
 /// How far (in lines) to search around the original position when a tag's content
@@ -447,7 +447,7 @@ fn same_range(
 }
 
 fn tags_path(root: &Path) -> PathBuf {
-    root.join(TAGS_DIR).join(TAGS_FILE)
+    review_dir::path(root).join(TAGS_FILE)
 }
 
 fn read(root: &Path) -> AppResult<TagStore> {
@@ -463,11 +463,8 @@ fn read(root: &Path) -> AppResult<TagStore> {
 }
 
 fn write(root: &Path, store: &TagStore) -> AppResult<()> {
-    let path = tags_path(root);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(&path, serde_json::to_string_pretty(store)?)?;
+    review_dir::ensure(root)?;
+    std::fs::write(tags_path(root), serde_json::to_string_pretty(store)?)?;
     Ok(())
 }
 
@@ -998,8 +995,8 @@ mod tests {
           }],
           "flags": [], "ignored": []
         }"#;
-        fs::create_dir_all(root.join(TAGS_DIR)).unwrap();
-        fs::write(root.join(TAGS_DIR).join(TAGS_FILE), legacy).unwrap();
+        fs::create_dir_all(review_dir::path(root)).unwrap();
+        fs::write(tags_path(root), legacy).unwrap();
 
         let store = load(root, WT).unwrap();
         assert_eq!(store.reviewed.len(), 1, "legacy tag survives migration");
