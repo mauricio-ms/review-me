@@ -389,6 +389,14 @@ kbd {
   padding: 6px 0 40px;
   font-size: var(--code-font-size);
   line-height: 1.55;
+  /* DiffBuffer corrects scrollTop itself when off-screen rows are measured; native
+     anchoring (where the engine has it) would apply the same correction twice. */
+  overflow-anchor: none;
+}
+
+.diff-virtual-spacer {
+  width: 1px;
+  pointer-events: none;
 }
 
 .diff-row {

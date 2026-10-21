@@ -166,6 +166,10 @@ The fixture's first commit (`initial`) is the **root** commit — §6 reviews th
 - [ ] **Expect:** The file expands to show hunk headers (`@@ … @@`, blue, each with a `▾`/`▸` caret) and unified-diff lines: old/new line-number gutters, `+` lines green, `−` lines red, context muted. `Tab` on the file row again collapses the whole file.
 - [ ] **Steps:** Move the cursor onto a **hunk header** and press `Tab` (or double-click).
 - [ ] **Expect:** Only that hunk's lines collapse (caret flips to `▸`); sibling hunks stay expanded. `Tab` again re-expands just that hunk. Pressing `Tab` while on a diff **line** also folds the parent hunk and lands the cursor on its header.
+- [ ] **Steps:** Repeat file and hunk folding with a diff containing tens of thousands of lines (`sample-java/large-diff.txt` from `./scripts/make-java-sample.sh`), then use `gg`, `G`, `j`/`k`, and `Ctrl-e`/`Ctrl-r` across it.
+- [ ] **Expect:** Folding stays responsive; navigation reaches the full diff; wrapped lines do not overlap or leave blank gaps while scrolling.
+- [ ] **Steps:** Press `G`, then scroll **up** with the mouse wheel through the wrapped lines. Separately, with the cursor mid-screen, toggle to project mode and back, and run `refresh`.
+- [ ] **Expect:** Rows on screen hold still while scrolling up (no jumps as wrapped lines come into view); the mode round trip and `refresh` leave the cursor at the same screen position.
 - [ ] **Note:** Only `Tab` (and double-click) folds — `Enter` does **not** (see 1.7c).
 
 ### 1.7c Enter opens the file in project mode at the cursor position

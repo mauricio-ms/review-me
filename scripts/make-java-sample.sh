@@ -329,4 +329,17 @@ cd sample-java
 git init -q -b master
 git add -A
 git -c user.email=fixture@example.com -c user.name=fixture commit -qm "java xref fixture"
-echo "sample-java/ rebuilt ($(find . -name '*.java' | wc -l) java files)"
+
+# Leave one deliberately large untracked file for exercising diff virtualization and
+# file/hunk folding without adding thousands of Java symbols to the xref fixture. Every
+# 25th line is long enough to wrap, so scrolling crosses rows taller than estimated.
+long=$(printf 'wrapped fixture content %.0s' {1..30})
+for ((line = 1; line <= 50000; line++)); do
+    if ((line % 25 == 0)); then
+        printf 'line %05d: %s\n' "$line" "$long"
+    else
+        printf 'line %05d: large diff fixture content for scrolling and folding\n' "$line"
+    fi
+done > large-diff.txt
+
+echo "sample-java/ rebuilt ($(find . -name '*.java' | wc -l) java files, 50000-line diff fixture)"

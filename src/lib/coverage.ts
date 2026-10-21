@@ -12,32 +12,56 @@ export type LineRange = { lo: number; hi: number };
 /** The line side + span a reviewable hunk is tagged against. */
 export type ReviewTarget = { side: AnchorSide; lo: number; hi: number };
 
-/** The new-side line span a hunk occupies (context + added), or null when it has none. */
-export function hunkNewRange(hunk: Hunk): LineRange | null {
-  let lo = Infinity;
-  let hi = -Infinity;
+type HunkSummary = {
+  newRange: LineRange | null;
+  oldRange: LineRange | null;
+  pureDeletion: boolean;
+};
+
+const HUNK_SUMMARIES = new WeakMap<Hunk, HunkSummary>();
+
+/** Diff payloads are immutable, so derive all line-range facts once per hunk. */
+function hunkSummary(hunk: Hunk): HunkSummary {
+  const cached = HUNK_SUMMARIES.get(hunk);
+  if (cached) return cached;
+  let newLo = Infinity;
+  let newHi = -Infinity;
+  let oldLo = Infinity;
+  let oldHi = -Infinity;
+  let added = 0;
+  let removed = 0;
   for (const line of hunk.lines) {
     if (line.newLine != null) {
-      lo = Math.min(lo, line.newLine);
-      hi = Math.max(hi, line.newLine);
+      newLo = Math.min(newLo, line.newLine);
+      newHi = Math.max(newHi, line.newLine);
+    }
+    if (line.kind === "removed") {
+      removed += 1;
+      if (line.oldLine != null) {
+        oldLo = Math.min(oldLo, line.oldLine);
+        oldHi = Math.max(oldHi, line.oldLine);
+      }
+    } else if (line.kind === "added") {
+      added += 1;
     }
   }
-  if (lo === Infinity) return null;
-  return { lo, hi };
+  const summary = {
+    newRange: newLo === Infinity ? null : { lo: newLo, hi: newHi },
+    oldRange: oldLo === Infinity ? null : { lo: oldLo, hi: oldHi },
+    pureDeletion: added === 0 && removed > 0,
+  };
+  HUNK_SUMMARIES.set(hunk, summary);
+  return summary;
+}
+
+/** The new-side line span a hunk occupies (context + added), or null when it has none. */
+export function hunkNewRange(hunk: Hunk): LineRange | null {
+  return hunkSummary(hunk).newRange;
 }
 
 /** The old-side (HEAD) span of a hunk's removed lines, or null when nothing is removed. */
 export function hunkOldRange(hunk: Hunk): LineRange | null {
-  let lo = Infinity;
-  let hi = -Infinity;
-  for (const line of hunk.lines) {
-    if (line.kind === "removed" && line.oldLine != null) {
-      lo = Math.min(lo, line.oldLine);
-      hi = Math.max(hi, line.oldLine);
-    }
-  }
-  if (lo === Infinity) return null;
-  return { lo, hi };
+  return hunkSummary(hunk).oldRange;
 }
 
 /** The new-side span covering all of a file's hunks, or null if none. */
@@ -72,13 +96,7 @@ export function fileOldRange(file: ChangedFile): LineRange | null {
 
 /** A hunk that removes lines without adding any — reviewed on the old (HEAD) side. */
 export function isPureDeletionHunk(hunk: Hunk): boolean {
-  let added = 0;
-  let removed = 0;
-  for (const line of hunk.lines) {
-    if (line.kind === "added") added += 1;
-    else if (line.kind === "removed") removed += 1;
-  }
-  return added === 0 && removed > 0;
+  return hunkSummary(hunk).pureDeletion;
 }
 
 /**

@@ -14,6 +14,7 @@ export interface WordSeg {
 // Above this token count per line we skip the O(n*m) LCS and treat the whole
 // line as changed — keeps very long / minified lines from stalling the UI.
 const MAX_TOKENS = 800;
+const HUNK_REFINEMENTS = new WeakMap<DiffLine[], (WordSeg[] | null)[]>();
 
 /** Split into runs of word chars, runs of whitespace, and single other chars. */
 function tokenize(s: string): string[] {
@@ -96,6 +97,8 @@ export function wordDiff(
  * content) — matching magit, which refines the replacement as one block.
  */
 export function refineHunk(lines: DiffLine[]): (WordSeg[] | null)[] {
+  const cached = HUNK_REFINEMENTS.get(lines);
+  if (cached) return cached;
   const out: (WordSeg[] | null)[] = new Array(lines.length).fill(null);
   let i = 0;
   while (i < lines.length) {
@@ -122,5 +125,6 @@ export function refineHunk(lines: DiffLine[]): (WordSeg[] | null)[] {
     }
     i = a > r ? a : r;
   }
+  HUNK_REFINEMENTS.set(lines, out);
   return out;
 }

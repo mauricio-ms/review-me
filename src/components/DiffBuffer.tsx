@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import {
   fileNewRange,
@@ -47,10 +47,17 @@ import type {
 } from "../types/tags";
 
 type Row =
-  | { kind: "section"; section: ReviewSection; count: number }
-  | { kind: "file"; section: ReviewSection; file: ChangedFile }
-  | { kind: "hunk"; section: ReviewSection; file: ChangedFile; hunk: Hunk }
+  | { key: string; kind: "section"; section: ReviewSection; count: number }
+  | { key: string; kind: "file"; section: ReviewSection; file: ChangedFile }
   | {
+      key: string;
+      kind: "hunk";
+      section: ReviewSection;
+      file: ChangedFile;
+      hunk: Hunk;
+    }
+  | {
+      key: string;
       kind: "line";
       section: ReviewSection;
       file: ChangedFile;
@@ -83,6 +90,47 @@ const SECTION_LABEL: Record<ReviewSection, string> = {
   reviewed: "Reviewed",
   ignored: "Ignored",
 };
+
+const LIST_PADDING_TOP = 6;
+const VIRTUAL_OVERSCAN = 800;
+
+function estimatedRowHeight(kind: Row["kind"]): number {
+  switch (kind) {
+    case "section":
+      return 38;
+    case "file":
+      return 44;
+    case "hunk":
+      return 34;
+    case "line":
+      return 30;
+  }
+}
+
+function measuredRowHeight(element: HTMLDivElement): number {
+  const rectHeight = element.getBoundingClientRect().height;
+  if (rectHeight <= 0) return 0;
+  const style = window.getComputedStyle(element);
+  return (
+    rectHeight +
+    (parseFloat(style.marginTop) || 0) +
+    (parseFloat(style.marginBottom) || 0)
+  );
+}
+
+/** Find the row whose vertical span contains `offset`. */
+function rowAtOffset(offsets: Float64Array, offset: number): number {
+  const rowCount = offsets.length - 1;
+  if (rowCount <= 0) return 0;
+  let lo = 0;
+  let hi = rowCount - 1;
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (offsets[mid + 1] <= offset) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
 
 /** What "nothing to show" means depends on what's being compared. */
 function emptyLabel(comparison: Comparison | undefined): string {
@@ -169,17 +217,24 @@ function buildRows(
     if (entries.length === 0) continue; // hide empty sections (magit-style)
     // Count reviewable units: hunks, or the file itself when it has none.
     const count = entries.reduce((n, e) => n + (e.hunks.length || 1), 0);
-    rows.push({ kind: "section", section, count });
+    rows.push({ key: `s:${section}`, kind: "section", section, count });
     if (collapsedSections.has(section)) continue;
     for (const { file, hunks } of entries) {
-      rows.push({ kind: "file", section, file });
+      rows.push({ key: `f:${section}:${file.path}`, kind: "file", section, file });
       if (expanded.has(file.path) && !file.binary) {
         for (const hunk of hunks) {
-          rows.push({ kind: "hunk", section, file, hunk });
+          rows.push({
+            key: `h:${section}:${hunk.id}`,
+            kind: "hunk",
+            section,
+            file,
+            hunk,
+          });
           if (collapsedHunks.has(hunk.id)) continue;
           const segments = refineHunk(hunk.lines);
           hunk.lines.forEach((line, li) =>
             rows.push({
+              key: `l:${section}:${hunk.id}:${li}`,
               kind: "line",
               section,
               file,
@@ -215,13 +270,22 @@ export default function DiffBuffer() {
 
   const rootRef = useRef<HTMLDivElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
-  const rowRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const rowElements = useRef(new Map<string, HTMLDivElement>());
+  const rowRefCallbacks = useRef(
+    new Map<string, (element: HTMLDivElement | null) => void>(),
+  );
+  const rowResizeObserver = useRef<ResizeObserver | null>(null);
+  const rowHeights = useRef(new Map<string, number>());
+  const measurementFrame = useRef<number | null>(null);
+  const viewportFrame = useRef<number | null>(null);
   const pending = useRef<string | null>(null);
   // Set when we move the cursor to keep it on screen after a manual scroll, so the
   // cursor effect below doesn't re-center and fight the scroll (Ctrl-E / Ctrl-R).
   const skipScrollIntoView = useRef(false);
   const [cursor, setCursor] = useState(0);
   const [visualAnchor, setVisualAnchor] = useState<number | null>(null);
+  const [measurementEpoch, setMeasurementEpoch] = useState(0);
+  const [viewport, setViewport] = useState({ top: 0, height: 600 });
 
   const files = useMemo(() => diff?.files ?? [], [diff]);
   const rows = useMemo(
@@ -237,6 +301,180 @@ export default function DiffBuffer() {
       ),
     [files, expandedFiles, collapsedHunks, collapsedSections, reviewed, flags, ignored],
   );
+  const rowOffsets = useMemo(() => {
+    const offsets = new Float64Array(rows.length + 1);
+    for (let i = 0; i < rows.length; i++) {
+      offsets[i + 1] =
+        offsets[i] +
+        (rowHeights.current.get(rows[i].key) ?? estimatedRowHeight(rows[i].kind));
+    }
+    return offsets;
+  }, [rows, measurementEpoch]);
+  const rowGroupEnds = useMemo(() => {
+    const ends = new Int32Array(rows.length);
+    let section = -1;
+    let file = -1;
+    let hunk = -1;
+    const close = (index: number) => {
+      if (hunk >= 0) ends[hunk] = index;
+      if (file >= 0) ends[file] = index;
+      if (section >= 0) ends[section] = index;
+    };
+    for (let i = 0; i < rows.length; i++) {
+      ends[i] = i;
+      if (rows[i].kind === "section") {
+        close(i - 1);
+        section = i;
+        file = -1;
+        hunk = -1;
+      } else if (rows[i].kind === "file") {
+        if (hunk >= 0) ends[hunk] = i - 1;
+        if (file >= 0) ends[file] = i - 1;
+        file = i;
+        hunk = -1;
+      } else if (rows[i].kind === "hunk") {
+        if (hunk >= 0) ends[hunk] = i - 1;
+        hunk = i;
+      }
+    }
+    close(rows.length - 1);
+    return ends;
+  }, [rows]);
+  const loading = status.kind === "loading";
+  const error = status.kind === "error" ? status.message : null;
+  const isClean = diff != null && files.length === 0 && error == null;
+  const previousCursor = useRef(cursor);
+  const previousRows = useRef(rows);
+  const currentCursorKey = useRef<string | null>(null);
+  const cursorScrollTarget = useRef<string | null>(null);
+  const cursorScrollMeasured = useRef(false);
+  currentCursorKey.current = rows[cursor]?.key ?? null;
+
+  const cacheRenderedRowHeights = () => {
+    rowElements.current.forEach((element, key) => {
+      const height = measuredRowHeight(element);
+      if (height > 0) rowHeights.current.set(key, height);
+    });
+  };
+
+  const hasCurrentMeasurement = (key: string): boolean => {
+    const element = rowElements.current.get(key);
+    const cached = rowHeights.current.get(key);
+    return (
+      element != null &&
+      cached != null &&
+      Math.abs(measuredRowHeight(element) - cached) <= 0.5
+    );
+  };
+
+  useEffect(() => {
+    const observer = new ResizeObserver((entries) => {
+      let changed = false;
+      // Rows whose height differs from what the offsets laid them out at (their cached
+      // height, or the estimate): each moved everything below it by `delta`.
+      const resized: { top: number; delta: number }[] = [];
+      for (const entry of entries) {
+        const element = entry.target as HTMLDivElement;
+        const key = element.dataset.rowKey;
+        if (!key) continue;
+        const height = measuredRowHeight(element);
+        // AppShell keeps this buffer mounted under display:none in project mode.
+        // Ignore those zero-size observations so they cannot poison scroll offsets.
+        if (height <= 0) continue;
+        const previous = rowHeights.current.get(key);
+        if (previous == null || Math.abs(previous - height) > 0.5) {
+          const assumed =
+            previous ?? estimatedRowHeight(element.dataset.rowKind as Row["kind"]);
+          resized.push({ top: element.getBoundingClientRect().top, delta: height - assumed });
+          rowHeights.current.set(key, height);
+          changed = true;
+        }
+        if (key === cursorScrollTarget.current && !cursorScrollMeasured.current) {
+          cursorScrollMeasured.current = true;
+          changed = true;
+        }
+      }
+      // Undo the move of whatever started above the viewport, before paint, so rows
+      // measured while scrolling up (wrapped lines taller than estimated) don't shove the
+      // content under the reader. "Above" is judged by where a row sat before this batch:
+      // in document order, every resized row above it has already pushed it down. The list
+      // opts out of native scroll anchoring, so this is the only correction applied.
+      const list = listRef.current;
+      if (list && list.clientHeight > 0 && resized.length > 0) {
+        const viewTop = list.getBoundingClientRect().top;
+        resized.sort((a, b) => a.top - b.top);
+        let shift = 0;
+        for (const { top, delta } of resized) {
+          if (top - shift >= viewTop) break;
+          shift += delta;
+        }
+        if (Math.abs(shift) > 0.5) list.scrollTop += shift;
+      }
+      if (changed && measurementFrame.current == null) {
+        measurementFrame.current = requestAnimationFrame(() => {
+          measurementFrame.current = null;
+          setMeasurementEpoch((epoch) => epoch + 1);
+        });
+      }
+    });
+    rowResizeObserver.current = observer;
+    rowElements.current.forEach((element) => observer.observe(element));
+    return () => {
+      observer.disconnect();
+      rowResizeObserver.current = null;
+      if (measurementFrame.current != null) {
+        cancelAnimationFrame(measurementFrame.current);
+        measurementFrame.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    const element = listRef.current;
+    if (!element) return;
+    let lastWidth = element.clientWidth;
+    const syncViewport = () => {
+      // Hidden under display:none (project mode): keep the last window rendered so
+      // coming back shows the same rows rather than re-rendering from the top.
+      if (element.clientHeight <= 0) return;
+      setViewport((current) => {
+        const next = { top: element.scrollTop, height: element.clientHeight };
+        return current.top === next.top && current.height === next.height ? current : next;
+      });
+    };
+    const observer = new ResizeObserver(() => {
+      const width = element.clientWidth;
+      if (width > 0 && lastWidth > 0 && width !== lastWidth) {
+        const cursorKey = currentCursorKey.current;
+        const cursorWasRendered = cursorKey != null && rowElements.current.has(cursorKey);
+        rowHeights.current.clear();
+        cacheRenderedRowHeights();
+        cursorScrollTarget.current = cursorWasRendered ? cursorKey : null;
+        cursorScrollMeasured.current = cursorKey != null && hasCurrentMeasurement(cursorKey);
+        setMeasurementEpoch((epoch) => epoch + 1);
+      }
+      if (width > 0) lastWidth = width;
+      syncViewport();
+    });
+    observer.observe(element);
+    syncViewport();
+    return () => {
+      observer.disconnect();
+      if (viewportFrame.current != null) {
+        cancelAnimationFrame(viewportFrame.current);
+        viewportFrame.current = null;
+      }
+    };
+  }, [isClean]);
+
+  // A different comparison starts its heights from estimates again. A refresh keeps
+  // them: the same rows are usually the same height, and any that changed are
+  // re-measured (and scroll-corrected) as they render, so the view doesn't jump.
+  useLayoutEffect(() => {
+    rowHeights.current.clear();
+    cacheRenderedRowHeights();
+    setMeasurementEpoch((epoch) => epoch + 1);
+  }, [comparisonEpoch]);
 
   useEffect(() => {
     setCursor((c) => Math.min(Math.max(0, c), Math.max(0, rows.length - 1)));
@@ -253,13 +491,51 @@ export default function DiffBuffer() {
     if (activeBuffer === "diff") rootRef.current?.focus({ preventScroll: true });
   }, [activeBuffer, focusRequest]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    const cursorChanged = previousCursor.current !== cursor;
+    const rowsChanged = previousRows.current !== rows;
+    previousCursor.current = cursor;
+    previousRows.current = rows;
     if (skipScrollIntoView.current) {
       skipScrollIntoView.current = false;
+      cursorScrollTarget.current = null;
+      cursorScrollMeasured.current = false;
       return;
     }
-    rowRefs.current[cursor]?.scrollIntoView({ block: "nearest" });
-  }, [cursor]);
+    const element = listRef.current;
+    const row = rows[cursor];
+    if (activeBuffer !== "diff" || !element || element.clientHeight <= 0 || !row) {
+      cursorScrollTarget.current = null;
+      cursorScrollMeasured.current = false;
+      return;
+    }
+    if (cursorChanged || rowsChanged) {
+      cursorScrollTarget.current = row.key;
+      cursorScrollMeasured.current = hasCurrentMeasurement(row.key);
+    }
+    if (cursorScrollTarget.current !== row.key) return;
+    const top = LIST_PADDING_TOP + rowOffsets[cursor];
+    const bottom = LIST_PADDING_TOP + rowOffsets[cursor + 1];
+    const viewTop = element.scrollTop;
+    const viewBottom = viewTop + element.clientHeight;
+    let next = viewTop;
+    if (top < viewTop) next = top;
+    else if (bottom > viewBottom) {
+      next =
+        bottom - top > element.clientHeight
+          ? top
+          : Math.max(0, bottom - element.clientHeight);
+    }
+    if (next !== viewTop) {
+      element.scrollTop = next;
+      setViewport({ top: next, height: element.clientHeight });
+    }
+    cursorScrollMeasured.current = hasCurrentMeasurement(row.key);
+    if (cursorScrollMeasured.current) {
+      cursorScrollTarget.current = null;
+      cursorScrollMeasured.current = false;
+    }
+  }, [activeBuffer, cursor, rowOffsets, rows]);
 
   const selectionRange = (): [number, number] =>
     visualAnchor == null
@@ -271,21 +547,8 @@ export default function DiffBuffer() {
   // Drives the cursor-follows highlight.
   const sectionRange = (): [number, number] => {
     const row = rows[cursor];
-    if (!row || row.kind === "line") return [cursor, cursor];
-    let end = cursor + 1;
-    if (row.kind === "section") {
-      while (end < rows.length && rows[end].kind !== "section") end++;
-    } else if (row.kind === "file") {
-      while (
-        end < rows.length &&
-        rows[end].kind !== "file" &&
-        rows[end].kind !== "section"
-      )
-        end++;
-    } else {
-      while (end < rows.length && rows[end].kind === "line") end++;
-    }
-    return [cursor, end - 1];
+    if (!row) return [cursor, cursor];
+    return [cursor, rowGroupEnds[cursor]];
   };
 
   // The line range + scope kind/side targeted by the current cursor/selection. A
@@ -472,34 +735,57 @@ export default function DiffBuffer() {
   };
 
   const keepCursorVisible = (el: HTMLDivElement) => {
-    const cur = rowRefs.current[cursor];
-    if (!cur) return;
+    if (cursor < 0 || cursor >= rows.length) return;
     const viewTop = el.scrollTop;
     const viewBottom = viewTop + el.clientHeight;
-    const top = cur.offsetTop;
-    const bottom = top + cur.offsetHeight;
+    const top = LIST_PADDING_TOP + rowOffsets[cursor];
+    const bottom = LIST_PADDING_TOP + rowOffsets[cursor + 1];
     if (bottom > viewTop && top < viewBottom) return; // still (partially) visible
-    let target = -1;
+    let target: number;
     if (bottom <= viewTop) {
       // Scrolled down past the cursor: first row visible from the top.
-      target = rows.findIndex((_r, i) => {
-        const e2 = rowRefs.current[i];
-        return e2 != null && e2.offsetTop + e2.offsetHeight > viewTop;
-      });
+      target = rowAtOffset(rowOffsets, Math.max(0, viewTop - LIST_PADDING_TOP));
     } else {
       // Scrolled up past the cursor: last row visible from the bottom.
-      for (let i = rows.length - 1; i >= 0; i--) {
-        const e2 = rowRefs.current[i];
-        if (e2 != null && e2.offsetTop < viewBottom) {
-          target = i;
-          break;
-        }
-      }
+      target = rowAtOffset(
+        rowOffsets,
+        Math.max(0, viewBottom - LIST_PADDING_TOP - 1),
+      );
     }
-    if (target >= 0 && target !== cursor) {
+    if (target !== cursor) {
       skipScrollIntoView.current = true;
       setCursor(target);
     }
+  };
+
+  const onListScroll = (event: React.UIEvent<HTMLDivElement>) => {
+    const element = event.currentTarget;
+    if (viewportFrame.current != null) return;
+    viewportFrame.current = requestAnimationFrame(() => {
+      viewportFrame.current = null;
+      setViewport({ top: element.scrollTop, height: element.clientHeight });
+    });
+  };
+
+  const refForRow = (row: Row) => {
+    const { key, kind } = row;
+    const existing = rowRefCallbacks.current.get(key);
+    if (existing) return existing;
+    const callback = (element: HTMLDivElement | null) => {
+      const previous = rowElements.current.get(key);
+      if (previous && previous !== element) rowResizeObserver.current?.unobserve(previous);
+      if (element) {
+        element.dataset.rowKey = key;
+        element.dataset.rowKind = kind;
+        rowElements.current.set(key, element);
+        rowResizeObserver.current?.observe(element);
+      } else {
+        rowElements.current.delete(key);
+        rowRefCallbacks.current.delete(key);
+      }
+    };
+    rowRefCallbacks.current.set(key, callback);
+    return callback;
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -602,12 +888,30 @@ export default function DiffBuffer() {
     }
   };
 
-  const loading = status.kind === "loading";
-  const error = status.kind === "error" ? status.message : null;
-  const isClean = diff != null && files.length === 0 && error == null;
   const [selLo, selHi] = selectionRange();
   const visual = visualAnchor != null;
   const [secLo, secHi] = visual ? [-1, -1] : sectionRange();
+  const totalHeight = rowOffsets[rowOffsets.length - 1] ?? 0;
+  const renderStart =
+    rows.length === 0
+      ? 0
+      : rowAtOffset(
+          rowOffsets,
+          Math.max(0, viewport.top - LIST_PADDING_TOP - VIRTUAL_OVERSCAN),
+        );
+  const renderEnd =
+    rows.length === 0
+      ? 0
+      : Math.min(
+          rows.length,
+          rowAtOffset(
+            rowOffsets,
+            Math.max(
+              0,
+              viewport.top + viewport.height - LIST_PADDING_TOP + VIRTUAL_OVERSCAN,
+            ),
+          ) + 1,
+        );
 
   return (
     <div
@@ -634,22 +938,27 @@ export default function DiffBuffer() {
       {isClean ? (
         <DiffCleanState />
       ) : (
-      <div className="diff-list" ref={listRef}>
-        {rows.map((row, idx) => {
+      <div className="diff-list" ref={listRef} onScroll={onListScroll}>
+        {renderStart > 0 && (
+          <div
+            className="diff-virtual-spacer"
+            style={{ height: rowOffsets[renderStart] }}
+          />
+        )}
+        {rows.slice(renderStart, renderEnd).map((row, visibleIndex) => {
+          const idx = renderStart + visibleIndex;
           const selected = idx === cursor;
           const inVisual = visual && idx >= selLo && idx <= selHi;
           const inSection = !visual && idx >= secLo && idx <= secHi;
           const cls = `${selected ? "is-selected" : ""} ${
             inSection ? "is-section" : ""
           } ${inVisual ? "is-visual-sel" : ""}`;
-          const ref = (el: HTMLDivElement | null) => {
-            rowRefs.current[idx] = el;
-          };
+          const ref = refForRow(row);
           if (row.kind === "section") {
             const collapsed = collapsedSections.has(row.section);
             return (
               <div
-                key={`s:${row.section}`}
+                key={row.key}
                 ref={ref}
                 className={`diff-row diff-section-header section-${row.section} ${cls}`}
                 onClick={() => setCursor(idx)}
@@ -669,7 +978,7 @@ export default function DiffBuffer() {
             const fileIgnored = ignored.some((t) => t.anchor.file === f.path);
             return (
               <div
-                key={`f:${row.section}:${f.path}`}
+                key={row.key}
                 ref={ref}
                 className={`diff-row diff-file-row status-${f.status} ${cls}`}
                 onClick={() => setCursor(idx)}
@@ -710,7 +1019,7 @@ export default function DiffBuffer() {
             const open = !collapsedHunks.has(row.hunk.id);
             return (
               <div
-                key={`h:${row.hunk.id}`}
+                key={row.key}
                 ref={ref}
                 className={`diff-row diff-hunk-row ${cls}`}
                 onClick={() => setCursor(idx)}
@@ -751,7 +1060,7 @@ export default function DiffBuffer() {
             lineSide != null && isLineIgnored(ignored, row.file.path, lineNo, lineSide);
           return (
             <div
-              key={`l:${row.hunk.id}:${idx}`}
+              key={row.key}
               ref={ref}
               className={`diff-row diff-line-row line-${line.kind} ${
                 lineReviewed ? "is-reviewed" : ""
@@ -781,6 +1090,12 @@ export default function DiffBuffer() {
             </div>
           );
         })}
+        {renderEnd < rows.length && (
+          <div
+            className="diff-virtual-spacer"
+            style={{ height: totalHeight - rowOffsets[renderEnd] }}
+          />
+        )}
       </div>
       )}
     </div>
