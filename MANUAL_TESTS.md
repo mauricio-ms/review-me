@@ -107,6 +107,14 @@ The fixture's first commit (`initial`) is the **root** commit — §6 reviews th
 - [ ] **Steps:** Launch the app with no repo open.
 - [ ] **Expect:** Centered `review-me` logo, tagline, and a key menu (`Space`, `o p`, `o r`, `:`). Dark theme.
 
+### 1.1b Title bar follows the desktop
+- [ ] **Steps:** Launch on a tiling compositor (Hyprland, sway, niri, river, i3).
+- [ ] **Expect:** No title bar — the app fills its tile edge to edge, from the first frame (no bar that flashes and disappears).
+- [ ] **Steps:** Launch on a floating desktop (stock Ubuntu GNOME, KDE).
+- [ ] **Expect:** A normal title bar: drag it to move the window, and its close / minimise / maximise buttons work.
+- [ ] **Steps:** `REVIEW_ME_DECORATIONS=1 npm run tauri dev` on the tiling compositor, then `REVIEW_ME_DECORATIONS=0` on the floating one.
+- [ ] **Expect:** The override wins: a GTK header bar inside the tile, and a bare window on GNOME respectively.
+
 ### 1.2 Open via directory browser (path navigator)
 - [ ] **Steps:** Press `Space` → `o` → `p`. The prompt is a **colored path** (`~`-abbreviated): ancestors dim teal, the **current level** highlighted bright teal, then your typed filter. **Type to filter** the current directory; navigate rows with `↑`/`↓` (or `Ctrl-n`/`Ctrl-p`). **`Tab` descends** into the highlighted directory; **`Enter` opens** the highlighted directory as a repo (a non-repo folder descends instead). Walk down to `/tmp/air-fixture` with `Tab`.
 - [ ] **Expect:** Selection lands on the **first matching directory** (not the `..` / "open this repository" rows). Directory entries listed (dirs only) with **colored folder icons**; git repos tinted git-red and marked `git` in amber. A top row **"open this repository"** appears when the current dir is itself a repo (`Enter` opens it).

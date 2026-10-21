@@ -237,6 +237,11 @@ sudo apt install ./review-me_0.1.0_amd64.deb
 review-me                                    # or find it in the app launcher
 ```
 
+The window has a title bar on floating desktops (GNOME, KDE) and none on tiling
+compositors (Hyprland, sway, niri, river, i3), where GTK would otherwise draw its own
+header bar inside the tile. It decides at startup from `XDG_CURRENT_DESKTOP`;
+`REVIEW_ME_DECORATIONS=1` or `=0` forces either way.
+
 Note that the AppImage bundles webkit but still links the host's GTK 3 and graphics stack
 (`libGL`/`libEGL`/`libgbm`) — linuxdeploy deliberately excludes those as system libraries.
 That holds on any desktop install, but not on a minimal or headless box.

@@ -50,6 +50,7 @@ symbol index in a global `Mutex`.
 - `coverage.rs` review progress over a computed diff (`summarize`, `commit_reviews` for the log's rows) and the covers/overlaps helpers `review_commit.rs` stages by — the Rust twin of `src/lib/coverage.ts`; keep the two in step.
 - `notes.rs` the Markdown export of review notes (see "Notes" below). `review_dir.rs` owns `.review-me/`: every write goes through `ensure`, which also adds it to `.git/info/exclude`.
 - `queries.rs` + `xref.rs` tree-sitter symbol index and find-definition/references.
+- `window.rs` builds the main window in `setup` (`tauri.conf.json` has it `"create": false`) so decorations can follow the desktop: off on tiling compositors, on elsewhere, `REVIEW_ME_DECORATIONS` overrides.
 
 **Frontend (`src/`)** — `AppShell.tsx` keeps all three buffers (`DiffBuffer`, `LogBuffer`,
 `ProjectBuffer`) mounted and toggles visibility with `display:none` (preserves

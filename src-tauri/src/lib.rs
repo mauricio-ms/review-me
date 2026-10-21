@@ -15,12 +15,14 @@ mod review_dir;
 mod revision;
 mod tags;
 mod tree;
+mod window;
 mod xref;
 #[cfg(test)]
 mod xref_validate;
 
 pub fn run() {
     tauri::Builder::default()
+        .setup(|app| window::create_main(app))
         .invoke_handler(tauri::generate_handler![
             commands::open_repo,
             commands::compute_diff,
