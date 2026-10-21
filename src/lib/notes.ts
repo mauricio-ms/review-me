@@ -2,7 +2,10 @@ import { useNotesStore } from "../state/notes";
 import { useRepoStore } from "../state/repo";
 import { useTagsStore } from "../state/tags";
 import type { FlagTag } from "../types/tags";
+import { useUIStore } from "../state/ui";
 import { diffTarget, type DiffTarget } from "./diff-view";
+import { logRef } from "./log";
+import { exportNotes as exportNotesFor } from "./tauri";
 
 /**
  * Whether review notes can be written here. A note is a fix left for later, attached
@@ -74,4 +77,26 @@ export function openNoteEditor(): boolean {
       : { target, flagId: null, saved: "" },
   );
   return true;
+}
+
+/**
+ * `:export`: write every note on the review branch's history into one Markdown file
+ * (each commit's own file is kept current as notes change) and say where it went.
+ */
+export async function exportNotes(): Promise<void> {
+  const repo = useRepoStore.getState().repoPath;
+  if (!repo) return;
+  const ui = useUIStore.getState();
+  try {
+    const result = await exportNotesFor(repo, logRef());
+    ui.showFlash(
+      result.path
+        ? `${result.notes} note${result.notes === 1 ? "" : "s"} on ${result.commits} commit${
+            result.commits === 1 ? "" : "s"
+          } → ${result.path}`
+        : "no notes on this branch to export",
+    );
+  } catch (e) {
+    ui.showFlash(`export failed: ${String(e)}`);
+  }
 }

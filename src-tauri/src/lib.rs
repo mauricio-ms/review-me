@@ -6,6 +6,7 @@ mod diff;
 mod error;
 mod fs_browse;
 mod fuzzy;
+mod notes;
 mod queries;
 mod repo;
 mod repo_library;
@@ -40,6 +41,7 @@ pub fn run() {
             commands::remove_tag,
             commands::clear_tags,
             commands::unmark_range,
+            commands::export_notes,
             commands::reviewed_commit_preflight,
             commands::prepare_reviewed_commit,
             commands::abort_reviewed_commit,

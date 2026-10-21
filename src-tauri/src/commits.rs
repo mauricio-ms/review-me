@@ -56,6 +56,8 @@ pub struct ResolvedCommit {
     pub oid: Oid,
     pub parent_oid: Option<Oid>,
     pub info: CommitInfo,
+    /// The whole message, subject and body.
+    pub message: String,
 }
 
 /// `ref_name`'s history, newest first: `limit` commits after skipping the newest
@@ -142,6 +144,7 @@ pub fn resolve(repo: &Repository, rev: &str) -> AppResult<ResolvedCommit> {
         // Merges are reviewed against their first parent; a root commit has none.
         parent_oid: commit.parent_ids().next(),
         info: info(&commit, head_oid(repo)),
+        message: String::from_utf8_lossy(commit.message_bytes()).into_owned(),
     })
 }
 

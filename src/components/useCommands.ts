@@ -1,7 +1,7 @@
 import { useCallback, useState } from "react";
 
 import { showLog } from "../lib/log";
-import { openNoteEditor } from "../lib/notes";
+import { exportNotes, openNoteEditor } from "../lib/notes";
 import { applyComparison, refreshDiff } from "../lib/open-repo";
 import { projectSelectionRange } from "../lib/project-view";
 import { addFlag } from "../lib/review-actions";
@@ -176,6 +176,11 @@ export function useCommands(rawClose: CommandClose): {
     if (!openNoteEditor()) requestFocus();
   }, [close, requestFocus]);
 
+  const handleExportNotes = useCallback(() => {
+    close();
+    void exportNotes();
+  }, [close]);
+
   const handleGotoDef = useCallback(() => {
     close({ restoreFocus: false });
     void gotoDefinition();
@@ -286,6 +291,18 @@ export function useCommands(rawClose: CommandClose): {
       // A note is exported per commit, so it only exists while reviewing one.
       enabled: !!repo && comparison.kind === "commit",
       run: handleNote,
+    },
+    {
+      id: "export-notes",
+      name: "export",
+      aliases: ["notes", "export-notes"],
+      label: `export notes on ${reviewBranch?.display ?? "HEAD"} to Markdown`,
+      group: "tag",
+      prefix: "t",
+      key: "",
+      palette: false,
+      enabled: !!repo,
+      run: handleExportNotes,
     },
     {
       id: "goto-def",

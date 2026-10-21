@@ -48,6 +48,7 @@ export default function BufferStatusBar() {
   const ignored = useTagsStore((s) => s.ignored);
   const activeBuffer = useUIStore((s) => s.activeBuffer);
   const vimMode = useUIStore((s) => s.vimMode);
+  const flash = useUIStore((s) => s.flash);
 
   const files = diff?.files ?? [];
   const { done, total } = reviewProgress(files, reviewed);
@@ -101,6 +102,7 @@ export default function BufferStatusBar() {
           )}
         </>
       )}
+      {flash && <span className="status-segment status-flash">{flash}</span>}
       <span className="status-spacer" />
       <span className="status-segment status-hint">
         {activeBuffer === "log" ? (

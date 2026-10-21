@@ -26,6 +26,8 @@ type UIState = {
   focusRequest: number;
   modalDepth: number;
   diffHighlight: DiffHighlightMode;
+  /** A one-line message for the status bar (e.g. where `:export` wrote); fades. */
+  flash: string | null;
 
   switchBuffer: (dir: "next" | "prev") => void;
   setActiveBuffer: (b: BufferName) => void;
@@ -42,7 +44,12 @@ type UIState = {
   endModal: () => void;
   setDiffHighlight: (m: DiffHighlightMode) => void;
   toggleDiffHighlight: () => void;
+  showFlash: (message: string) => void;
 };
+
+/** How long a status-bar message stays up. */
+const FLASH_MS = 6000;
+let flashTimer: ReturnType<typeof setTimeout> | null = null;
 
 const BUFFERS: BufferName[] = ["diff", "log", "project"];
 
@@ -55,6 +62,7 @@ export const useUIStore = create<UIState>((set) => ({
   focusRequest: 0,
   modalDepth: 0,
   diffHighlight: "word",
+  flash: null,
 
   switchBuffer: (dir) =>
     set((s) => {
@@ -80,4 +88,12 @@ export const useUIStore = create<UIState>((set) => ({
   setDiffHighlight: (m) => set({ diffHighlight: m }),
   toggleDiffHighlight: () =>
     set((s) => ({ diffHighlight: s.diffHighlight === "word" ? "line" : "word" })),
+  showFlash: (message) => {
+    if (flashTimer) clearTimeout(flashTimer);
+    flashTimer = setTimeout(() => {
+      flashTimer = null;
+      set({ flash: null });
+    }, FLASH_MS);
+    set({ flash: message });
+  },
 }));

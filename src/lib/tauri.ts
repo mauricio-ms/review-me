@@ -21,6 +21,7 @@ import type {
 import type {
   AnchorKind,
   AnchorSide,
+  NotesExport,
   ReviewScope,
   TagStore,
 } from "../types/tags";
@@ -145,6 +146,11 @@ export function setFlagNote(
   note: string | null,
 ): Promise<TagStore> {
   return invoke<TagStore>("set_flag_note", { repo, scope, id, note });
+}
+
+/** Write every note reachable from `refName` into one Markdown bundle. */
+export function exportNotes(repo: string, refName: string): Promise<NotesExport> {
+  return invoke<NotesExport>("export_notes", { repo, refName });
 }
 
 export function addIgnoredTag(

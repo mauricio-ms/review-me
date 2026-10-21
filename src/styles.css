@@ -321,6 +321,14 @@ kbd {
   color: var(--accent-violet);
 }
 
+.status-flash {
+  color: var(--accent-violet);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .status-hint {
   color: var(--fg-3);
   display: flex;
