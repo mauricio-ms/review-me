@@ -45,7 +45,7 @@ export default function CommandTransient() {
   );
 
   const { commands, busy } = useCommands(close);
-  const groups = groupCommands(commands);
+  const groups = groupCommands(commands.filter((c) => c.palette !== false));
   const groupsRef = useRef(groups);
   groupsRef.current = groups;
 

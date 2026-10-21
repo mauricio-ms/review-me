@@ -12,6 +12,7 @@ import CommitReviewedHost from "./CommitReviewedHost";
 import ConfirmClearHost from "./ConfirmClearHost";
 import DiffBuffer from "./DiffBuffer";
 import FuzzyFinderHost from "./FuzzyFinderHost";
+import LogBuffer from "./LogBuffer";
 import OpenRepoHost from "./OpenRepoHost";
 import ProjectBuffer from "./ProjectBuffer";
 import RecentReposHost from "./RecentReposHost";
@@ -80,13 +81,20 @@ export default function AppShell() {
       <div className="app-body">
         {hasRepo ? (
           <>
-            {/* Both buffers stay mounted; only one is visible, preserving each
-                buffer's cursor/scroll across switches. */}
+            {/* Every buffer stays mounted; only one is visible, preserving each
+                buffer's cursor/scroll across switches — which is also how leaving a
+                commit lands back on its row in the log. */}
             <div
               className="buffer-wrap"
               style={{ display: activeBuffer === "diff" ? "block" : "none" }}
             >
               <DiffBuffer />
+            </div>
+            <div
+              className="buffer-wrap"
+              style={{ display: activeBuffer === "log" ? "block" : "none" }}
+            >
+              <LogBuffer />
             </div>
             <div
               className="buffer-wrap"

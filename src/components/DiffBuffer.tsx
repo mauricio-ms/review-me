@@ -16,6 +16,7 @@ import {
   sectionForHunk,
   type ReviewSection,
 } from "../lib/coverage";
+import { leaveCommit } from "../lib/open-repo";
 import { openFileFromDiff } from "../lib/project";
 import { setProjectCursor } from "../lib/project-view";
 import {
@@ -884,6 +885,14 @@ export default function DiffBuffer() {
       case "i":
         e.preventDefault();
         doIgnore();
+        break;
+      case "q":
+        // A commit is entered from the commits buffer; `q` goes back to it (magit's
+        // quit-window). Nothing to leave in the other comparisons.
+        if (comparison?.kind === "commit") {
+          e.preventDefault();
+          leaveCommit();
+        }
         break;
     }
   };

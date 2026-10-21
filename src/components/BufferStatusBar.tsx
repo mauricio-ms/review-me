@@ -103,8 +103,22 @@ export default function BufferStatusBar() {
       )}
       <span className="status-spacer" />
       <span className="status-segment status-hint">
-        <kbd>r</kbd> review · <kbd>f</kbd> flag · <kbd>i</kbd> ignore ·{" "}
-        <kbd>u</kbd> unmark · <kbd>Space</kbd> palette
+        {activeBuffer === "log" ? (
+          <>
+            <kbd>↵</kbd> open commit · <kbd>Space</kbd> palette
+          </>
+        ) : (
+          <>
+            <kbd>r</kbd> review · <kbd>f</kbd> flag · <kbd>i</kbd> ignore ·{" "}
+            <kbd>u</kbd> unmark ·{" "}
+            {activeBuffer === "diff" && comparison?.kind === "commit" && (
+              <>
+                <kbd>q</kbd> commits ·{" "}
+              </>
+            )}
+            <kbd>Space</kbd> palette
+          </>
+        )}
       </span>
     </div>
   );

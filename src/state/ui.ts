@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-export type BufferName = "diff" | "project";
+export type BufferName = "diff" | "project" | "log";
 export type VimMode = "normal" | "insert" | "visual" | "replace";
 /** How the diff view highlights changes: per-word (intra-line) or whole-line. */
 export type DiffHighlightMode = "word" | "line";
@@ -44,7 +44,7 @@ type UIState = {
   toggleDiffHighlight: () => void;
 };
 
-const BUFFERS: BufferName[] = ["diff", "project"];
+const BUFFERS: BufferName[] = ["diff", "log", "project"];
 
 export const useUIStore = create<UIState>((set) => ({
   activeBuffer: "diff",
