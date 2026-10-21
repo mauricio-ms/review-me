@@ -16,6 +16,8 @@ import {
   sectionForHunk,
   type ReviewSection,
 } from "../lib/coverage";
+import { setDiffTargetSource } from "../lib/diff-view";
+import { flagTarget, hasNote, openNoteFor } from "../lib/notes";
 import { leaveCommit } from "../lib/open-repo";
 import { openFileFromDiff } from "../lib/project";
 import { setProjectCursor } from "../lib/project-view";
@@ -28,6 +30,7 @@ import {
 } from "../lib/review-actions";
 import { refineHunk, type WordSeg } from "../lib/word-diff";
 import DiffCleanState from "./DiffCleanState";
+import { useNotesStore } from "../state/notes";
 import { useRepoStore } from "../state/repo";
 import { useTagsStore } from "../state/tags";
 import { useUIStore } from "../state/ui";
@@ -66,6 +69,15 @@ type Row =
       line: DiffLine;
       /** Intra-line word-diff segments, or null when there's nothing to refine. */
       segments: WordSeg[] | null;
+    }
+  | {
+      key: string;
+      kind: "note";
+      section: ReviewSection;
+      file: ChangedFile;
+      /** The hunk the note sits under; null for a note on the whole file. */
+      hunk: Hunk | null;
+      flag: FlagTag;
     };
 
 type Scope = {
@@ -105,6 +117,8 @@ function estimatedRowHeight(kind: Row["kind"]): number {
       return 34;
     case "line":
       return 30;
+    case "note":
+      return 32;
   }
 }
 
@@ -162,6 +176,40 @@ function headerRange(comparison: Comparison | undefined): string {
   }
 }
 
+/**
+ * Where each of a file's notes (flags carrying one) is shown: a note on lines sits
+ * under the first hunk it touches; a note on the whole file, or on lines outside every
+ * hunk (flagged from project mode), sits under the file row.
+ */
+function placeNotes(
+  file: ChangedFile,
+  flags: FlagTag[],
+): { fileNotes: FlagTag[]; hunkNotes: Map<string, FlagTag[]> } {
+  const fileNotes: FlagTag[] = [];
+  const hunkNotes = new Map<string, FlagTag[]>();
+  const notes = flags
+    .filter((f) => f.anchor.file === file.path && !f.anchor.stale && hasNote(f))
+    .sort((a, b) => a.anchor.startLine - b.anchor.startLine);
+  for (const flag of notes) {
+    const { kind, side, startLine, endLine } = flag.anchor;
+    const hunk =
+      kind === "file" || side === "file"
+        ? undefined
+        : file.hunks.find((h) => {
+            const t = hunkTarget(h);
+            return t != null && t.side === side && t.lo <= endLine && t.hi >= startLine;
+          });
+    if (!hunk) {
+      fileNotes.push(flag);
+      continue;
+    }
+    const list = hunkNotes.get(hunk.id) ?? [];
+    list.push(flag);
+    hunkNotes.set(hunk.id, list);
+  }
+  return { fileNotes, hunkNotes };
+}
+
 function buildRows(
   files: ChangedFile[],
   expanded: Set<string>,
@@ -213,6 +261,8 @@ function buildRows(
   }
 
   const rows: Row[] = [];
+  // A file recurs once per section it has hunks in; its whole-file notes show once.
+  const fileNotesShown = new Set<string>();
   for (const section of SECTION_ORDER) {
     const entries = buckets[section];
     if (entries.length === 0) continue; // hide empty sections (magit-style)
@@ -222,7 +272,23 @@ function buildRows(
     if (collapsedSections.has(section)) continue;
     for (const { file, hunks } of entries) {
       rows.push({ key: `f:${section}:${file.path}`, kind: "file", section, file });
-      if (expanded.has(file.path) && !file.binary) {
+      // A binary file never expands, so its notes show regardless.
+      if (!expanded.has(file.path) && !file.binary) continue;
+      const { fileNotes, hunkNotes } = placeNotes(file, flags);
+      if (!fileNotesShown.has(file.path)) {
+        fileNotesShown.add(file.path);
+        for (const flag of fileNotes) {
+          rows.push({
+            key: `n:${section}:${flag.id}`,
+            kind: "note",
+            section,
+            file,
+            hunk: null,
+            flag,
+          });
+        }
+      }
+      if (!file.binary) {
         for (const hunk of hunks) {
           rows.push({
             key: `h:${section}:${hunk.id}`,
@@ -231,6 +297,17 @@ function buildRows(
             file,
             hunk,
           });
+          // Notes stay visible with their hunk folded: they're what you came back for.
+          for (const flag of hunkNotes.get(hunk.id) ?? []) {
+            rows.push({
+              key: `n:${section}:${flag.id}`,
+              kind: "note",
+              section,
+              file,
+              hunk,
+              flag,
+            });
+          }
           if (collapsedHunks.has(hunk.id)) continue;
           const segments = refineHunk(hunk.lines);
           hunk.lines.forEach((line, li) =>
@@ -607,6 +684,11 @@ export default function DiffBuffer() {
       if (!t) return null;
       return { file: row.file, lo: t.lo, hi: t.hi, kind: "hunk", side: t.side };
     }
+    // A note row stands for its flag's lines: `u` there unmarks them, `:note` edits it.
+    if (row.kind === "note") {
+      const { lo, hi, kind, side } = flagTarget(row.flag);
+      return { file: row.file, lo, hi, kind, side };
+    }
     if (row.line.newLine != null) {
       return {
         file: row.file,
@@ -635,6 +717,30 @@ export default function DiffBuffer() {
   };
 
   const exitVisual = () => setVisualAnchor(null);
+
+  // `:note` reads the cursor's target through this handle; re-registered every render
+  // so it always sees the current cursor and selection.
+  useEffect(() => {
+    setDiffTargetSource(() => {
+      const scope = targetScope();
+      return scope
+        ? {
+            file: scope.file.path,
+            lo: scope.lo,
+            hi: scope.hi,
+            kind: scope.kind,
+            side: scope.side,
+          }
+        : null;
+    });
+  });
+  useEffect(() => () => setDiffTargetSource(null), []);
+
+  // Opening a note consumes the selection, as marking it would.
+  const noteOpen = useNotesStore((s) => s.editing != null);
+  useEffect(() => {
+    if (noteOpen) setVisualAnchor(null);
+  }, [noteOpen]);
 
   const doReview = () => {
     const row = rows[cursor];
@@ -688,11 +794,17 @@ export default function DiffBuffer() {
       if (idx >= 0) setCursor(idx);
       return;
     }
-    // hunk or line: fold this hunk and land the cursor on its header row.
-    toggleHunk(row.hunk.id);
-    const idx = rows.findIndex(
-      (r) => r.kind === "hunk" && r.hunk.id === row.hunk.id,
-    );
+    if (row.kind === "note" && row.hunk == null) {
+      toggleFile(row.file.path);
+      const idx = fileRowIndex(row.section, row.file.path);
+      if (idx >= 0) setCursor(idx);
+      return;
+    }
+    // hunk, line or a hunk's note: fold this hunk and land the cursor on its header.
+    const hunk = row.hunk;
+    if (!hunk) return;
+    toggleHunk(hunk.id);
+    const idx = rows.findIndex((r) => r.kind === "hunk" && r.hunk.id === hunk.id);
     if (idx >= 0) setCursor(idx);
   };
 
@@ -985,6 +1097,9 @@ export default function DiffBuffer() {
             const fileReviewed = isFileReviewed(reviewed, f);
             const fileFlagged = flags.some((t) => t.anchor.file === f.path);
             const fileIgnored = ignored.some((t) => t.anchor.file === f.path);
+            const fileNotes = flags.filter(
+              (t) => t.anchor.file === f.path && hasNote(t),
+            ).length;
             return (
               <div
                 key={row.key}
@@ -1003,6 +1118,11 @@ export default function DiffBuffer() {
                 <span className="diff-file-path">
                   {f.oldPath ? `${f.oldPath} → ${f.path}` : f.path}
                 </span>
+                {fileNotes > 0 && (
+                  <span className="diff-file-notes" title={`${fileNotes} with a note`}>
+                    ✎ {fileNotes}
+                  </span>
+                )}
                 {f.staged === true && (
                   <span className="diff-staged-dot" title="staged">
                     ●
@@ -1041,6 +1161,31 @@ export default function DiffBuffer() {
                   {hunkIgnored && <span className="mark-ignored">⊘</span>}
                 </span>
                 <span className="diff-hunk-header">{row.hunk.header}</span>
+              </div>
+            );
+          }
+          if (row.kind === "note") {
+            const a = row.flag.anchor;
+            const where =
+              a.side === "file"
+                ? "whole file"
+                : a.startLine === a.endLine
+                  ? `line ${a.startLine}`
+                  : `lines ${a.startLine}–${a.endLine}`;
+            return (
+              <div
+                key={row.key}
+                ref={ref}
+                className={`diff-row diff-note-row ${row.hunk ? "" : "is-file-note"} ${cls}`}
+                onClick={() => setCursor(idx)}
+                onDoubleClick={() => openNoteFor(row.flag)}
+              >
+                <span className="diff-note-glyph">✎</span>
+                <span className="diff-note-where">
+                  {where}
+                  {a.side === "old" ? " (removed)" : ""}
+                </span>
+                <span className="diff-note-text">{row.flag.note}</span>
               </div>
             );
           }

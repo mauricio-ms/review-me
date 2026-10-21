@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 
 import { showLog } from "../lib/log";
+import { openNoteEditor } from "../lib/notes";
 import { applyComparison, refreshDiff } from "../lib/open-repo";
 import { projectSelectionRange } from "../lib/project-view";
 import { addFlag } from "../lib/review-actions";
@@ -169,6 +170,12 @@ export function useCommands(rawClose: CommandClose): {
     }
   }, [close, requestFocus]);
 
+  const handleNote = useCallback(() => {
+    close({ restoreFocus: false });
+    // Nothing to annotate on a section header: hand focus straight back.
+    if (!openNoteEditor()) requestFocus();
+  }, [close, requestFocus]);
+
   const handleGotoDef = useCallback(() => {
     close({ restoreFocus: false });
     void gotoDefinition();
@@ -261,6 +268,24 @@ export function useCommands(rawClose: CommandClose): {
       buffer: "project",
       enabled: !!openPath,
       run: handleProjectFlag,
+    },
+    {
+      id: "note",
+      name: "note",
+      aliases: ["annotate", "comment", "todo"],
+      label:
+        comparison.kind === "commit"
+          ? "note on the lines at the cursor (a fix for later)"
+          : "note (while reviewing a commit)",
+      group: "tag",
+      prefix: "t",
+      key: "",
+      buffer: "diff",
+      // Notes are a `:note` away; no chord, in keeping with the commits buffer.
+      palette: false,
+      // A note is exported per commit, so it only exists while reviewing one.
+      enabled: !!repo && comparison.kind === "commit",
+      run: handleNote,
     },
     {
       id: "goto-def",

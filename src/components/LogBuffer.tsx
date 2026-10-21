@@ -19,7 +19,7 @@ function errorMessage(error: unknown): string {
 
 /**
  * A commit's review at a glance: `✓` when every change is reviewed or ignored,
- * otherwise `◐ done/total`, plus its flags and notes. Untouched commits show nothing.
+ * otherwise `done/total`, plus its flags and notes. Untouched commits show nothing.
  */
 function ReviewBadges({ review }: { review: CommitReview | undefined }) {
   if (!review) return null;
@@ -37,7 +37,7 @@ function ReviewBadges({ review }: { review: CommitReview | undefined }) {
             className="log-progress"
             title={`${done} of ${total} changes reviewed or ignored`}
           >
-            ◐ {done}/{total}
+            {done}/{total}
           </span>
         )
       )}

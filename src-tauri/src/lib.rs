@@ -36,6 +36,7 @@ pub fn run() {
             commands::add_reviewed_tag,
             commands::add_flag_tag,
             commands::add_ignored_tag,
+            commands::set_flag_note,
             commands::remove_tag,
             commands::clear_tags,
             commands::unmark_range,

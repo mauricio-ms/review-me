@@ -13,6 +13,7 @@ import ConfirmClearHost from "./ConfirmClearHost";
 import DiffBuffer from "./DiffBuffer";
 import FuzzyFinderHost from "./FuzzyFinderHost";
 import LogBuffer from "./LogBuffer";
+import NoteEditorHost from "./NoteEditorHost";
 import OpenRepoHost from "./OpenRepoHost";
 import ProjectBuffer from "./ProjectBuffer";
 import RecentReposHost from "./RecentReposHost";
@@ -116,6 +117,7 @@ export default function AppShell() {
       <CommitPickHost />
       <ConfirmClearHost />
       <CommitReviewedHost />
+      <NoteEditorHost />
       <XrefHost />
       {transientOpen && <CommandTransient />}
       {commandLineOpen && <CommandLine />}

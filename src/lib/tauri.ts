@@ -137,6 +137,16 @@ export function addFlagTag(
   });
 }
 
+/** Set or clear (null / blank) the note on flag `id`, keeping the flag itself. */
+export function setFlagNote(
+  repo: string,
+  scope: ReviewScope,
+  id: string,
+  note: string | null,
+): Promise<TagStore> {
+  return invoke<TagStore>("set_flag_note", { repo, scope, id, note });
+}
+
 export function addIgnoredTag(
   repo: string,
   scope: ReviewScope,

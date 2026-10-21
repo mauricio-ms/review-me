@@ -657,6 +657,48 @@ kbd {
   background: rgba(var(--accent-red-rgb), 0.34);
 }
 
+/* A review note under the hunk (or file) it is about. */
+.diff-note-row {
+  align-items: start;
+  gap: 10px;
+  padding: 4px 14px 4px 56px;
+  margin: 2px 0;
+  background: rgba(var(--accent-violet-rgb), 0.08);
+  box-shadow: inset 2px 0 0 var(--accent-violet);
+  font-size: 0.85em;
+}
+
+.diff-note-row.is-file-note {
+  padding-left: 40px;
+}
+
+.diff-note-row.is-selected {
+  background: rgba(var(--accent-violet-rgb), 0.16);
+  box-shadow: inset 3px 0 0 var(--accent-amber);
+}
+
+.diff-note-glyph {
+  color: var(--accent-violet);
+}
+
+.diff-note-where {
+  flex: 0 0 auto;
+  color: var(--fg-2);
+}
+
+.diff-note-text {
+  min-width: 0;
+  color: var(--fg-0);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.diff-file-notes {
+  color: var(--accent-violet);
+  font-size: 0.78em;
+  font-weight: 400;
+}
+
 /* ---------- log buffer (commits) ---------- */
 
 .log-buffer {
@@ -1520,6 +1562,38 @@ kbd {
 
 .commit-editor-shell .cm-scroller {
   font-family: var(--mono);
+}
+
+/* ---------- note editor ---------- */
+
+.note-editor {
+  width: min(860px, 94vw);
+  height: min(540px, 80vh);
+  min-height: 340px;
+}
+
+.note-target {
+  padding: 34px 20px 0;
+  color: var(--fg-2);
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.note-editor .note-editor-shell {
+  padding-top: 10px;
+}
+
+/* @uiw/react-codemirror wraps the editor in a div of its own; without a height on it,
+   the editor's `height: 100%` resolves to its content and the box collapses. */
+.note-editor-shell > div {
+  height: 100%;
+}
+
+.note-dirty {
+  margin-left: auto;
+  color: var(--accent-amber);
 }
 
 .commit-warning {

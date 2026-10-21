@@ -13,9 +13,11 @@ import {
   addIgnoredTag,
   addReviewedTag,
   clearTags,
+  setFlagNote,
   unmarkRange,
 } from "./tauri";
 import { hunkTarget } from "./coverage";
+import type { NoteEdit } from "../state/notes";
 
 /**
  * The repo and the comparison every mark below belongs to. Reading both together
@@ -91,6 +93,33 @@ export async function addFlag(
   const t = target();
   if (!t) return;
   apply(await addFlagTag(t.repo, t.scope, file, lo, hi, kind, side));
+}
+
+/**
+ * Save a note: onto its flag, or — the first time — by flagging the note's lines with
+ * it. Saving an empty note clears it from an existing flag (the flag stays; `u`
+ * removes it) and creates nothing otherwise. Returns the flag the note is on.
+ */
+export async function saveNote(edit: NoteEdit, text: string): Promise<string | null> {
+  const t = target();
+  if (!t) return null;
+  const note = text.trim() === "" ? null : text.trimEnd();
+  const { file, lo, hi, kind, side } = edit.target;
+  if (edit.flagId) {
+    apply(await setFlagNote(t.repo, t.scope, edit.flagId, note));
+    return edit.flagId;
+  }
+  if (!note) return null;
+  const store = await addFlagTag(t.repo, t.scope, file, lo, hi, kind, side, note, null);
+  apply(store);
+  const created = store.flags.find(
+    (f) =>
+      f.anchor.file === file &&
+      f.anchor.side === side &&
+      f.anchor.startLine === lo &&
+      f.anchor.endLine === hi,
+  );
+  return created?.id ?? null;
 }
 
 export async function addIgnore(

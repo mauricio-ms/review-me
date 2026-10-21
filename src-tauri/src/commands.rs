@@ -180,6 +180,17 @@ pub fn add_ignored_tag(
     )
 }
 
+/// Set or clear the note on a flag in `scope`, keeping the flag itself.
+#[tauri::command]
+pub fn set_flag_note(
+    repo: String,
+    scope: ReviewScope,
+    id: String,
+    note: Option<String>,
+) -> AppResult<TagStore> {
+    tags::set_flag_note(&repo_root(repo)?, &scope, &id, note)
+}
+
 #[tauri::command]
 pub fn remove_tag(repo: String, scope: ReviewScope, id: String) -> AppResult<TagStore> {
     tags::remove(&repo_root(repo)?, &scope, &id)
