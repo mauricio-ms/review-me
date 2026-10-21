@@ -321,6 +321,14 @@ kbd {
   color: var(--accent-violet);
 }
 
+.status-flash {
+  color: var(--accent-violet);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .status-hint {
   color: var(--fg-3);
   display: flex;
@@ -655,6 +663,169 @@ kbd {
 
 .line-removed .diff-word {
   background: rgba(var(--accent-red-rgb), 0.34);
+}
+
+/* A review note under the hunk (or file) it is about. */
+.diff-note-row {
+  align-items: start;
+  gap: 10px;
+  padding: 4px 14px 4px 56px;
+  margin: 2px 0;
+  background: rgba(var(--accent-violet-rgb), 0.08);
+  box-shadow: inset 2px 0 0 var(--accent-violet);
+  font-size: 0.85em;
+}
+
+.diff-note-row.is-file-note {
+  padding-left: 40px;
+}
+
+.diff-note-row.is-selected {
+  background: rgba(var(--accent-violet-rgb), 0.16);
+  box-shadow: inset 3px 0 0 var(--accent-amber);
+}
+
+.diff-note-glyph {
+  color: var(--accent-violet);
+}
+
+.diff-note-where {
+  flex: 0 0 auto;
+  color: var(--fg-2);
+}
+
+.diff-note-text {
+  min-width: 0;
+  color: var(--fg-0);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.diff-file-notes {
+  color: var(--accent-violet);
+  font-size: 0.78em;
+  font-weight: 400;
+}
+
+/* ---------- log buffer (commits) ---------- */
+
+.log-buffer {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-0);
+  font-family: var(--mono);
+}
+
+.log-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 6px 0 40px;
+  font-size: var(--code-font-size);
+  line-height: 1.55;
+}
+
+/* Magit-status preamble: Head / Review / Changes, labels in a fixed column. */
+.log-status {
+  padding: 4px 14px 8px;
+}
+
+.log-status-line {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.log-status-label {
+  flex: 0 0 9ch;
+  color: var(--fg-2);
+}
+
+.log-status-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--fg-0);
+}
+
+.log-status-hint {
+  color: var(--fg-3);
+  font-size: 0.75em;
+}
+
+.log-section-header {
+  margin-top: 4px;
+}
+
+.log-row {
+  gap: 10px;
+}
+
+.log-oid {
+  flex: 0 0 auto;
+  color: var(--fg-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.log-ref {
+  flex: 0 0 auto;
+  padding: 0 4px;
+  border-radius: 2px;
+}
+
+.log-ref.is-local {
+  color: var(--accent-teal);
+}
+
+.log-ref.is-remote {
+  color: var(--accent-green);
+}
+
+.log-ref.is-tag {
+  color: var(--accent-amber);
+}
+
+/* The branch under review, boxed the way magit boxes the current branch. */
+.log-ref.is-current {
+  box-shadow: inset 0 0 0 1px currentColor;
+}
+
+.log-summary {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--fg-1);
+}
+
+.log-review {
+  flex: 0 0 auto;
+  display: inline-flex;
+  gap: 10px;
+  font-size: 0.8em;
+}
+
+.log-progress {
+  color: var(--accent-teal);
+}
+
+.log-notes {
+  color: var(--accent-violet);
+}
+
+.log-meta {
+  flex: 0 0 auto;
+  display: inline-flex;
+  gap: 10px;
+  color: var(--fg-3);
+  font-size: 0.72em;
+}
+
+.log-empty {
+  padding: 6px 14px;
+  color: var(--fg-3);
 }
 
 /* ---------- project buffer ---------- */
@@ -1399,6 +1570,38 @@ kbd {
 
 .commit-editor-shell .cm-scroller {
   font-family: var(--mono);
+}
+
+/* ---------- note editor ---------- */
+
+.note-editor {
+  width: min(860px, 94vw);
+  height: min(540px, 80vh);
+  min-height: 340px;
+}
+
+.note-target {
+  padding: 34px 20px 0;
+  color: var(--fg-2);
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.note-editor .note-editor-shell {
+  padding-top: 10px;
+}
+
+/* @uiw/react-codemirror wraps the editor in a div of its own; without a height on it,
+   the editor's `height: 100%` resolves to its content and the box collapses. */
+.note-editor-shell > div {
+  height: 100%;
+}
+
+.note-dirty {
+  margin-left: auto;
+  color: var(--accent-amber);
 }
 
 .commit-warning {

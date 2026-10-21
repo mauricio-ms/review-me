@@ -1,14 +1,17 @@
 mod branches;
 mod commands;
 mod commits;
+mod coverage;
 mod diff;
 mod error;
 mod fs_browse;
 mod fuzzy;
+mod notes;
 mod queries;
 mod repo;
 mod repo_library;
 mod review_commit;
+mod review_dir;
 mod revision;
 mod tags;
 mod tree;
@@ -23,6 +26,7 @@ pub fn run() {
             commands::compute_diff,
             commands::list_branches,
             commands::list_commits,
+            commands::commit_reviews,
             commands::resolve_commit,
             commands::list_recent_repos,
             commands::forget_repo,
@@ -33,9 +37,11 @@ pub fn run() {
             commands::add_reviewed_tag,
             commands::add_flag_tag,
             commands::add_ignored_tag,
+            commands::set_flag_note,
             commands::remove_tag,
             commands::clear_tags,
             commands::unmark_range,
+            commands::export_notes,
             commands::reviewed_commit_preflight,
             commands::prepare_reviewed_commit,
             commands::abort_reviewed_commit,

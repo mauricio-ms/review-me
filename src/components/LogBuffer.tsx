@@ -1,0 +1,279 @@
+import { useEffect, useRef, useState } from "react";
+
+import { loadMoreLog } from "../lib/log";
+import { enterCommit } from "../lib/open-repo";
+import { timeAgo } from "../lib/time";
+import { useLogStore } from "../state/log";
+import { useRepoStore } from "../state/repo";
+import { useUIStore } from "../state/ui";
+import type { CommitInfo, CommitReview, Decoration } from "../types/repo";
+
+/** Start paging in more history once the cursor is this many rows from the end. */
+const PREFETCH_ROWS = 30;
+/** The same for mouse scrolling: this many pixels from the bottom. */
+const PREFETCH_PX = 600;
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * A commit's review at a glance: `✓` when every change is reviewed or ignored,
+ * otherwise `done/total`, plus its flags and notes. Untouched commits show nothing.
+ */
+function ReviewBadges({ review }: { review: CommitReview | undefined }) {
+  if (!review) return null;
+  const { total, reviewed, ignored, flagged } = review.coverage;
+  const done = reviewed + ignored;
+  return (
+    <span className="log-review">
+      {total > 0 && flagged === 0 && done === total ? (
+        <span className="mark-reviewed" title="every change reviewed">
+          ✓
+        </span>
+      ) : (
+        total > 0 && (
+          <span
+            className="log-progress"
+            title={`${done} of ${total} changes reviewed or ignored`}
+          >
+            {done}/{total}
+          </span>
+        )
+      )}
+      {review.flags > 0 && (
+        <span className="mark-flagged" title={`${review.flags} flagged`}>
+          ⚑ {review.flags}
+        </span>
+      )}
+      {review.notes > 0 && (
+        <span className="log-notes" title={`${review.notes} with a note`}>
+          ✎ {review.notes}
+        </span>
+      )}
+    </span>
+  );
+}
+
+/** A ref decoration; the branch under review is boxed, as magit boxes the current one. */
+function RefLabel({ decoration, current }: { decoration: Decoration; current: boolean }) {
+  return (
+    <span className={`log-ref is-${decoration.kind}${current ? " is-current" : ""}`}>
+      {decoration.name}
+    </span>
+  );
+}
+
+/**
+ * The commits buffer: the review branch's history as a magit-style list. `Enter` opens
+ * the commit under the cursor in the diff buffer (against its first parent) and `q`
+ * there comes back here. Stays mounted while hidden, so the cursor is still on the
+ * commit you left. It is also where a clean checkout opens, having no changes to show.
+ */
+export default function LogBuffer() {
+  const repo = useRepoStore((s) => s.repo);
+  const reviewBranch = useRepoStore((s) => s.reviewBranch);
+  const uncommitted = useRepoStore((s) =>
+    s.comparison.kind === "worktree" ? (s.diff?.files.length ?? 0) : 0,
+  );
+  const commits = useLogStore((s) => s.commits);
+  const reviews = useLogStore((s) => s.reviews);
+  const loading = useLogStore((s) => s.loading);
+  const error = useLogStore((s) => s.error);
+  const complete = useLogStore((s) => s.complete);
+  const activeBuffer = useUIStore((s) => s.activeBuffer);
+  const focusRequest = useUIStore((s) => s.focusRequest);
+
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const rowRefs = useRef(new Map<string, HTMLDivElement>());
+  const pending = useRef<string | null>(null);
+  // Tracked by oid, not index, so a reload (the branch moved, a page arrived) keeps
+  // the cursor on the same commit.
+  const [cursorOid, setCursorOid] = useState<string | null>(null);
+  const [entering, setEntering] = useState<string | null>(null);
+  const [enterError, setEnterError] = useState<string | null>(null);
+
+  const found = cursorOid ? commits.findIndex((c) => c.oid === cursorOid) : -1;
+  const cursor = found >= 0 ? found : 0;
+  const active = activeBuffer === "log";
+
+  useEffect(() => {
+    if (active) rootRef.current?.focus({ preventScroll: true });
+  }, [active, focusRequest]);
+
+  useEffect(() => {
+    if (!active) return;
+    const oid = commits[cursor]?.oid;
+    if (oid) rowRefs.current.get(oid)?.scrollIntoView({ block: "nearest" });
+  }, [active, commits, cursor]);
+
+  useEffect(() => {
+    if (!complete && commits.length > 0 && cursor >= commits.length - PREFETCH_ROWS) {
+      void loadMoreLog();
+    }
+  }, [commits.length, complete, cursor]);
+
+  const moveTo = (index: number) => {
+    const commit = commits[Math.min(Math.max(0, index), commits.length - 1)];
+    if (commit) setCursorOid(commit.oid);
+  };
+
+  const enter = async (commit: CommitInfo | undefined) => {
+    if (!commit || entering) return;
+    setCursorOid(commit.oid);
+    setEntering(commit.oid);
+    setEnterError(null);
+    try {
+      await enterCommit(commit.oid);
+    } catch (e) {
+      setEnterError(errorMessage(e));
+    } finally {
+      setEntering(null);
+    }
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    const key = e.key;
+    if (pending.current === "g") {
+      pending.current = null;
+      if (key === "g") {
+        e.preventDefault();
+        moveTo(0);
+      }
+      return;
+    }
+    switch (key) {
+      case "j":
+      case "ArrowDown":
+        e.preventDefault();
+        moveTo(cursor + 1);
+        break;
+      case "k":
+      case "ArrowUp":
+        e.preventDefault();
+        moveTo(cursor - 1);
+        break;
+      case "G":
+        e.preventDefault();
+        moveTo(commits.length - 1);
+        break;
+      case "g":
+        e.preventDefault();
+        pending.current = key;
+        break;
+      case "Enter":
+        e.preventDefault();
+        void enter(commits[cursor]);
+        break;
+    }
+  };
+
+  const onScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const el = e.currentTarget;
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < PREFETCH_PX) {
+      void loadMoreLog();
+    }
+  };
+
+  if (!repo) return null;
+
+  const isCurrent = (d: Decoration) =>
+    d.kind !== "tag" && reviewBranch != null && d.name === reviewBranch.display;
+  const headCommit = commits.find((c) => c.isHead);
+  // The log lists the review branch, so its first row is that branch's tip.
+  const reviewingElsewhere = reviewBranch != null && reviewBranch.display !== repo.branch;
+  const shownError = enterError ?? error;
+
+  return (
+    <div
+      ref={rootRef}
+      className="buffer log-buffer"
+      tabIndex={0}
+      onKeyDown={onKeyDown}
+    >
+      <div className="diff-header">
+        <span className="diff-header-branch">
+          {reviewBranch?.display ?? repo.branch}
+        </span>
+        <span className="diff-header-count">
+          {commits.length}
+          {complete ? "" : "+"} commit{commits.length === 1 ? "" : "s"}
+        </span>
+        {entering && (
+          <span className="diff-header-status">
+            opening {entering.slice(0, 7)}…
+          </span>
+        )}
+        {loading && !entering && <span className="diff-header-status">loading…</span>}
+        {shownError && <span className="diff-header-error">{shownError}</span>}
+      </div>
+
+      <div className="log-list" onScroll={onScroll}>
+        <div className="log-status">
+          <div className="log-status-line">
+            <span className="log-status-label">Head:</span>
+            <span className="log-ref is-local">{repo.branch}</span>
+            <span className="log-status-text">{headCommit?.summary ?? repo.head}</span>
+          </div>
+          {reviewingElsewhere && (
+            <div className="log-status-line">
+              <span className="log-status-label">Review:</span>
+              <span className="log-ref is-local is-current">{reviewBranch.display}</span>
+              <span className="log-status-text">{commits[0]?.summary ?? ""}</span>
+            </div>
+          )}
+          {uncommitted > 0 && (
+            <div className="log-status-line">
+              <span className="log-status-label">Changes:</span>
+              <span className="log-status-text">
+                {uncommitted} uncommitted file{uncommitted === 1 ? "" : "s"}
+              </span>
+              <span className="log-status-hint">Space b d</span>
+            </div>
+          )}
+        </div>
+
+        <div className="diff-row diff-section-header log-section-header">
+          <span className="diff-section-label">Recent commits</span>
+          <span className="diff-section-count">
+            {commits.length}
+            {complete ? "" : "+"}
+          </span>
+        </div>
+
+        {commits.map((commit, index) => (
+          <div
+            key={commit.oid}
+            ref={(el) => {
+              if (el) rowRefs.current.set(commit.oid, el);
+              else rowRefs.current.delete(commit.oid);
+            }}
+            className={`diff-row log-row${index === cursor ? " is-selected" : ""}`}
+            onClick={() => setCursorOid(commit.oid)}
+            onDoubleClick={() => void enter(commit)}
+          >
+            <span className="log-oid">{commit.shortOid}</span>
+            {commit.refs.map((d) => (
+              <RefLabel key={`${d.kind}:${d.name}`} decoration={d} current={isCurrent(d)} />
+            ))}
+            <span className="log-summary">{commit.summary}</span>
+            <ReviewBadges review={reviews[commit.oid]} />
+            <span className="log-meta">
+              {commit.isMerge && <span className="commit-badge is-merge">merge</span>}
+              <span className="log-author">{commit.authorName}</span>
+              <span className="log-when">{timeAgo(commit.timestamp)}</span>
+            </span>
+          </div>
+        ))}
+
+        {commits.length === 0 && !loading && (
+          <div className="log-empty">{error ? "no history to show" : "no commits yet"}</div>
+        )}
+        {!complete && commits.length > 0 && (
+          <div className="log-empty">{loading ? "loading more…" : "…"}</div>
+        )}
+      </div>
+    </div>
+  );
+}

@@ -8,10 +8,10 @@ use sha2::{Digest, Sha256};
 
 use crate::branches;
 use crate::commits;
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use crate::repo;
+use crate::review_dir;
 
-const TAGS_DIR: &str = ".review-me";
 const TAGS_FILE: &str = "tags.json";
 const CONTEXT_LINES: usize = 3;
 /// How far (in lines) to search around the original position when a tag's content
@@ -285,6 +285,20 @@ pub fn load(root: &Path, scope: &ReviewScope) -> AppResult<TagStore> {
     Ok(store)
 }
 
+/// Every scope that holds at least one mark, read without re-anchoring anything — the
+/// cheap first pass for summaries that only care about scopes someone has touched.
+pub fn marked_scopes(root: &Path) -> AppResult<HashSet<ReviewScope>> {
+    let store = read(root)?;
+    Ok(store
+        .reviewed
+        .iter()
+        .map(|t| &t.anchor)
+        .chain(store.flags.iter().map(|t| &t.anchor))
+        .chain(store.ignored.iter().map(|t| &t.anchor))
+        .map(|anchor| anchor.scope.clone())
+        .collect())
+}
+
 pub fn add_reviewed(
     root: &Path,
     scope: &ReviewScope,
@@ -358,6 +372,26 @@ pub fn add_ignored(
         created_at: now_millis(),
         note: None,
     });
+    write(root, &store)?;
+    load(root, scope)
+}
+
+/// Set (or, with `None` or only whitespace, clear) the note on flag `id` in `scope`.
+/// The flag keeps its anchor, id and creation time — editing what you wrote about some
+/// lines isn't re-flagging them.
+pub fn set_flag_note(
+    root: &Path,
+    scope: &ReviewScope,
+    id: &str,
+    note: Option<String>,
+) -> AppResult<TagStore> {
+    let mut store = read(root)?;
+    let flag = store
+        .flags
+        .iter_mut()
+        .find(|t| t.id == id && t.anchor.scope == *scope)
+        .ok_or_else(|| AppError::Tag(format!("no flag {id} in this comparison")))?;
+    flag.note = note.filter(|n| !n.trim().is_empty());
     write(root, &store)?;
     load(root, scope)
 }
@@ -447,7 +481,7 @@ fn same_range(
 }
 
 fn tags_path(root: &Path) -> PathBuf {
-    root.join(TAGS_DIR).join(TAGS_FILE)
+    review_dir::path(root).join(TAGS_FILE)
 }
 
 fn read(root: &Path) -> AppResult<TagStore> {
@@ -463,11 +497,8 @@ fn read(root: &Path) -> AppResult<TagStore> {
 }
 
 fn write(root: &Path, store: &TagStore) -> AppResult<()> {
-    let path = tags_path(root);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(&path, serde_json::to_string_pretty(store)?)?;
+    review_dir::ensure(root)?;
+    std::fs::write(tags_path(root), serde_json::to_string_pretty(store)?)?;
     Ok(())
 }
 
@@ -998,8 +1029,8 @@ mod tests {
           }],
           "flags": [], "ignored": []
         }"#;
-        fs::create_dir_all(root.join(TAGS_DIR)).unwrap();
-        fs::write(root.join(TAGS_DIR).join(TAGS_FILE), legacy).unwrap();
+        fs::create_dir_all(review_dir::path(root)).unwrap();
+        fs::write(tags_path(root), legacy).unwrap();
 
         let store = load(root, WT).unwrap();
         assert_eq!(store.reviewed.len(), 1, "legacy tag survives migration");
@@ -1379,5 +1410,49 @@ mod tests {
         // The working tree matches the commit, so worktree scope sees no change —
         // proving the oids came from the two trees.
         assert!(load(root, WT).unwrap().reviewed.is_empty());
+    }
+
+    #[test]
+    fn set_flag_note_edits_in_place_and_clears_blank_notes() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        init_repo(root);
+        fs::write(root.join("a.txt"), "one\ntwo\n").unwrap();
+        git(root, &["add", "."]);
+        git(root, &["commit", "-qm", "init"]);
+        fs::write(root.join("a.txt"), "one\nTWO\nthree\n").unwrap();
+        git(root, &["commit", "-qam", "edit"]);
+        let scope = commit_scope(root, "HEAD");
+
+        let store = add_flag(
+            root,
+            &scope,
+            "a.txt",
+            2,
+            3,
+            AnchorKind::Range,
+            AnchorSide::New,
+            None,
+            Some("high".into()),
+        )
+        .unwrap();
+        let before = store.flags[0].clone();
+
+        let store =
+            set_flag_note(root, &scope, &before.id, Some("use the shared client".into()))
+                .unwrap();
+        let after = &store.flags[0];
+        assert_eq!(after.note.as_deref(), Some("use the shared client"));
+        assert_eq!(after.id, before.id);
+        assert_eq!(after.created_at, before.created_at);
+        assert_eq!(after.severity.as_deref(), Some("high"));
+        assert_eq!((after.anchor.start_line, after.anchor.end_line), (2, 3));
+
+        let store = set_flag_note(root, &scope, &before.id, Some(" \n ".into())).unwrap();
+        assert!(store.flags[0].note.is_none(), "a blank note is cleared");
+
+        // A flag is only reachable from its own comparison.
+        assert!(set_flag_note(root, WT, &before.id, Some("x".into())).is_err());
+        assert!(set_flag_note(root, &scope, "flag:nope", Some("x".into())).is_err());
     }
 }

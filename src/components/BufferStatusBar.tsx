@@ -48,6 +48,7 @@ export default function BufferStatusBar() {
   const ignored = useTagsStore((s) => s.ignored);
   const activeBuffer = useUIStore((s) => s.activeBuffer);
   const vimMode = useUIStore((s) => s.vimMode);
+  const flash = useUIStore((s) => s.flash);
 
   const files = diff?.files ?? [];
   const { done, total } = reviewProgress(files, reviewed);
@@ -101,10 +102,25 @@ export default function BufferStatusBar() {
           )}
         </>
       )}
+      {flash && <span className="status-segment status-flash">{flash}</span>}
       <span className="status-spacer" />
       <span className="status-segment status-hint">
-        <kbd>r</kbd> review · <kbd>f</kbd> flag · <kbd>i</kbd> ignore ·{" "}
-        <kbd>u</kbd> unmark · <kbd>Space</kbd> palette
+        {activeBuffer === "log" ? (
+          <>
+            <kbd>↵</kbd> open commit · <kbd>Space</kbd> palette
+          </>
+        ) : (
+          <>
+            <kbd>r</kbd> review · <kbd>f</kbd> flag · <kbd>i</kbd> ignore ·{" "}
+            <kbd>u</kbd> unmark ·{" "}
+            {activeBuffer === "diff" && comparison?.kind === "commit" && (
+              <>
+                <kbd>q</kbd> commits ·{" "}
+              </>
+            )}
+            <kbd>Space</kbd> palette
+          </>
+        )}
       </span>
     </div>
   );

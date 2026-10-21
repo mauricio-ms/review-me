@@ -8,6 +8,7 @@ use crate::branches::{self, ResolvedBranches};
 use crate::commits::{self, ResolvedCommit};
 use crate::error::AppResult;
 use crate::repo;
+use crate::review_dir;
 
 /// How a branch comparison picks the old side. Only `MergeBase` exists today
 /// (`git diff base...target`), but the tagged shape leaves room for `Direct`.
@@ -180,6 +181,18 @@ fn compute_worktree(repo: &Repository) -> AppResult<DiffSummary> {
 
     let mut files = Vec::new();
     for idx in 0..diff.deltas().len() {
+        // review-me's own state is never part of the review. Writing it excludes it
+        // from git, but a repo marked before that existed still has it untracked.
+        let own_state = diff.get_delta(idx).is_some_and(|delta| {
+            delta.status() == Delta::Untracked
+                && delta
+                    .new_file()
+                    .path()
+                    .is_some_and(|p| review_dir::contains(&path_string(p)))
+        });
+        if own_state {
+            continue;
+        }
         let file = changed_file(&diff, idx, Some(&staged), &|_delta, path| {
             path_change_is_binary(repo, &root, path)
         })?;
@@ -533,6 +546,28 @@ mod tests {
             .expect("fresh.txt in diff");
         assert!(matches!(fresh.status, ChangeStatus::Added));
         assert_eq!(fresh.added_lines, 1);
+    }
+
+    #[test]
+    fn leaves_review_me_state_out_of_the_worktree_diff() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path();
+        run(path, &["init", "-q", "-b", "master"]);
+        fs::write(path.join("kept.txt"), "one\n").unwrap();
+        run(path, &["add", "."]);
+        run(path, &["commit", "-qm", "init"]);
+
+        // Written before review-me excluded its folder: plainly untracked to git.
+        fs::create_dir_all(path.join(".review-me/notes")).unwrap();
+        fs::write(path.join(".review-me/tags.json"), "{}").unwrap();
+        fs::write(path.join(".review-me/notes/README.md"), "# notes\n").unwrap();
+        // Lookalikes are ordinary files.
+        fs::write(path.join(".review-meta"), "keep\n").unwrap();
+
+        let repo = Repository::open(path).unwrap();
+        let summary = compute(&repo, &DiffSpec::Worktree).unwrap();
+        let paths: Vec<&str> = summary.files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths, vec![".review-meta"]);
     }
 
     #[test]

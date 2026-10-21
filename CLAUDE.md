@@ -6,8 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **review-me** is a Tauri v2 desktop tool for reviewing code produced by LLM agents:
 a magit-style, vim-driven UI over a git diff — working-tree-vs-HEAD, a
-`base...target` branch comparison, or a single commit vs its first parent — with
-reviewed/flag tagging, a fuzzy file finder,
+`base...target` branch comparison, or a single commit vs its first parent, entered from a
+magit-style commits buffer — with reviewed/flag tagging, review notes exported as
+Markdown for an LLM to act on, a fuzzy file finder,
 an IDE-like project mode, and tree-sitter cross-references.
 The stack and UX deliberately mirror the sibling app at
 `/home/mms/development/projects/video-studio` (buffer model, command palette, neo-picker
@@ -42,21 +43,25 @@ it receives `repo` (the repo root path), opens the repo fresh via `repo::open` (
 with libgit2), and returns. The one exception is `xref.rs`, which caches a parsed
 symbol index in a global `Mutex`.
 - `repo.rs` open/validate, `RepoInfo` (incl. `review_branch_ref`, the branch the UI starts reviewing). `branches.rs` local/remote ref discovery + `resolve()` → (base tip, target tip, merge base).
-- `commits.rs` `list(repo, ref, limit)` → newest-first `CommitInfo`s and `resolve(repo, rev)` → (oid, **first** parent oid, info). Any revision resolves (full oid, abbreviation, `HEAD~2`), but only full oids may reach a `DiffSpec`/`ReviewScope`.
+- `commits.rs` `list(repo, ref, skip, limit)` → a newest-first page of `CommitInfo`s, each with its ref `Decoration`s (filled by `list` only), and `resolve(repo, rev)` → (oid, **first** parent oid, info, full message). Any revision resolves (full oid, abbreviation, `HEAD~2`), but only full oids may reach a `DiffSpec`/`ReviewScope`.
 - `diff.rs` `compute(repo, &DiffSpec)` → `DiffSummary { comparison, files }` (`ChangedFile`/`Hunk`/`DiffLine`). See "Comparisons" below.
 - `revision.rs` `ProjectSource` (worktree | commit) and tree-backed content/listing/file-list reads.
 - `tags.rs` review/flag persistence + **anchoring** (see below). `tree.rs` ignore-aware dir listing. `fuzzy.rs` nucleo-matcher file ranking.
+- `coverage.rs` review progress over a computed diff (`summarize`, `commit_reviews` for the log's rows) and the covers/overlaps helpers `review_commit.rs` stages by — the Rust twin of `src/lib/coverage.ts`; keep the two in step.
+- `notes.rs` the Markdown export of review notes (see "Notes" below). `review_dir.rs` owns `.review-me/`: every write goes through `ensure`, which also adds it to `.git/info/exclude`.
 - `queries.rs` + `xref.rs` tree-sitter symbol index and find-definition/references.
 
-**Frontend (`src/`)** — `AppShell.tsx` keeps both buffers (`DiffBuffer`, `ProjectBuffer`)
-mounted and toggles visibility with `display:none` (preserves cursor/scroll). A single
-**`components/useCommands.ts`** registry feeds both the `Space` transient palette
-(`CommandTransient`) and the `:` command line (`CommandLine`); commands carry a `buffer`
-scope and chord `prefix`/`key`. Modal pickers (open-repo, recent, fuzzy, checkout-branch,
-branch-compare, commit-pick, xref) are gated
+**Frontend (`src/`)** — `AppShell.tsx` keeps all three buffers (`DiffBuffer`, `LogBuffer`,
+`ProjectBuffer`) mounted and toggles visibility with `display:none` (preserves
+cursor/scroll). A single **`components/useCommands.ts`** registry feeds both the `Space`
+transient palette (`CommandTransient`) and the `:` command line (`CommandLine`); commands
+carry a `buffer` scope and chord `prefix`/`key`, and `palette: false` keeps one out of the
+palette (`:show`, `:note`, `:export` are command-line only — the user wants no new
+chords for them). Modal pickers (open-repo, recent, fuzzy, checkout-branch,
+branch-compare, commit-pick, xref) and the modal editors (commit message, note) are gated
 by `useUIStore.picker` or a dedicated store and use `useModalFocus`.
 
-**State** is Zustand in `src/state/` (`ui`, `repo`, `tags`, `project`, `xref`). Cross-cutting
+**State** is Zustand in `src/state/` (`ui`, `repo`, `tags`, `log`, `notes`, `project`, `xref`). Cross-cutting
 conventions that will bite if ignored:
 - **Wire format:** Rust structs are `#[serde(rename_all = "camelCase")]`; `AppError`
   serializes to a string. serde emits `null` for `Option::None`, so TS types use `| null`
@@ -68,9 +73,10 @@ conventions that will bite if ignored:
 
 `useRepoStore.reviewBranch` (`ReviewBranch { ref, display }`) is the app's own notion of a
 checkout and the **single place a branch is chosen**: `:compare` collects only a base and
-targets it, `:log` lists its history. It is seeded on open from `RepoInfo.reviewBranchRef`
-(HEAD's branch, else the repo's default branch, else `None` — a repo with no branches
-disables both commands) and changed by `:checkout` (`Space g s`, `CheckoutBranchHost`).
+targets it, the commits buffer (`:log`) lists its history. It is seeded on open from
+`RepoInfo.reviewBranchRef` (HEAD's branch, else the repo's default branch, else `None` — a
+repo with no branches disables `:compare`, and the log lists `HEAD`) and changed by
+`:checkout` (`Space g s`, `CheckoutBranchHost`).
 
 It is **app-level only**: nothing fetches, checks out, stages, or writes to the working
 tree, so a branch that isn't checked out reviews like any other. Worktree mode still means
@@ -112,6 +118,27 @@ request ticket. `useRepoStore.comparison` is the applied spec; `comparisonEpoch`
 when its identity changes, which resets folds and the diff cursor. Opening a repo always
 resets to worktree; `refresh` recomputes whatever is applied (a branch pair can move under
 it; a commit spec is immutable, so only its tags are re-read).
+
+### The commits buffer
+
+`LogBuffer.tsx` (buffer `"log"`) is the review branch's history as a magit-status-style
+list — Head/Review/Changes lines, then "Recent commits" with decorations — and the way
+into commit review: `Enter` calls `open-repo.ts`'s **`enterCommit`** (applies a commit
+spec, switches to the diff buffer), and `q` in the diff buffer calls **`leaveCommit`**
+(back to the log, refresh that row's review, re-apply the worktree comparison so the diff
+buffer and project mode mean the current changes again). Staying mounted is what puts you
+back on the same row; the cursor is tracked by **oid**, so reloads don't move it.
+
+`useLogStore` holds the listed `ref` (`lib/log.ts`'s `logRef()`: the review branch, else
+`HEAD`), the pages loaded so far, and `reviews` by oid. `loadLog` reloads page one and is
+called whenever the log is shown, on `refresh`, and when `switchReviewBranch` changes the
+branch; `loadMoreLog` pages (`skip`) as the cursor or scrollbar nears the end. Row progress
+comes from `commit_reviews`, which only computes a diff for commits with a mark in their
+scope (`tags::marked_scopes`) — an untouched history costs nothing.
+
+`openRepoByPath` lands on the log when the freshly applied worktree diff is empty (and
+the repo has a HEAD); a dirty tree lands on the diff buffer. Only *opening* chooses — a
+refresh never moves you, which is why the diff buffer's clean state still exists.
 
 ### The diff buffer is NOT CodeMirror
 
@@ -173,6 +200,36 @@ reviewed binary files via index add/remove; it loads **worktree-scoped tags only
 already committed. NB: libgit2's `DiffFile::is_binary()` is
 unreliable before patches are generated, so binary detection uses
 `diff::path_change_is_binary` (NUL-byte heuristic over HEAD blob + working file).
+
+`.review-me/` is review-me's own state inside the reviewed repo and must never look like
+part of the project: `review_dir::ensure` (called by every write) appends `/.review-me/`
+to the repo's `.git/info/exclude` — the *local* ignore file, never the project's
+`.gitignore` — resolving the common git dir for linked worktrees, and `compute_worktree`
+also skips untracked paths under it for repos marked before that existed.
+
+### Notes
+
+A **note** is a flag's `note`: a fix left for later, written while reviewing a commit.
+There is no separate store — notes ride on flags, so they get anchoring, the Flagged
+section and `u` for free. `:note` (`lib/notes.ts`) reads the diff buffer's cursor or
+selection through `lib/diff-view.ts` (the diff-buffer twin of `project-view.ts`) and opens
+`NoteEditorHost` on the flag found there (`flagAt`: same range, else overlapping), or on
+bare lines that its first save flags (`review-actions.ts`'s `saveNote`). Existing notes
+are edited in place by `set_flag_note` (same id/anchor/`createdAt`; blank clears). Notes
+are commit-scope only (`notesAvailable`). The diff buffer renders each as a `note` row
+under the first hunk it touches (or under the file row), and a note row's scope is its
+flag's lines.
+
+`notes.rs` exports them as Markdown, a **projection** never read back: every command
+that can change a commit's flags (`add_flag_tag`, `set_flag_note`, `remove_tag`,
+`clear_tags`, `unmark_range`) calls `commands.rs`'s `sync_notes`, which rewrites
+`.review-me/notes/commits/<full-oid>.md` (or removes it) and `notes/README.md`; a failed
+export is logged, never fatal. `:export` writes `notes/branches/<branch>.md` — every note
+reachable from the review branch, oldest first. Rendering must stay **deterministic**
+(dates from the commit, write only when content changes) so an unchanged review never
+churns; excerpts are the commit's own diff lines over the note's range, or tree lines for
+code the commit didn't touch, because the reader works at a later HEAD where line numbers
+have drifted.
 
 ### Project mode is revision-aware
 
@@ -274,11 +331,18 @@ the stack whenever the source changes.
 - Leader keys (`Space`/`:`) inside the viewer must check vim insert mode and type a
   literal char there — see `editor/cm-shared.ts` (`inVimInsertMode`). Don't rely on keymap
   precedence; read the authoritative vim state from the view.
+- codemirror-vim's ex commands are **global**: modal editors share `editor/vim-modal.ts`
+  and take turns with `claimModalEditor` (its release only clears a still-current claim).
+- In a `@uiw/react-codemirror` modal editor (see `NoteEditorHost`): keep `basicSetup` and
+  `extensions` identity-stable (the wrapper reconfigures on change), prefer an uncontrolled
+  `value`, and turn **autocompletion off** for prose — with Markdown loaded, a pending
+  completion's `Escape` binding swallows a quick `<Esc>` out of insert mode. Put
+  `Prec.highest(vim())` first so vim reads keys before any other keymap.
 
 ## Testing
 
 Logic is unit-tested in Rust against `tempfile` git fixtures (`diff`, `tags`, `commits`,
-`fuzzy`, `xref`, `repo_library`). UI/interaction is covered by the manual checklist in
+`coverage`, `notes`, `review_dir`, `fuzzy`, `xref`, `repo_library`). UI/interaction is covered by the manual checklist in
 `MANUAL_TESTS.md` (fixture setup + per-milestone scenarios) — keep it current when adding
 features.
 

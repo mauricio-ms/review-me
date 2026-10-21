@@ -1,10 +1,13 @@
 import { useCallback, useState } from "react";
 
+import { showLog } from "../lib/log";
+import { exportNotes, openNoteEditor } from "../lib/notes";
 import { applyComparison, refreshDiff } from "../lib/open-repo";
 import { projectSelectionRange } from "../lib/project-view";
 import { addFlag } from "../lib/review-actions";
 import { findUsages, gotoDefinition, jumpBack } from "../lib/xref";
 import { useJumpStore } from "../state/jumps";
+import { useLogStore } from "../state/log";
 import { useProjectStore } from "../state/project";
 import { useRepoStore } from "../state/repo";
 import { useTagsStore } from "../state/tags";
@@ -31,6 +34,8 @@ export type AppCommand = {
   key: string;
   /** If set, the command is only available while this buffer is active. */
   buffer?: BufferName;
+  /** `false` keeps it out of the `Space` palette: reachable from `:` only. */
+  palette?: boolean;
   enabled: boolean;
   run: () => void | Promise<void>;
 };
@@ -96,6 +101,7 @@ export function useCommands(rawClose: CommandClose): {
     close({ restoreFocus: false });
     closeRepo();
     useTagsStore.getState().clear();
+    useLogStore.getState().reset();
     useProjectStore.getState().reset();
     requestFocus();
   }, [close, closeRepo, requestFocus]);
@@ -124,6 +130,11 @@ export function useCommands(rawClose: CommandClose): {
     close({ restoreFocus: false });
     openPicker("commitPick");
   }, [close, openPicker]);
+
+  const handleShowLog = useCallback(() => {
+    close({ restoreFocus: false });
+    showLog();
+  }, [close]);
 
   const handleCheckoutBranch = useCallback(() => {
     close({ restoreFocus: false });
@@ -158,6 +169,17 @@ export function useCommands(rawClose: CommandClose): {
       requestFocus();
     }
   }, [close, requestFocus]);
+
+  const handleNote = useCallback(() => {
+    close({ restoreFocus: false });
+    // Nothing to annotate on a section header: hand focus straight back.
+    if (!openNoteEditor()) requestFocus();
+  }, [close, requestFocus]);
+
+  const handleExportNotes = useCallback(() => {
+    close();
+    void exportNotes();
+  }, [close]);
 
   const handleGotoDef = useCallback(() => {
     close({ restoreFocus: false });
@@ -253,6 +275,36 @@ export function useCommands(rawClose: CommandClose): {
       run: handleProjectFlag,
     },
     {
+      id: "note",
+      name: "note",
+      aliases: ["annotate", "comment", "todo"],
+      label:
+        comparison.kind === "commit"
+          ? "note on the lines at the cursor (a fix for later)"
+          : "note (while reviewing a commit)",
+      group: "tag",
+      prefix: "t",
+      key: "",
+      buffer: "diff",
+      // Notes are a `:note` away; no chord, in keeping with the commits buffer.
+      palette: false,
+      // A note is exported per commit, so it only exists while reviewing one.
+      enabled: !!repo && comparison.kind === "commit",
+      run: handleNote,
+    },
+    {
+      id: "export-notes",
+      name: "export",
+      aliases: ["notes", "export-notes"],
+      label: `export notes on ${reviewBranch?.display ?? "HEAD"} to Markdown`,
+      group: "tag",
+      prefix: "t",
+      key: "",
+      palette: false,
+      enabled: !!repo,
+      run: handleExportNotes,
+    },
+    {
       id: "goto-def",
       name: "definition",
       aliases: ["def", "gd"],
@@ -329,16 +381,28 @@ export function useCommands(rawClose: CommandClose): {
       run: handleCompareBranches,
     },
     {
-      id: "commit-diff",
+      id: "log",
       name: "log",
-      aliases: ["commits", "show", "revision"],
-      label: reviewBranch
-        ? `review a commit on ${reviewBranch.display}`
-        : "review a commit (no branch to review)",
+      aliases: ["commits", "history"],
+      label: `commits on ${reviewBranch?.display ?? "HEAD"}`,
       group: "git",
       prefix: "g",
       key: "l",
-      enabled: !!repo && !!reviewBranch,
+      enabled: !!repo,
+      run: handleShowLog,
+    },
+    {
+      id: "commit-diff",
+      name: "show",
+      aliases: ["revision", "sha"],
+      label: "review a commit by sha or subject",
+      group: "git",
+      prefix: "g",
+      key: "",
+      // The log is the way into a commit; this picker remains for searching and for
+      // a sha outside the listed history.
+      palette: false,
+      enabled: !!repo,
       run: handlePickCommit,
     },
     {

@@ -1,11 +1,13 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::branches::{self, BranchInfo};
 use crate::commits::{self, CommitInfo};
+use crate::coverage::{self, CommitReview};
 use crate::diff::{self, DiffSpec, DiffSummary};
 use crate::error::AppResult;
 use crate::fs_browse::{self, DirectoryListing, FileSystemListing};
 use crate::fuzzy::{self, FileMatch};
+use crate::notes::{self, NotesExport};
 use crate::repo::{self, RepoInfo};
 use crate::repo_library::{self, RememberedRepo};
 use crate::revision::{self, ProjectSource};
@@ -19,6 +21,17 @@ use crate::xref::{self, IndexStats, SymbolRef, XrefResult};
 /// Resolve and validate the repo at `repo`, returning its canonical working-dir root.
 fn repo_root(repo: String) -> AppResult<PathBuf> {
     repo::root(&repo::open(&PathBuf::from(repo))?)
+}
+
+/// After a mark changes in a commit's scope, regenerate that commit's exported notes.
+/// The tag store is the source of truth and the write already succeeded, so a failed
+/// export is logged rather than failing the command.
+fn sync_notes(root: &Path, scope: &ReviewScope) {
+    if let ReviewScope::Commit { oid } = scope {
+        if let Err(e) = notes::sync_commit(root, oid) {
+            eprintln!("failed to export notes for {oid}: {e}");
+        }
+    }
 }
 
 /// Open (discover) the git repo at `path`, remember it in the recent list, and
@@ -48,11 +61,25 @@ pub fn list_branches(repo: String) -> AppResult<Vec<BranchInfo>> {
     branches::list(&repository)
 }
 
-/// `ref_name`'s history, newest first, for the commit picker's second stage.
+/// A page of `ref_name`'s history, newest first, for the commits buffer and the commit
+/// picker.
 #[tauri::command]
-pub fn list_commits(repo: String, ref_name: String, limit: u32) -> AppResult<Vec<CommitInfo>> {
+pub fn list_commits(
+    repo: String,
+    ref_name: String,
+    skip: u32,
+    limit: u32,
+) -> AppResult<Vec<CommitInfo>> {
     let repository = repo::open(&PathBuf::from(repo))?;
-    commits::list(&repository, &ref_name, limit as usize)
+    commits::list(&repository, &ref_name, skip as usize, limit as usize)
+}
+
+/// Review progress for whichever of `oids` have been marked, for the commits buffer.
+#[tauri::command]
+pub fn commit_reviews(repo: String, oids: Vec<String>) -> AppResult<Vec<CommitReview>> {
+    let repository = repo::open(&PathBuf::from(repo))?;
+    let root = repo::root(&repository)?;
+    coverage::commit_reviews(&repository, &root, &oids)
 }
 
 /// Resolve a typed revision (abbreviated sha, `HEAD~2`, a ref) to a full commit, so
@@ -131,17 +158,12 @@ pub fn add_flag_tag(
     note: Option<String>,
     severity: Option<String>,
 ) -> AppResult<TagStore> {
-    tags::add_flag(
-        &repo_root(repo)?,
-        &scope,
-        &file,
-        start_line,
-        end_line,
-        kind,
-        side,
-        note,
-        severity,
-    )
+    let root = repo_root(repo)?;
+    let store = tags::add_flag(
+        &root, &scope, &file, start_line, end_line, kind, side, note, severity,
+    )?;
+    sync_notes(&root, &scope);
+    Ok(store)
 }
 
 #[tauri::command]
@@ -165,16 +187,36 @@ pub fn add_ignored_tag(
     )
 }
 
+/// Set or clear the note on a flag in `scope`, keeping the flag itself.
+#[tauri::command]
+pub fn set_flag_note(
+    repo: String,
+    scope: ReviewScope,
+    id: String,
+    note: Option<String>,
+) -> AppResult<TagStore> {
+    let root = repo_root(repo)?;
+    let store = tags::set_flag_note(&root, &scope, &id, note)?;
+    sync_notes(&root, &scope);
+    Ok(store)
+}
+
 #[tauri::command]
 pub fn remove_tag(repo: String, scope: ReviewScope, id: String) -> AppResult<TagStore> {
-    tags::remove(&repo_root(repo)?, &scope, &id)
+    let root = repo_root(repo)?;
+    let store = tags::remove(&root, &scope, &id)?;
+    sync_notes(&root, &scope);
+    Ok(store)
 }
 
 /// Remove every reviewed, flag, and ignore tag in the active comparison. Marks made
 /// against other comparisons are untouched.
 #[tauri::command]
 pub fn clear_tags(repo: String, scope: ReviewScope) -> AppResult<TagStore> {
-    tags::clear_scope(&repo_root(repo)?, &scope)
+    let root = repo_root(repo)?;
+    let store = tags::clear_scope(&root, &scope)?;
+    sync_notes(&root, &scope);
+    Ok(store)
 }
 
 /// Fuzzy-rank `source`'s files for the file finder.
@@ -257,7 +299,19 @@ pub fn unmark_range(
     end_line: u32,
     side: AnchorSide,
 ) -> AppResult<TagStore> {
-    tags::unmark_range(&repo_root(repo)?, &scope, &file, start_line, end_line, side)
+    let root = repo_root(repo)?;
+    let store = tags::unmark_range(&root, &scope, &file, start_line, end_line, side)?;
+    sync_notes(&root, &scope);
+    Ok(store)
+}
+
+/// `:export`: write every note on commits reachable from `ref_name` into one Markdown
+/// file under `.review-me/notes/branches/`.
+#[tauri::command]
+pub fn export_notes(repo: String, ref_name: String) -> AppResult<NotesExport> {
+    let repository = repo::open(&PathBuf::from(repo))?;
+    let root = repo::root(&repository)?;
+    notes::export(&repository, &root, &ref_name)
 }
 
 #[tauri::command]

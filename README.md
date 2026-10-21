@@ -41,9 +41,13 @@ Reviewing agent-generated code has a different shape than reviewing a human PR:
 - **Branch comparison** — review that branch's whole body of work (`master...feature`)
   by choosing only what to compare it against. Project mode follows: files open at the
   compared revision, not whatever happens to be checked out.
-- **Commit review** — step through the review branch's history and review one commit's
-  change (`git show` semantics). Its marks are keyed to the commit's oid, so they can
-  never drift and never mix with the branch-wide review.
+- **Commit review** — a magit-style **commits buffer** lists the review branch's history;
+  enter a commit to review its change (`git show` semantics), `q` to come back to the
+  list, where each row shows how far its review got. Marks are keyed to the commit's
+  oid, so they can never drift and never mix with the branch-wide review.
+- **Notes for later** — `:note` leaves a Markdown note on the lines of a commit: a fix to
+  make later, typically by an LLM. Every commit's notes are kept as structured Markdown
+  under `.review-me/notes/`, and `:export` bundles a whole branch's into one file.
 - **Fuzzy file finder** — jump to any (non-ignored) file in the repo.
 - **Project mode** — a read-only, IDE-like browser over the *entire* repo, not just the
   changed files. You can't mark things reviewed here (reviewing is diff-only), but you can
@@ -58,14 +62,18 @@ files → hunks → lines, with a `Space` transient palette and a `:` command li
 
 ## Core concepts
 
-### Two buffers
+### Three buffers
 
-Both stay mounted; you toggle between them and keep your cursor/scroll position.
+All stay mounted; you switch between them and keep your cursor/scroll position.
 
 | Buffer | What it is | Tagging |
 | --- | --- | --- |
-| **Diff** (default) | The active comparison as a navigable file/hunk/line list. | Review **and** flag |
+| **Diff** | The active comparison as a navigable file/hunk/line list. | Review, flag **and** note |
+| **Commits** | The review branch's history, magit-style; `Enter` opens a commit in the diff buffer. | — |
 | **Project** | Read-only file tree + syntax-highlighted viewer over the whole repo, at the compared revision. | Flag only |
+
+Opening a repository lands on the diff buffer when the working tree has uncommitted
+changes, and on the commits buffer when it's clean (there would be nothing to diff).
 
 ### The branch under review
 
@@ -82,7 +90,7 @@ amber — a reminder that the working-tree diff still belongs to the real checko
 Both committed-history views derive from it, so you name a branch once:
 
 - `:compare` asks only for a **base** and shows `base...reviewBranch`.
-- `:log` lists the **review branch's** history.
+- `:log` (the commits buffer) lists the **review branch's** history.
 
 Switching while comparing branches re-targets the comparison, so you can walk several
 branches against the same base. (If the new branch *is* that base, there's nothing to
@@ -97,7 +105,7 @@ status bar:
 | --- | --- | --- |
 | **Working tree** (default) | Everything uncommitted vs `HEAD`, staged or not, including untracked files. | `Space g w` / `:worktree` |
 | **Branches** | `git diff base...reviewBranch` — the review branch's work since it forked from the base. | `Space g b` / `:compare` |
-| **Commit** | `git show <commit>` — one commit of the review branch against its first parent. | `Space g l` / `:log` |
+| **Commit** | `git show <commit>` — one commit of the review branch against its first parent. | `Enter` in the commits buffer (`Space g l` / `:log`) |
 
 Both committed-history modes are strictly read-only: they never fetch, check out, stage,
 or write to the working tree. Only refs and objects your clone already has are offered,
@@ -107,18 +115,24 @@ and a dirty checkout can't affect what you see. Because both sides are already c
 Merges are reviewed against their **first parent** (never as a combined diff), and a root
 commit — having no parent — reads as all additions.
 
-Opening a repository always starts on the working-tree diff; `:refresh` recomputes
-whichever comparison is active (picking up new commits on either branch; a commit
-comparison is immutable, so only its marks are re-read).
+Opening a repository always starts on the working-tree diff (shown in the commits buffer
+instead when there is none); `:refresh` recomputes whichever comparison is active (picking
+up new commits on either branch; a commit comparison is immutable, so only its marks are
+re-read) and reloads the commits buffer.
 
 ### Reviewed vs. flagged
 
 - **Reviewed (`✓`)** — "I have checked this region." Fundamentally per-hunk; file- and
   line-level coverage is *derived*, not stored. Diff buffer only.
 - **Flag (`⚑`)** — "Scrutinize this later." Works on the same scopes (file / hunk / line
-  range), and is available in *both* buffers.
+  range), and is available in the diff and project buffers.
+- **Note (`✎`)** — a flag that says what to fix, written with `:note` while reviewing a
+  commit (see [Notes](#notes)).
 
-Tags are stored in `<repo>/.review-me/tags.json` and **anchored** to the file's current
+Tags are stored in `<repo>/.review-me/tags.json` — a folder review-me adds to the repo's
+`.git/info/exclude`, git's *local* ignore file, so it never shows up in `git status`, in
+the diff, or in an agent's `git add -A`, and the project itself is never changed. They
+are **anchored** to the file's current
 content (line range + a hash of those lines + surrounding context). On reload they
 re-anchor: exact match at the stored position, else a nearby search, else marked *stale* —
 so small edits above a tagged region don't lose the tag, and a fully rewritten region
@@ -259,7 +273,10 @@ chase a definition.
 | `r` | `:refresh` | Recompute the active comparison |
 | `g s` | `:checkout` | Choose the branch under review (app-level; no real checkout) |
 | `g b` | `:compare` | Compare the review branch against a base (`base...review`) |
-| `g l` | `:log` | Review a single commit of the review branch (`git show`) |
+| `g l` | `:log` | The commits buffer: the review branch's history |
+| — | `:show` | Review a commit by searching or typing its sha (commit picker) |
+| — | `:note` | (diff, commit review) Note on the lines at the cursor — a fix for later |
+| — | `:export` | Write the review branch's notes to one Markdown file |
 | `g w` | `:worktree` | Return to the working-tree diff |
 | `g c` | `:commit` | Commit the reviewed working-tree changes |
 | `c` | `:close` | Close the repository |
@@ -285,6 +302,8 @@ chase a definition.
 | `r` | Mark the file / hunk / selection **reviewed** (`✓`) |
 | `u` | Un-review |
 | `f` | Toggle **flag** (`⚑`) on the file / hunk / selection |
+| `i` | **Ignore** (`⊘`) the file / hunk / selection |
+| `q` | Leave the commit under review for the commits buffer |
 | `Esc` | Cancel a visual selection |
 
 Glyphs: `A`/`M`/`D`/`R` file status, `+adds −dels` counts, a green `●` for staged changes
@@ -310,16 +329,51 @@ with no common ancestor) show inline without closing the picker.
 
 Neither picker fetches, so remote-tracking branches are as fresh as your last `git fetch`.
 
-### Commit picker
+### Commits buffer
 
-`Space g l` lists the review branch's history, newest first: short oid, subject,
-`merge` / `HEAD` badges, author and relative age. `Enter` reviews that commit against its
-first parent.
+`Space g l` / `:log` shows the review branch's history the way magit's status does: a
+`Head:` line (plus `Review:` when the branch under review isn't the checkout, and
+`Changes:` when the working tree is dirty), then **Recent commits** — short oid, ref
+decorations (local branches, remote-tracking branches, tags; the branch under review
+boxed), subject, author and age.
 
-History is listed 300 commits deep. Anything older — or a commit on another branch
-entirely — is reachable by typing its sha: when no listed commit matches, the picker offers
-to resolve what you typed against the whole object database. A commit reached that way
-shows no branch context, since it needn't be on the review branch.
+| Key | Action |
+| --- | --- |
+| `j` / `k` | Move down / up |
+| `gg` / `G` | Jump to the newest / oldest loaded commit |
+| `Enter` | Review that commit against its first parent, in the diff buffer |
+
+`q` in the diff buffer brings you back, on the same row. Each row shows its review:
+`✓` when every change is reviewed (or ignored), `done/total` while partial, `⚑ n` flags and
+`✎ n` notes. History pages in as you approach the end, and reloads whenever the buffer is
+shown, on `:refresh`, and when the review branch changes.
+
+`:show` keeps the old commit picker for what the list can't do: filter by subject or
+author, and resolve a typed sha against the whole object database — a commit on another
+branch entirely, reviewed with no branch context.
+
+### Notes
+
+While reviewing a commit, `:note` opens a small Markdown editor (vim keys) for the lines
+under the cursor — or the visual selection, or the note row you're on. A note is a fix
+left for later, so it rides on a flag: on lines already flagged it edits that flag's
+note; otherwise saving flags the lines with it. `:w` saves, `:wq` / `:x` / `Ctrl+Enter`
+save and close, `:q` refuses to drop unsaved changes, `:q!` discards. An empty note clears
+it (the flag stays; `u` removes both). Notes show as rows under their hunk.
+
+Every commit's notes are written, as you make them, to
+`.review-me/notes/commits/<full-oid>.md`, indexed in `.review-me/notes/README.md`:
+
+- YAML front matter (commit, parent, subject, author, date, note count) and a short
+  preamble for the reader,
+- the commit message,
+- each file's notes in diff order, titled by line range, each followed by the commit's
+  own diff over those lines — so a reader working at a later HEAD can find the code even
+  after it moved.
+
+`:export` writes every note reachable from the review branch, oldest commit first, to
+`.review-me/notes/branches/<branch>.md` — one file to hand to an LLM. The files are
+generated from the tag store and never read back: edit notes in the app.
 
 ### Project buffer
 
@@ -381,9 +435,11 @@ React component → src/lib/*.ts action → invoke() in src/lib/tauri.ts
   validate via libgit2), `branches` (ref discovery + merge-base resolution), `commits`
   (history listing + revision resolution), `diff` (working-tree-vs-`HEAD`,
   `base...target`, or one commit vs its first parent), `revision` (reading a commit's tree),
-  `tags` (scoped persistence + anchoring), `tree` (ignore-aware listing), `fuzzy` (nucleo
-  matcher), `queries` + `xref` (tree-sitter symbol index).
-- **Frontend (`src/`)** — `AppShell` keeps both buffers mounted; a single command registry
+  `tags` (scoped persistence + anchoring), `coverage` (review progress over a diff),
+  `notes` (the Markdown export), `review_dir` (the `.review-me/` folder and its local
+  exclusion), `tree` (ignore-aware listing), `fuzzy` (nucleo matcher), `queries` + `xref`
+  (tree-sitter symbol index).
+- **Frontend (`src/`)** — `AppShell` keeps all three buffers mounted; a single command registry
   (`components/useCommands.ts`) feeds both the palette and the command line; state is
   Zustand (`src/state/`). The diff buffer is a custom keyboard-navigable list (not
   CodeMirror); only the project viewer uses CodeMirror.
@@ -418,9 +474,9 @@ current when adding features.
 - Branch comparison never fetches, so remote-tracking branches are only as fresh as your
   last `git fetch`. Comparison is always merge-base (`base...target`); there's no
   two-dot/direct-diff mode.
-- The commit picker lists the newest **300** commits of the chosen branch; older commits
-  are reachable only by typing a sha. Merge commits are reviewed against their first
-  parent, so changes brought in from the other side of the merge show as that merge's
-  work — there's no combined-diff view.
+- Merge commits are reviewed against their first parent, so changes brought in from the
+  other side of the merge show as that merge's work — there's no combined-diff view.
+- Commit marks and notes are keyed to the commit's oid, so rebasing or amending a commit
+  leaves its review behind on the old oid.
 - Running the app needs a display (it's a desktop window); `npm run build` smoke-builds the
   frontend without one.

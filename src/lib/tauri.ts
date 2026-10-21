@@ -4,6 +4,7 @@ import type { DiffSpec, DiffSummary } from "../types/diff";
 import type {
   BranchInfo,
   CommitInfo,
+  CommitReview,
   DirectoryListing,
   FileMatch,
   FileSystemListing,
@@ -20,6 +21,7 @@ import type {
 import type {
   AnchorKind,
   AnchorSide,
+  NotesExport,
   ReviewScope,
   TagStore,
 } from "../types/tags";
@@ -37,13 +39,19 @@ export function listBranches(repo: string): Promise<BranchInfo[]> {
   return invoke<BranchInfo[]>("list_branches", { repo });
 }
 
-/** `refName`'s history, newest first, capped at `limit`. */
+/** A page of `refName`'s history, newest first: `limit` commits after the newest `skip`. */
 export function listCommits(
   repo: string,
   refName: string,
+  skip: number,
   limit: number,
 ): Promise<CommitInfo[]> {
-  return invoke<CommitInfo[]>("list_commits", { repo, refName, limit });
+  return invoke<CommitInfo[]>("list_commits", { repo, refName, skip, limit });
+}
+
+/** Review progress for whichever of `oids` have a mark; untouched commits are omitted. */
+export function commitReviews(repo: string, oids: string[]): Promise<CommitReview[]> {
+  return invoke<CommitReview[]>("commit_reviews", { repo, oids });
 }
 
 /** Expand a typed revision (short sha, `HEAD~2`, a ref) to a full commit. */
@@ -128,6 +136,21 @@ export function addFlagTag(
     note: note ?? null,
     severity: severity ?? null,
   });
+}
+
+/** Set or clear (null / blank) the note on flag `id`, keeping the flag itself. */
+export function setFlagNote(
+  repo: string,
+  scope: ReviewScope,
+  id: string,
+  note: string | null,
+): Promise<TagStore> {
+  return invoke<TagStore>("set_flag_note", { repo, scope, id, note });
+}
+
+/** Write every note reachable from `refName` into one Markdown bundle. */
+export function exportNotes(repo: string, refName: string): Promise<NotesExport> {
+  return invoke<NotesExport>("export_notes", { repo, refName });
 }
 
 export function addIgnoredTag(

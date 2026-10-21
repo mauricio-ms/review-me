@@ -57,7 +57,7 @@ export default function CommitPickHost() {
     setError(null);
     setCommits([]);
     setLoading(true);
-    void listCommits(repoPath, reviewBranch.ref, HISTORY_LIMIT)
+    void listCommits(repoPath, reviewBranch.ref, 0, HISTORY_LIMIT)
       .then((next) => {
         if (!cancelled) setCommits(next);
       })

@@ -94,6 +94,39 @@ export interface CommitInfo {
   isMerge: boolean;
   /** The commit HEAD points at. */
   isHead: boolean;
+  /**
+   * Branches, remote-tracking branches and tags pointing here — magit's decorations,
+   * local branches first. Only filled by `listCommits`.
+   */
+  refs: Decoration[];
+}
+
+/** A ref pointing at a listed commit. */
+export interface Decoration {
+  /** Shorthand: `master`, `origin/master`, `v1.2`. */
+  name: string;
+  kind: "local" | "remote" | "tag";
+}
+
+/**
+ * Review units of one comparison, bucketed by the diff buffer's precedence (flagged >
+ * ignored > reviewed), so the three counts never overlap. Mirrors `coverage::Coverage`.
+ */
+export interface Coverage {
+  total: number;
+  reviewed: number;
+  flagged: number;
+  ignored: number;
+}
+
+/** One commit's review at a glance, for its row in the commits buffer. */
+export interface CommitReview {
+  oid: string;
+  coverage: Coverage;
+  /** Flag tags in the commit's scope. */
+  flags: number;
+  /** Flags carrying a note — fixes left for later. */
+  notes: number;
 }
 
 export type FileSystemEntryKind = "directory" | "file";

@@ -4,10 +4,7 @@ import { vim } from "@replit/codemirror-vim";
 import CodeMirror from "@uiw/react-codemirror";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import {
-  defineCommitMessageVim,
-  setCommitMessageActions,
-} from "../editor/vim-commit";
+import { claimModalEditor, defineModalEditorVim } from "../editor/vim-modal";
 import { gruberDarkerTheme } from "../editor/gruber-darker";
 import {
   cancelReviewedCommit,
@@ -83,7 +80,7 @@ export default function CommitReviewedHost() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    defineCommitMessageVim();
+    defineModalEditorVim();
   }, []);
 
   const close = useCallback(() => {
@@ -189,15 +186,12 @@ export default function CommitReviewedHost() {
   }, [busy, close, message, prepared]);
 
   useEffect(() => {
-    if (!open || phase !== "editor") {
-      setCommitMessageActions(null);
-      return;
-    }
-    setCommitMessageActions({
-      commit: () => void submit(),
-      abort: () => void abortEditor(),
+    if (!open || phase !== "editor") return;
+    // `:wq`/`:x` commit; `:q`/`:cq` abort and unstage, forced or not.
+    return claimModalEditor({
+      writeQuit: () => void submit(),
+      quit: () => void abortEditor(),
     });
-    return () => setCommitMessageActions(null);
   }, [abortEditor, open, phase, submit]);
 
   const extensions = useMemo(

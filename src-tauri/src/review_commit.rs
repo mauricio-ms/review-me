@@ -7,9 +7,10 @@ use git2::{
 };
 use serde::Serialize;
 
+use crate::coverage::{covers, covers_file, file_tagged, overlaps};
 use crate::error::{AppError, AppResult};
 use crate::repo;
-use crate::tags::{self, Anchor, AnchorSide, ReviewScope, ReviewedTag, TagStore};
+use crate::tags::{self, AnchorSide, ReviewScope, TagStore};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -476,45 +477,6 @@ fn delta_path(delta: &DiffDelta<'_>) -> Option<String> {
 
 fn path_string(path: &Path) -> String {
     path.to_string_lossy().into_owned()
-}
-
-fn covers(tags: &[ReviewedTag], side: AnchorSide, file: &str, lo: u32, hi: u32) -> bool {
-    tags.iter().any(|tag| {
-        let anchor = &tag.anchor;
-        !anchor.stale
-            && anchor.side == side
-            && anchor.file == file
-            && anchor.start_line <= lo
-            && anchor.end_line >= hi
-    })
-}
-
-fn overlaps<'a>(
-    mut anchors: impl Iterator<Item = &'a Anchor>,
-    side: AnchorSide,
-    file: &str,
-    lo: u32,
-    hi: u32,
-) -> bool {
-    anchors.any(|anchor| {
-        !anchor.stale
-            && anchor.side == side
-            && anchor.file == file
-            && anchor.start_line <= hi
-            && anchor.end_line >= lo
-    })
-}
-
-/// A binary file is reviewed when a non-stale file anchor names its path.
-fn covers_file(tags: &[ReviewedTag], file: &str) -> bool {
-    tags.iter().any(|tag| {
-        !tag.anchor.stale && tag.anchor.side == AnchorSide::File && tag.anchor.file == file
-    })
-}
-
-/// File-scope flag/ignore check for binary files: any non-stale anchor on the path.
-fn file_tagged<'a>(mut anchors: impl Iterator<Item = &'a Anchor>, file: &str) -> bool {
-    anchors.any(|anchor| !anchor.stale && anchor.file == file)
 }
 
 fn range_covered(ranges: &[(u32, u32)], lo: u32, hi: u32) -> bool {
