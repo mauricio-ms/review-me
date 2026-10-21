@@ -194,6 +194,7 @@ The fixture's first commit (`initial`) is the **root** commit — §6 reviews th
 - [ ] **Steps:** Make the working tree clean (e.g. `git stash` or commit all changes in the fixture), then `Space` → `r` (refresh).
 - [ ] **Expect:** Instead of an empty list, the diff buffer shows a fake terminal window that *types* `git status` and prints "nothing to commit, working tree clean" (last clause green), then `git rev-parse --short HEAD` and `review-me status`. The branch, short HEAD sha, and reviewed/flagged counts are **real** (match the fixture). A green block cursor blinks at a trailing `❯` prompt, and a `r refresh · b p project · o p open repo` hint row fades in below. Editing a file + `r` returns to the normal diff list; making it clean again replays the type-out.
 - [ ] **Reduced motion:** With OS "reduce motion" enabled, the whole transcript renders immediately and static (no typewriter, no blink).
+- [ ] **Note:** A refresh never moves you, so the fake terminal is what a tree that *becomes* clean shows. Opening a repo that is already clean lands on the commits buffer instead (§7.1).
 
 ### 1.10 Leader keys & focus
 - [ ] **Expect:** `Space` always opens the palette, `:` the command line, from any buffer. `Esc` dismisses overlays. Typing in the command-line input does **not** trigger leader keys.
@@ -502,18 +503,19 @@ The fixture's first commit (`initial`) is the **root** commit — §6 reviews th
 
 > Uses the fixtures from §0 (including the §6 additions).
 
-### 6.1 Open the picker
+Commits are entered from the commits buffer (`Space g l` / `:log`, laid out in §7.1); `Enter`
+on a row reviews that commit and `q` comes back.
+
+### 6.1 The log follows the review branch
 - [ ] **Steps:** Open `/tmp/air-fixture`, put `feature` under review (`Space g s`), then press `Space` → `g` → `l` (or `:log`).
-- [ ] **Expect:** A **Review a commit** picker over **`feature`'s** history — no branch stage. Footer: `on feature · ↵ review commit · Esc cancel`. Rows are newest-first: amber short oid, subject, then author and a relative age (`3m ago`); the commit `HEAD` points at is badged `HEAD` (green). Count reads `N commits`. Selection starts on the **newest** commit.
-- [ ] **Steps:** `Esc`, switch the review branch to `master`, and reopen.
-- [ ] **Expect:** The history now lists `master`'s commits (`master work` on top) — the picker always follows the review branch.
+- [ ] **Expect:** The commits buffer lists **`feature`'s** history, newest first — no branch stage. The cursor starts on the **newest** commit.
+- [ ] **Steps:** Switch the review branch to `master` (`Space g s`).
+- [ ] **Expect:** The log reloads with `master`'s commits (`master work` on top) — it always follows the review branch.
 
 ### 6.2 Review a commit
-- [ ] **Steps:** Put `feature` back under review and open the picker.
-- [ ] **Steps:** Type `feature` (or part of the author name).
-- [ ] **Expect:** Rows filter on oid + subject + author, case-insensitive.
-- [ ] **Steps:** `Enter` on `feature work`.
-- [ ] **Expect:** The picker closes; the header reads `<sha> feature work` with `parent <sha> → <sha>` and the changed-file count. The status bar segment turns violet: `⊙ <sha> feature work`; hovering it names the range, the branch, the subject and the author.
+- [ ] **Steps:** Put `feature` back under review and `Space g l`.
+- [ ] **Steps:** Move to `feature work` (`j`/`k`) and press `Enter`.
+- [ ] **Expect:** The diff buffer opens on it; the header reads `<sha> feature work` with `parent <sha> → <sha>` and the changed-file count. The status bar segment turns violet: `⊙ <sha> feature work`; hovering it names the range, the branch, the subject and the author.
 - [ ] **Expect:** The files are that commit's own work: `kept.txt` modified, `Extra.java` added, `gone.txt` deleted, `logo.bin` binary. **`base-only.txt` is absent** (it's on master, not in this commit), as are the dirty working-tree changes and untracked `fresh.txt`.
 - [ ] **Expect:** No file shows the green staged `●`.
 - [ ] **Steps:** Tag a hunk reviewed (`r`), a line range flagged (`v j` then `f`), and a hunk ignored (`i`).
@@ -532,8 +534,12 @@ The fixture's first commit (`initial`) is the **root** commit — §6 reviews th
 - [ ] **Expect:** `review: feature` throughout the commit review (the review branch is where the commit came from), and switching to `merged` **leaves the commit diff on screen** — a commit belongs to no branch in particular, so there is nothing to re-target. Only the `review:` segment changes.
 - [ ] **Expect:** Reopening `:log` now lists `merged`'s history.
 
-### 6.6 Typing a sha reaches outside the list
-- [ ] **Steps:** In the picker, type the full or abbreviated sha (≥4 hex chars) of a commit **not** on the review branch — e.g. `master`'s `master work` while reviewing `feature`.
+### 6.6 `:show` searches, and reaches outside the list
+- [ ] **Steps:** Run `:show` (command line only — it isn't in the `Space` palette).
+- [ ] **Expect:** A **Review a commit** picker over the review branch's history. Footer: `on feature · ↵ review commit · Esc cancel`. Rows: amber short oid, subject, author and a relative age; the commit `HEAD` points at is badged `HEAD` (green).
+- [ ] **Steps:** Type `feature` (or part of the author name).
+- [ ] **Expect:** Rows filter on oid + subject + author, case-insensitive.
+- [ ] **Steps:** Type the full or abbreviated sha (≥4 hex chars) of a commit **not** on the review branch — e.g. `master`'s `master work` while reviewing `feature`.
 - [ ] **Expect:** When no listed commit matches, a single row appears: the typed sha with an italic `resolve this revision…`. `Enter` reviews that commit.
 - [ ] **Expect:** The header shows the resolved commit, and the status-bar tooltip mentions **no branch** (a typed sha carries no branch context).
 - [ ] **Steps:** Type a sha that doesn't exist (e.g. `abcdef1`) and press `Enter`.
@@ -588,7 +594,80 @@ The fixture's first commit (`initial`) is the **root** commit — §6 reviews th
 
 ---
 
-## 7. Regression sanity
+## 7. M7 — Commits buffer & notes
+
+> Uses the fixtures from §0 (including the §6 additions).
+
+### 7.1 A clean checkout opens on the log
+- [ ] **Steps:** Park the fixture's dirty tree (`git -C /tmp/air-fixture stash -u`), then reopen the repo (`Space o r`).
+- [ ] **Expect:** The **commits buffer** opens (status bar: `log`), magit-style: a `Head:` line with the branch and its subject, then **Recent commits** newest first — dim short oid, ref decorations (local branches teal, remote-tracking green, tags amber; the branch under review **boxed**), subject, and author/age on the right. The header counts the commits. The status-bar hint reads `↵ open commit`.
+- [ ] **Steps:** `git -C /tmp/air-fixture stash pop` and reopen.
+- [ ] **Expect:** It opens on the **diff buffer** as before — uncommitted changes come first.
+- [ ] **Steps:** `Space g l`.
+- [ ] **Expect:** A `Changes: N uncommitted files` line under `Head:` (with a `Space b d` hint).
+- [ ] **Steps:** Put a branch that isn't checked out under review (`Space g s` → `feature`).
+- [ ] **Expect:** A `Review:` line names it, boxed, with its tip's subject.
+
+### 7.2 Enter and leave commits
+- [ ] **Steps:** `j`/`k`, `gg`, `G` in the log.
+- [ ] **Expect:** The cursor moves row by row (amber bar) and scrolls into view.
+- [ ] **Steps:** `Enter` on a commit.
+- [ ] **Expect:** The diff buffer shows that commit (§6.2); the status-bar hint now includes `q commits`.
+- [ ] **Steps:** Review a hunk (`r`), then press `q`.
+- [ ] **Expect:** Back in the log **on the same row**, which now shows its progress. `Space b d` shows the **working-tree** diff again — leaving a commit returns the diff buffer (and project mode) to the current changes.
+- [ ] **Steps:** Press `q` in the working-tree diff and in a branch comparison.
+- [ ] **Expect:** Nothing happens — there's no commit to leave.
+
+### 7.3 Review progress per row
+- [ ] **Steps:** In one commit review every hunk; in another review one hunk of several; in a third flag a hunk; in a fourth ignore everything.
+- [ ] **Expect:** Back in the log: `✓` for the first and the fourth (ignored counts as done), `1/N` for the second, `0/N ⚑ 1` for the third, nothing on untouched commits.
+
+### 7.4 History follows the branch
+- [ ] **Steps:** With the log open, commit to the review branch in a terminal, then `Space r`.
+- [ ] **Expect:** The new commit appears on top; the cursor stays on the commit it was on.
+- [ ] **Steps:** On a scratch branch with a long history (`for i in $(seq 450); do git commit -q --allow-empty -m "c$i"; done`), open the log and hold `j` (or `G` repeatedly).
+- [ ] **Expect:** The count reads `200+` and grows as pages load near the end, stopping at the full count with no `+`. No commit is listed twice.
+
+### 7.5 Write a note
+- [ ] **Steps:** Enter `feature work`, expand `kept.txt` (`Tab`), put the cursor on its hunk header and run `:note`.
+- [ ] **Expect:** A **Note** editor titled `kept.txt · lines a–b · saving flags these lines`, in **insert** mode.
+- [ ] **Steps:** Type a few lines (a `# heading` and some `` `code` `` too), `Esc`, `:wq`.
+- [ ] **Expect:** The hunk moves to **Flagged**; under its header a violet note row reads `✎ lines a–b` and the text (wrapped, multi-line). The file row shows `✎ 1`; the status bar `⚑ 1`.
+- [ ] **Steps:** Select two lines (`v j`) and `:note`.
+- [ ] **Expect:** The editor names exactly those lines; saving adds a second note row.
+- [ ] **Steps:** `:note` on a pure-deletion hunk (`gone.txt`).
+- [ ] **Expect:** The title and row say `(removed)`.
+- [ ] **Steps:** `:note` while on the working-tree diff or a branch comparison.
+- [ ] **Expect:** The command is disabled (`note (while reviewing a commit)`); notes belong to a commit.
+
+### 7.6 Edit, discard and clear a note
+- [ ] **Steps:** Put the cursor on a note row (or any line of its hunk) and `:note`.
+- [ ] **Expect:** The editor opens on the saved text in **normal** mode, without `saving flags these lines`.
+- [ ] **Steps:** Change it (`A` … `Esc`), then `:q`.
+- [ ] **Expect:** Refused: `unsaved changes — :w to save, :q! to discard`, with `modified` in the footer.
+- [ ] **Steps:** `:w`, then `:q`.
+- [ ] **Expect:** `saved`, then the editor closes; the row shows the new text.
+- [ ] **Steps:** Double-click a note row, change it, `:q!`.
+- [ ] **Expect:** Closed, text unchanged.
+- [ ] **Steps:** `:note`, delete everything (`ggdG`), `:wq`.
+- [ ] **Expect:** The note row disappears but the hunk stays flagged. `u` on the hunk removes the flag.
+- [ ] **Steps:** Type fast in insert mode and hit `Esc` immediately, then `:q!`.
+- [ ] **Expect:** `Esc` always leaves insert mode — `:q!` closes rather than landing in the note.
+
+### 7.7 Notes as Markdown
+- [ ] **Steps:** After §7.5, open `/tmp/air-fixture/.review-me/notes/commits/<full sha>.md`.
+- [ ] **Expect:** YAML front matter (`commit`, `parent`, `subject`, `author`, `date`, `notes`), a `# <sha> feature work` title, a quoted preamble, the commit message in a `text` block, then `## \`kept.txt\``, `*Modified by this commit.*`, `### Lines a–b`, the note (its own `# heading` demoted to `####`) and a ```` ```diff ```` block with that hunk's lines. A note on a deletion is titled `(removed)` and quotes the `-` lines.
+- [ ] **Expect:** `.review-me/notes/README.md` lists the commit with its date and note count.
+- [ ] **Steps:** Clear that commit's notes (§7.6) or `:clear` it.
+- [ ] **Expect:** Its file and its index row disappear (the index itself once no commit has notes).
+- [ ] **Steps:** Leave notes on two commits of `feature`, then `:export`.
+- [ ] **Expect:** The status bar says `N notes on 2 commits → .review-me/notes/branches/feature.md`; that file has both commits, **oldest first**. With no notes, `no notes on this branch to export` and no file.
+- [ ] **Steps:** `git -C /tmp/air-fixture status --porcelain` and `cat /tmp/air-fixture/.git/info/exclude`.
+- [ ] **Expect:** Nothing under `.review-me/` is listed — `/.review-me/` was added to `info/exclude` — and the working-tree diff doesn't show it either. The project's own `.gitignore` is untouched.
+
+---
+
+## 8. Regression sanity
 - [ ] App builds: `npm run build` (frontend) and `cd src-tauri && cargo test` (backend, all green).
 - [ ] No console errors in the dev tools during normal use.
 - [ ] Theme/contrast readable; long diff lines **wrap** (never `…`, never a horizontal
@@ -601,3 +680,6 @@ The fixture's first commit (`initial`) is the **root** commit — §6 reviews th
       against a base → `Space g l` one of its commits → `Space g w` back to the worktree.
       Each mode keeps its own marks, header, comparison glyph (`⎇` / `⇄` / `⊙`) and project
       revision; only the worktree allows `:commit`; `git status` is unchanged throughout.
+- [ ] Commit-by-commit flow: `Space g l` → `Enter` a commit → review, `:note` a hunk → `q` →
+      `j` → `Enter` the next → … → `:export`. Every row in the log shows its progress, and
+      the exported file has each commit's notes in order.
