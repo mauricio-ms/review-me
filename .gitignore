@@ -22,6 +22,6 @@ src-tauri/gen/
 # sandbox marker
 .ai-jail
 
-# manual-test fixtures (own git repos)
+# local fixtures (own git repos)
 sample/
 sample-java/

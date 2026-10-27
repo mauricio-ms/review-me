@@ -508,9 +508,7 @@ cd src-tauri && cargo test    # backend unit tests (tempfile git fixtures)
 cd src-tauri && cargo check   # fast backend typecheck
 ```
 
-Logic is unit-tested in Rust against temporary git fixtures. UI and keyboard interaction
-are covered by the manual checklist in [`MANUAL_TESTS.md`](./MANUAL_TESTS.md) — keep it
-current when adding features.
+Logic is unit-tested in Rust against temporary git fixtures.
 
 ---
 

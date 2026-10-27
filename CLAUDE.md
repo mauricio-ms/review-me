@@ -378,9 +378,8 @@ the stack whenever the source changes.
 ## Testing
 
 Logic is unit-tested in Rust against `tempfile` git fixtures (`diff`, `tags`, `commits`,
-`coverage`, `notes`, `review_dir`, `fuzzy`, `xref`, `repo_library`). UI/interaction is covered by the manual checklist in
-`MANUAL_TESTS.md` (fixture setup + per-milestone scenarios) — keep it current when adding
-features.
+`coverage`, `notes`, `review_dir`, `fuzzy`, `xref`, `repo_library`). UI/interaction has no
+automated or written test plan.
 
 `xref`'s two- and three-file fixtures are too small to catch resolution bugs that only
 appear across packages, so `xref_validate.rs` runs the resolver over a realistic
