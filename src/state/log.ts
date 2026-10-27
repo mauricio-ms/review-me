@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-import type { CommitInfo, CommitReview } from "../types/repo";
+import type { CommitInfo, CommitReview, LogRange } from "../types/repo";
 
 // Module-level stable empties — never return fresh []/{} from selectors (avoids the
 // Zustand infinite-rerender trap).
@@ -13,6 +13,13 @@ type LogState = {
    * when there is no branch to review. Null until the log is first loaded.
    */
   ref: string | null;
+  /** The base `ref`'s commits are listed over (`reviewBase`); null for none. */
+  base: string | null;
+  /**
+   * The part of `ref`'s history that is listed, as the backend resolved it from
+   * `ref` + `base`. Null until the first page arrives.
+   */
+  range: LogRange | null;
   /** Loaded history, newest first — paged in as the cursor nears the end. */
   commits: CommitInfo[];
   /** The whole history is loaded; there is no further page. */
@@ -22,8 +29,14 @@ type LogState = {
   /** Review progress by oid, for commits with a mark. Absent means untouched. */
   reviews: Record<string, CommitReview>;
 
-  begin: (ref: string) => void;
-  setPage: (ref: string, commits: CommitInfo[], complete: boolean) => void;
+  begin: (ref: string, base: string | null) => void;
+  setPage: (
+    ref: string,
+    base: string | null,
+    range: LogRange,
+    commits: CommitInfo[],
+    complete: boolean,
+  ) => void;
   appendPage: (commits: CommitInfo[], complete: boolean) => void;
   setReviews: (oids: string[], reviews: CommitReview[]) => void;
   fail: (message: string) => void;
@@ -32,19 +45,24 @@ type LogState = {
 
 export const useLogStore = create<LogState>((set) => ({
   ref: null,
+  base: null,
+  range: null,
   commits: EMPTY_COMMITS,
   complete: false,
   loading: false,
   error: null,
   reviews: EMPTY_REVIEWS,
 
-  begin: (ref) =>
+  begin: (ref, base) =>
     set((s) =>
-      // A different branch's history shares nothing with the one on screen.
-      s.ref === ref
+      // A different branch, or the same one over a different base, is a different
+      // list: nothing on screen carries over.
+      s.ref === ref && s.base === base
         ? { loading: true, error: null }
         : {
             ref,
+            base,
+            range: null,
             loading: true,
             error: null,
             commits: EMPTY_COMMITS,
@@ -52,8 +70,8 @@ export const useLogStore = create<LogState>((set) => ({
             reviews: EMPTY_REVIEWS,
           },
     ),
-  setPage: (ref, commits, complete) =>
-    set({ ref, commits, complete, loading: false, error: null }),
+  setPage: (ref, base, range, commits, complete) =>
+    set({ ref, base, range, commits, complete, loading: false, error: null }),
   appendPage: (commits, complete) =>
     set((s) => ({
       commits: [...s.commits, ...commits],
@@ -74,6 +92,8 @@ export const useLogStore = create<LogState>((set) => ({
   reset: () =>
     set({
       ref: null,
+      base: null,
+      range: null,
       commits: EMPTY_COMMITS,
       complete: false,
       loading: false,

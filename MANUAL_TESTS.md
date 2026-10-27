@@ -518,9 +518,9 @@ on a row reviews that commit and `q` comes back.
 
 ### 6.1 The log follows the review branch
 - [ ] **Steps:** Open `/tmp/air-fixture`, put `feature` under review (`Space g s`), then press `Space` → `g` → `l` (or `:log`).
-- [ ] **Expect:** The commits buffer lists **`feature`'s** history, newest first — no branch stage. The cursor starts on the **newest** commit.
+- [ ] **Expect:** The commits buffer lists only what **`feature`** introduced over `master` — the single `feature work` commit, under **Unmerged into master** — not `initial`, which master has too. The cursor starts on the **newest** commit.
 - [ ] **Steps:** Switch the review branch to `master` (`Space g s`).
-- [ ] **Expect:** The log reloads with `master`'s commits (`master work` on top) — it always follows the review branch.
+- [ ] **Expect:** The log reloads with `master`'s **whole** history under **Recent commits** (`master work` on top) — master is its own base and this fixture has no upstream (§7.8 covers the clone that does).
 
 ### 6.2 Review a commit
 - [ ] **Steps:** Put `feature` back under review and `Space g l`.
@@ -542,7 +542,7 @@ on a row reviews that commit and `q` comes back.
 ### 6.5 The review branch is unaffected by the commit choice
 - [ ] **Steps:** While reviewing a commit of `feature`, check the status bar, then `Space g s` → `Enter` on `merged`.
 - [ ] **Expect:** `review: feature` throughout the commit review (the review branch is where the commit came from), and switching to `merged` **leaves the commit diff on screen** — a commit belongs to no branch in particular, so there is nothing to re-target. Only the `review:` segment changes.
-- [ ] **Expect:** Reopening `:log` now lists `merged`'s history.
+- [ ] **Expect:** Reopening `:log` now lists what `merged` introduced: `merge feature` and `feature work`.
 
 ### 6.6 `:show` searches, and reaches outside the list
 - [ ] **Steps:** Run `:show` (command line only — it isn't in the `Space` palette).
@@ -564,7 +564,7 @@ on a row reviews that commit and `q` comes back.
 - [ ] **Expect:** Each comparison shows only its own marks. Restart the app, reopen the repo, and return to the commit — its marks are still there (a fresh open starts on the working-tree diff, as designed).
 
 ### 6.8 The same commit from another branch is the same review
-- [ ] **Steps:** With marks on `feature work`, switch the review branch to **`merged`** (`Space g s`) and pick the same `feature work` commit from its history (it is reachable from both).
+- [ ] **Steps:** With marks on `feature work`, switch the review branch to **`merged`** (`Space g s`) and pick the same `feature work` commit from its log (both branches introduced it over `master`).
 - [ ] **Expect:** The marks are **already there** — the review is keyed to the commit's oid, not the branch it was picked from — and folds/cursor are not reset.
 
 ### 6.9 Marks outlive the branch
@@ -625,8 +625,10 @@ on a row reviews that commit and `q` comes back.
 - [ ] **Expect:** The diff buffer shows that commit (§6.2); the status-bar hint now includes `q commits`.
 - [ ] **Steps:** Review a hunk (`r`), then press `q`.
 - [ ] **Expect:** Back in the log **on the same row**, which now shows its progress. `Space b d` shows the **working-tree** diff again — leaving a commit returns the diff buffer (and project mode) to the current changes.
-- [ ] **Steps:** Press `q` in the working-tree diff and in a branch comparison.
-- [ ] **Expect:** Nothing happens — there's no commit to leave.
+- [ ] **Steps:** Press `q` in a branch comparison (`Space g b`).
+- [ ] **Expect:** Back in the log, and the diff buffer is the working-tree diff again — same as leaving a commit.
+- [ ] **Steps:** Press `q` in the working-tree diff.
+- [ ] **Expect:** Nothing happens — there's nothing to leave.
 
 ### 7.3 Review progress per row
 - [ ] **Steps:** In one commit review every hunk; in another review one hunk of several; in a third flag a hunk; in a fourth ignore everything.
@@ -670,10 +672,24 @@ on a row reviews that commit and `q` comes back.
 - [ ] **Expect:** `.review-me/notes/README.md` lists the commit with its date and note count.
 - [ ] **Steps:** Clear that commit's notes (§7.6) or `:clear` it.
 - [ ] **Expect:** Its file and its index row disappear (the index itself once no commit has notes).
-- [ ] **Steps:** Leave notes on two commits of `feature`, then `:export`.
-- [ ] **Expect:** The status bar says `N notes on 2 commits → .review-me/notes/branches/feature.md`; that file has both commits, **oldest first**. With no notes, `no notes on this branch to export` and no file.
+- [ ] **Steps:** Put `merged` under review and leave notes on both its commits (`merge feature`, `feature work`) and on `initial` (via `:show`), then `:export`.
+- [ ] **Expect:** The status bar says `N notes on 2 commits → .review-me/notes/branches/merged.md`; that file has the two commits the log lists, **oldest first**, and **not** `initial` — master has it, so `merged` didn't introduce it. With no notes, `no notes on this branch to export` and no file.
 - [ ] **Steps:** `git -C /tmp/air-fixture status --porcelain` and `cat /tmp/air-fixture/.git/info/exclude`.
 - [ ] **Expect:** Nothing under `.review-me/` is listed — `/.review-me/` was added to `info/exclude` — and the working-tree diff doesn't show it either. The project's own `.gitignore` is untouched.
+
+### 7.8 The log lists what the branch introduced
+- [ ] **Steps:** In `/tmp/air-fixture`, put `feature` under review and `Space g l`.
+- [ ] **Expect:** A `Base: master` line reading `1 commit introduced by feature` with a `b whole branch` hint; the section is **Unmerged into master** and holds `feature work` alone. The status-bar hint includes `b whole range`.
+- [ ] **Steps:** Press `b`.
+- [ ] **Expect:** The diff buffer opens on `master...feature` (header and `⇄` status segment). `q` returns to the log on the same row, and the diff buffer is the working-tree diff again.
+- [ ] **Steps:** `Space g b` and pick `merged` as the base.
+- [ ] **Expect:** Back in the log, the section reads **Unmerged into merged** and says `feature has no commits beyond merged` — `merged` already contains `feature work`. Reopening `Space g b` starts on `merged`. Pick `master` again before moving on.
+- [ ] **Steps:** In the clone, commit something local: `git -C /tmp/air-clone commit -q --allow-empty -m "local work"`. Open `/tmp/air-clone` (master under review, tracking `origin/master`) and `Space g l`.
+- [ ] **Expect:** An `Upstream: origin/master` line reading `1 unpushed commit` with `b all unpushed`; the section is **Unpushed to origin/master** and holds `local work` alone. `b` opens `origin/master...master`.
+- [ ] **Steps:** `git -C /tmp/air-clone reset -q --hard origin/master`, then `Space r`.
+- [ ] **Expect:** Nothing is unpushed, so the log shows master's **whole** history under **Recent commits**, and there's no `Upstream:` line or `b` hint.
+- [ ] **Steps:** `:show`.
+- [ ] **Expect:** The picker still offers the branch's **whole** history, not just the log's commits.
 
 ---
 

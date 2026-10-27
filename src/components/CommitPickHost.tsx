@@ -57,9 +57,11 @@ export default function CommitPickHost() {
     setError(null);
     setCommits([]);
     setLoading(true);
-    void listCommits(repoPath, reviewBranch.ref, 0, HISTORY_LIMIT)
+    // The whole history, not the log's range: this picker is for what the log
+    // doesn't list.
+    void listCommits(repoPath, reviewBranch.ref, null, 0, HISTORY_LIMIT)
       .then((next) => {
-        if (!cancelled) setCommits(next);
+        if (!cancelled) setCommits(next.commits);
       })
       .catch((e) => {
         if (!cancelled) setError(errorMessage(e));

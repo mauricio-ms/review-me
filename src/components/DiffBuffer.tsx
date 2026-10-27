@@ -18,7 +18,7 @@ import {
 } from "../lib/coverage";
 import { setDiffTargetSource } from "../lib/diff-view";
 import { flagTarget, hasNote, openNoteFor } from "../lib/notes";
-import { leaveCommit } from "../lib/open-repo";
+import { leaveHistory } from "../lib/open-repo";
 import { openFileFromDiff } from "../lib/project";
 import { setProjectCursor } from "../lib/project-view";
 import {
@@ -999,11 +999,11 @@ export default function DiffBuffer() {
         doIgnore();
         break;
       case "q":
-        // A commit is entered from the commits buffer; `q` goes back to it (magit's
-        // quit-window). Nothing to leave in the other comparisons.
-        if (comparison?.kind === "commit") {
+        // A commit or the branch's whole range is entered from the commits buffer;
+        // `q` goes back to it (magit's quit-window). Nothing to leave in the worktree.
+        if (comparison && comparison.kind !== "worktree") {
           e.preventDefault();
-          leaveCommit();
+          leaveHistory();
         }
         break;
     }

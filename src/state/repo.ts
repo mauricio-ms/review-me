@@ -18,6 +18,12 @@ type RepoState = {
    * with no branches.
    */
   reviewBranch: ReviewBranch | null;
+  /**
+   * What the review branch is held against: the base its commits are listed over in
+   * the commits buffer. Starts as the repo's default branch; picking a base in
+   * `:compare` replaces it, so the log and the branch diff always share one base.
+   */
+  reviewBase: ReviewBranch | null;
   diff: DiffSummary | null;
   /** The comparison currently applied — what `diff` was computed from. */
   comparison: DiffSpec;
@@ -36,6 +42,7 @@ type RepoState = {
 
   setRepo: (repo: RepoInfo, path: string) => void;
   setReviewBranch: (branch: ReviewBranch | null) => void;
+  setReviewBase: (base: ReviewBranch | null) => void;
   /**
    * Commit a freshly computed comparison. Folds reset only when the comparison's
    * identity changed — a plain refresh keeps the reviewer's place.
@@ -53,6 +60,7 @@ export const useRepoStore = create<RepoState>((set) => ({
   repo: null,
   repoPath: null,
   reviewBranch: null,
+  reviewBase: null,
   diff: null,
   comparison: WORKTREE_SPEC,
   comparisonEpoch: 0,
@@ -62,6 +70,7 @@ export const useRepoStore = create<RepoState>((set) => ({
   collapsedSections: new Set(),
 
   setReviewBranch: (reviewBranch) => set({ reviewBranch }),
+  setReviewBase: (reviewBase) => set({ reviewBase }),
   setRepo: (repo, path) =>
     set((s) =>
       s.repoPath === path
@@ -122,6 +131,7 @@ export const useRepoStore = create<RepoState>((set) => ({
       repo: null,
       repoPath: null,
       reviewBranch: null,
+      reviewBase: null,
       diff: null,
       comparison: WORKTREE_SPEC,
       comparisonEpoch: s.comparisonEpoch + 1,

@@ -4,7 +4,7 @@ import { useTagsStore } from "../state/tags";
 import type { FlagTag } from "../types/tags";
 import { useUIStore } from "../state/ui";
 import { diffTarget, type DiffTarget } from "./diff-view";
-import { logRef } from "./log";
+import { logBase, logRef } from "./log";
 import { exportNotes as exportNotesFor } from "./tauri";
 
 /**
@@ -80,7 +80,7 @@ export function openNoteEditor(): boolean {
 }
 
 /**
- * `:export`: write every note on the review branch's history into one Markdown file
+ * `:export`: write every note on the commits the log lists into one Markdown file
  * (each commit's own file is kept current as notes change) and say where it went.
  */
 export async function exportNotes(): Promise<void> {
@@ -88,7 +88,7 @@ export async function exportNotes(): Promise<void> {
   if (!repo) return;
   const ui = useUIStore.getState();
   try {
-    const result = await exportNotesFor(repo, logRef());
+    const result = await exportNotesFor(repo, logRef(), logBase());
     ui.showFlash(
       result.path
         ? `${result.notes} note${result.notes === 1 ? "" : "s"} on ${result.commits} commit${

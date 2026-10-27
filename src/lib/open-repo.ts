@@ -3,7 +3,7 @@ import { useRepoStore } from "../state/repo";
 import { useTagsStore } from "../state/tags";
 import { useUIStore } from "../state/ui";
 import { WORKTREE_SPEC, type DiffSpec } from "../types/diff";
-import { branchShorthand, type ReviewBranch } from "../types/repo";
+import { branchShorthand, rangeBaseRef, type ReviewBranch } from "../types/repo";
 import { scopeForSpec } from "../types/tags";
 import { loadLog, refreshCommitReviews, showLog } from "./log";
 import { ambientSource, useProjectSource } from "./project";
@@ -70,6 +70,12 @@ export async function openRepoByPath(path: string): Promise<void> {
       ? { ref: info.reviewBranchRef, display: branchShorthand(info.reviewBranchRef) }
       : null,
   );
+  // ...and is held against the default branch until `:compare` picks another base.
+  repoStore.setReviewBase(
+    info.defaultBranchRef
+      ? { ref: info.defaultBranchRef, display: branchShorthand(info.defaultBranchRef) }
+      : null,
+  );
   await applyComparison(WORKTREE_SPEC);
   const clean = (useRepoStore.getState().diff?.files.length ?? 0) === 0;
   // An unborn branch has no history to list either; its (empty) diff stays put.
@@ -94,23 +100,56 @@ export async function enterCommit(oid: string): Promise<void> {
 }
 
 /**
- * Leave the commit under review (`q`) for the commits buffer, which kept its cursor
- * on that commit. The diff buffer goes back to meaning the current changes — and
- * project mode and xref back to the checkout — while the left commit's row picks up
- * whatever was just marked.
+ * Review everything the commits buffer lists as one diff (`b` in the log): the
+ * `base...branch` comparison over the base the log is holding the branch against —
+ * its upstream, when the branch is its own base. Throws when the diff can't be
+ * computed, leaving the log where it was.
  */
-export function leaveCommit(): void {
+export async function enterLogRange(): Promise<void> {
+  const { ref, range } = useLogStore.getState();
+  const baseRef = range ? rangeBaseRef(range) : null;
+  if (!ref || !baseRef) return;
+  await applyComparison({
+    kind: "branches",
+    baseRef,
+    targetRef: ref,
+    strategy: "mergeBase",
+  });
+  const ui = useUIStore.getState();
+  ui.setActiveBuffer("diff");
+  ui.requestFocus();
+}
+
+/**
+ * Leave committed history under review (`q`) — a commit, or a branch's whole range —
+ * for the commits buffer, which kept its cursor where it was. The diff buffer goes
+ * back to meaning the current changes — and project mode and xref back to the
+ * checkout — while a left commit's row picks up whatever was just marked.
+ */
+export function leaveHistory(): void {
   const { comparison } = useRepoStore.getState();
-  if (comparison.kind !== "commit") return;
+  if (comparison.kind === "worktree") return;
   const ui = useUIStore.getState();
   ui.setActiveBuffer("log");
   ui.requestFocus();
-  // A commit entered from `:show` may come before the log was ever loaded.
+  // A comparison entered from `:show` or `:compare` may come before the log was ever
+  // loaded.
   const log = useLogStore.getState();
   if (log.ref === null) void loadLog();
-  else void refreshCommitReviews([comparison.oid]);
+  else if (comparison.kind === "commit") void refreshCommitReviews([comparison.oid]);
   // applyComparison records any failure in the diff status.
   void applyComparison(WORKTREE_SPEC).catch(() => {});
+}
+
+/**
+ * Hold the review branch against `base` from now on — the base `:compare` picked — so
+ * the commits buffer lists what the branch introduced over the same base the branch
+ * diff uses. The log follows, once it has been opened.
+ */
+export function chooseReviewBase(base: ReviewBranch): void {
+  if (useRepoStore.getState().reviewBase?.ref === base.ref) return;
+  useRepoStore.getState().setReviewBase(base);
+  if (useLogStore.getState().ref !== null) void loadLog();
 }
 
 /**

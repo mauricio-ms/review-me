@@ -4,6 +4,7 @@ import type { DiffSpec, DiffSummary } from "../types/diff";
 import type {
   BranchInfo,
   CommitInfo,
+  CommitLog,
   CommitReview,
   DirectoryListing,
   FileMatch,
@@ -39,14 +40,18 @@ export function listBranches(repo: string): Promise<BranchInfo[]> {
   return invoke<BranchInfo[]>("list_branches", { repo });
 }
 
-/** A page of `refName`'s history, newest first: `limit` commits after the newest `skip`. */
+/**
+ * A page of the commits `refName` introduced over `baseRef`, newest first: `limit`
+ * commits after the newest `skip`. A null base lists the whole history.
+ */
 export function listCommits(
   repo: string,
   refName: string,
+  baseRef: string | null,
   skip: number,
   limit: number,
-): Promise<CommitInfo[]> {
-  return invoke<CommitInfo[]>("list_commits", { repo, refName, skip, limit });
+): Promise<CommitLog> {
+  return invoke<CommitLog>("list_commits", { repo, refName, baseRef, skip, limit });
 }
 
 /** Review progress for whichever of `oids` have a mark; untouched commits are omitted. */
@@ -148,9 +153,13 @@ export function setFlagNote(
   return invoke<TagStore>("set_flag_note", { repo, scope, id, note });
 }
 
-/** Write every note reachable from `refName` into one Markdown bundle. */
-export function exportNotes(repo: string, refName: string): Promise<NotesExport> {
-  return invoke<NotesExport>("export_notes", { repo, refName });
+/** Write every note on the commits `refName` introduced over `baseRef` into one bundle. */
+export function exportNotes(
+  repo: string,
+  refName: string,
+  baseRef: string | null,
+): Promise<NotesExport> {
+  return invoke<NotesExport>("export_notes", { repo, refName, baseRef });
 }
 
 export function addIgnoredTag(

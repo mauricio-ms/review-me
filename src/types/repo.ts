@@ -7,6 +7,11 @@ export interface RepoInfo {
    * default branch. Null when the repo has no branches at all.
    */
   reviewBranchRef: string | null;
+  /**
+   * The repo's default branch — the base the review branch's commits are listed
+   * against until `:compare` picks another. Null when there is no such branch.
+   */
+  defaultBranchRef: string | null;
   isDirty: boolean;
 }
 
@@ -99,6 +104,36 @@ export interface CommitInfo {
    * local branches first. Only filled by `listCommits`.
    */
   refs: Decoration[];
+}
+
+/**
+ * Which part of the review branch's history the commits buffer lists — the commits it
+ * introduced. Mirrors `commits::LogRange`.
+ */
+export type LogRange =
+  /** `base..branch`: what the branch has that its base doesn't. */
+  | { kind: "unmerged"; baseRef: string; baseName: string }
+  /** The branch is its own base: its commits not yet on its upstream. */
+  | { kind: "unpushed"; upstreamRef: string; upstreamName: string }
+  /** The whole history: no base to hold it against, or nothing unpushed. */
+  | { kind: "all" };
+
+/** The canonical ref a range is held against, or null for the whole history. */
+export function rangeBaseRef(range: LogRange): string | null {
+  switch (range.kind) {
+    case "unmerged":
+      return range.baseRef;
+    case "unpushed":
+      return range.upstreamRef;
+    case "all":
+      return null;
+  }
+}
+
+/** One page of the commits buffer and the range it was cut from. */
+export interface CommitLog {
+  range: LogRange;
+  commits: CommitInfo[];
 }
 
 /** A ref pointing at a listed commit. */

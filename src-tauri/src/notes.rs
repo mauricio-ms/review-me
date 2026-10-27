@@ -126,11 +126,17 @@ pub fn sync_commit(root: &Path, oid: &str) -> AppResult<()> {
     sync_index(&repo, root)
 }
 
-/// `:export`: every note on commits reachable from `ref_name`, oldest commit first, in
-/// one file to hand an LLM. Also regenerates each of those commits' own files and the
+/// `:export`: every note on the commits `ref_name` introduced over `base_ref` — the
+/// commits buffer's range (`commits::resolve_range`) — oldest commit first, in one
+/// file to hand an LLM. Also regenerates each of those commits' own files and the
 /// index, so the folder is whole again even if something was deleted by hand.
-pub fn export(repo: &Repository, root: &Path, ref_name: &str) -> AppResult<NotesExport> {
-    let tip = commits::resolve(repo, ref_name)?;
+pub fn export(
+    repo: &Repository,
+    root: &Path,
+    ref_name: &str,
+    base_ref: Option<&str>,
+) -> AppResult<NotesExport> {
+    let range = commits::resolve_range(repo, ref_name, base_ref)?;
     let name = if ref_name == "HEAD" {
         "HEAD".to_string()
     } else {
@@ -143,7 +149,10 @@ pub fn export(repo: &Repository, root: &Path, ref_name: &str) -> AppResult<Notes
     if !noted.is_empty() {
         let mut walk = repo.revwalk()?;
         walk.set_sorting(Sort::TOPOLOGICAL | Sort::TIME | Sort::REVERSE)?;
-        walk.push(tip.oid)?;
+        walk.push(range.tip)?;
+        for oid in &range.hide {
+            walk.hide(*oid)?;
+        }
         for oid in walk {
             let oid = oid?.to_string();
             if !noted.contains(&oid) {
@@ -170,7 +179,7 @@ pub fn export(repo: &Repository, root: &Path, ref_name: &str) -> AppResult<Notes
     write_if_changed(
         root,
         &bundle,
-        &render_bundle(&name, &tip.oid.to_string(), &gathered),
+        &render_bundle(&name, &range.tip.to_string(), &gathered),
     )?;
     Ok(NotesExport {
         path: Some(
@@ -913,7 +922,7 @@ mod tests {
         .unwrap();
 
         let repo = Repository::open(root).unwrap();
-        let export = export(&repo, root, "refs/heads/feature/docs").unwrap();
+        let export = export(&repo, root, "refs/heads/feature/docs", None).unwrap();
         assert_eq!(export.path.as_deref(), Some(".review-me/notes/branches/feature/docs.md"));
         assert_eq!((export.commits, export.notes), (2, 2));
 
@@ -930,12 +939,21 @@ mod tests {
         assert!(commit_path(root, &docs).exists());
         assert!(commit_path(root, &base).exists());
 
+        // Held against master, as the commits buffer lists it, the branch's own work is
+        // `docs` alone — master's notes stay out.
+        let master = Some("refs/heads/master");
+        let export = super::export(&repo, root, "refs/heads/feature/docs", master).unwrap();
+        assert_eq!((export.commits, export.notes), (1, 1));
+        let md = read(root.join(".review-me/notes/branches/feature/docs.md"));
+        assert!(md.contains("Add usage."));
+        assert!(!md.contains("Use a BigDecimal."));
+
         // Nothing left to say: no bundle.
         let scope = ReviewScope::Commit { oid: docs.clone() };
         tags::clear_scope(root, &scope).unwrap();
         let scope = ReviewScope::Commit { oid: base.clone() };
         tags::clear_scope(root, &scope).unwrap();
-        let export = super::export(&repo, root, "refs/heads/feature/docs").unwrap();
+        let export = super::export(&repo, root, "refs/heads/feature/docs", None).unwrap();
         assert!(export.path.is_none());
         assert!(!root.join(".review-me/notes/branches/feature/docs.md").exists());
     }

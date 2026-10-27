@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
-use git2::{BranchType, Commit, Oid, Repository, Sort};
+use git2::{Branch, BranchType, Commit, Oid, Repository, Sort};
 use serde::Serialize;
 
-use crate::branches::short_oid;
+use crate::branches::{short_oid, shorthand};
 use crate::error::{AppError, AppResult};
 
 /// One selectable commit in the commit picker. `oid` is the full 40-char id — specs
@@ -60,16 +60,124 @@ pub struct ResolvedCommit {
     pub message: String,
 }
 
-/// `ref_name`'s history, newest first: `limit` commits after skipping the newest
-/// `skip`, so a long history can be paged in as the reviewer scrolls. Any committish
-/// works, so a remote-tracking ref or a bare `HEAD` lists just as well as a branch.
+/// Which part of a branch's history the commits buffer lists: the commits the branch
+/// introduced, not everything reachable from it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum LogRange {
+    /// `base..ref`: what the branch has that its base — and the base's upstream, so a
+    /// stale local base can't leak mainline commits in — doesn't.
+    #[serde(rename_all = "camelCase")]
+    Unmerged { base_ref: String, base_name: String },
+    /// The branch is its own base (reviewing `master` itself): its commits not yet on
+    /// its upstream — what an agent just committed.
+    #[serde(rename_all = "camelCase")]
+    Unpushed {
+        upstream_ref: String,
+        upstream_name: String,
+    },
+    /// Everything reachable: there is no base to hold the branch against, or it is its
+    /// own base with nothing unpushed.
+    All,
+}
+
+/// A `LogRange` resolved for walking: start at `tip`, stop at anything reachable from
+/// `hide`.
+#[derive(Debug, Clone)]
+pub struct ResolvedRange {
+    pub tip: Oid,
+    pub hide: Vec<Oid>,
+    pub range: LogRange,
+}
+
+/// One page of the commits buffer, with the range it was cut from (for its title).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitLog {
+    pub range: LogRange,
+    pub commits: Vec<CommitInfo>,
+}
+
+/// The commits `ref_name` introduced relative to `base_ref` (both canonical refs).
+/// A base that names the branch itself, or doesn't resolve, falls back to the
+/// branch's unpushed commits, and then to its whole history.
+pub fn resolve_range(
+    repo: &Repository,
+    ref_name: &str,
+    base_ref: Option<&str>,
+) -> AppResult<ResolvedRange> {
+    let tip = resolve(repo, ref_name)?.oid;
+    if let Some(base_ref) = base_ref.filter(|base| *base != ref_name) {
+        if let Ok(base) = find_commit(repo, base_ref) {
+            let mut hide = vec![base.id()];
+            hide.extend(upstream(repo, base_ref).map(|upstream| upstream.oid));
+            return Ok(ResolvedRange {
+                tip,
+                hide,
+                range: LogRange::Unmerged {
+                    base_ref: base_ref.to_string(),
+                    base_name: shorthand(base_ref).to_string(),
+                },
+            });
+        }
+    }
+    if let Some(upstream) = upstream(repo, ref_name) {
+        let (ahead, _) = repo.graph_ahead_behind(tip, upstream.oid)?;
+        if ahead > 0 {
+            return Ok(ResolvedRange {
+                tip,
+                hide: vec![upstream.oid],
+                range: LogRange::Unpushed {
+                    upstream_ref: upstream.ref_name,
+                    upstream_name: upstream.name,
+                },
+            });
+        }
+    }
+    Ok(ResolvedRange {
+        tip,
+        hide: Vec::new(),
+        range: LogRange::All,
+    })
+}
+
+/// The branch a local branch tracks.
+struct Upstream {
+    /// Canonical: `refs/remotes/origin/master`.
+    ref_name: String,
+    /// Shorthand: `origin/master`.
+    name: String,
+    oid: Oid,
+}
+
+/// `ref_name`'s upstream. `None` for anything but a local branch with one configured:
+/// a remote-tracking ref, `HEAD`, a branch that tracks nothing.
+fn upstream(repo: &Repository, ref_name: &str) -> Option<Upstream> {
+    let reference = repo.find_reference(ref_name).ok()?;
+    if !reference.is_branch() {
+        return None;
+    }
+    let upstream = Branch::wrap(reference).upstream().ok()?;
+    let reference = upstream.get();
+    Some(Upstream {
+        ref_name: reference.name()?.to_string(),
+        name: reference.shorthand()?.to_string(),
+        oid: reference.peel_to_commit().ok()?.id(),
+    })
+}
+
+/// A page of the commits `ref_name` introduced over `base_ref` (see `resolve_range`),
+/// newest first: `limit` commits after skipping the newest `skip`, so a long history
+/// can be paged in as the reviewer scrolls. With no base, any committish lists its
+/// whole history, so a remote-tracking ref or a bare `HEAD` works just as well.
 pub fn list(
     repo: &Repository,
     ref_name: &str,
+    base_ref: Option<&str>,
     skip: usize,
     limit: usize,
-) -> AppResult<Vec<CommitInfo>> {
-    let tip = resolve(repo, ref_name)?.oid;
+) -> AppResult<CommitLog> {
+    let resolved = resolve_range(repo, ref_name, base_ref)?;
     let head_oid = head_oid(repo);
     let decorations = decorations(repo);
 
@@ -77,11 +185,14 @@ pub fn list(
     // Reverse-chronological like `git log`, but topological too: commits made within
     // the same second (scripted work, rebases) still list children before parents.
     walk.set_sorting(Sort::TIME | Sort::TOPOLOGICAL)?;
-    walk.push(tip)?;
+    walk.push(resolved.tip)?;
+    for oid in &resolved.hide {
+        walk.hide(*oid)?;
+    }
 
-    let mut out = Vec::new();
+    let mut commits = Vec::new();
     for oid in walk.skip(skip) {
-        if out.len() >= limit {
+        if commits.len() >= limit {
             break;
         }
         let commit = repo.find_commit(oid?)?;
@@ -89,9 +200,12 @@ pub fn list(
         if let Some(names) = decorations.get(&commit.id()) {
             commit_info.refs = names.clone();
         }
-        out.push(commit_info);
+        commits.push(commit_info);
     }
-    Ok(out)
+    Ok(CommitLog {
+        range: resolved.range,
+        commits,
+    })
 }
 
 /// Every commit some ref points at, mapped to those refs: local branches first, then
@@ -243,7 +357,7 @@ mod tests {
         repo_with_history(root);
         let repo = Repository::open(root).unwrap();
 
-        let commits = list(&repo, "refs/heads/master", 0, 100).unwrap();
+        let commits = list(&repo, "refs/heads/master", None, 0, 100).unwrap().commits;
         let summaries: Vec<&str> = commits.iter().map(|c| c.summary.as_str()).collect();
         assert_eq!(summaries[0], "merge feature");
         assert!(summaries.contains(&"feature work"), "merged-in commits are reachable");
@@ -266,14 +380,143 @@ mod tests {
         repo_with_history(root);
         let repo = Repository::open(root).unwrap();
 
-        assert_eq!(list(&repo, "refs/heads/master", 0, 2).unwrap().len(), 2);
+        assert_eq!(list(&repo, "refs/heads/master", None, 0, 2).unwrap().commits.len(), 2);
 
         // feature never saw master's "third" commit.
-        let feature = list(&repo, "refs/heads/feature", 0, 100).unwrap();
+        let feature = list(&repo, "refs/heads/feature", None, 0, 100).unwrap().commits;
         let summaries: Vec<&str> = feature.iter().map(|c| c.summary.as_str()).collect();
         assert_eq!(summaries, vec!["feature work", "second", "first"]);
 
-        assert!(list(&repo, "refs/heads/nope", 0, 10).is_err());
+        assert!(list(&repo, "refs/heads/nope", None, 0, 10).is_err());
+    }
+
+    /// `feature` branches off `master` at "second", merges master's later "third" back
+    /// in, and keeps going — so the commits it introduced are its own three plus that
+    /// merge, and "third" is master's.
+    fn repo_with_feature_branch(root: &Path) {
+        git(root, &["init", "-q", "-b", "master"]);
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        git(root, &["add", "."]);
+        git_at(root, 1, &["commit", "-qm", "first"]);
+        git_at(root, 2, &["commit", "-q", "--allow-empty", "-m", "second"]);
+        git(root, &["checkout", "-qb", "feature"]);
+        git_at(root, 3, &["commit", "-q", "--allow-empty", "-m", "f1"]);
+        git_at(root, 4, &["commit", "-q", "--allow-empty", "-m", "f2"]);
+        git(root, &["checkout", "-q", "master"]);
+        git_at(root, 5, &["commit", "-q", "--allow-empty", "-m", "third"]);
+        git(root, &["checkout", "-q", "feature"]);
+        git_at(
+            root,
+            6,
+            &["merge", "-q", "--no-ff", "-m", "merge master", "master"],
+        );
+        git_at(root, 7, &["commit", "-q", "--allow-empty", "-m", "f3"]);
+    }
+
+    /// Point `origin/master` at `rev` and make it `master`'s upstream. The remote's URL
+    /// is never contacted.
+    fn track_origin_master(root: &Path, rev: &str) {
+        git(root, &["remote", "add", "origin", "https://example.invalid/r.git"]);
+        git(root, &["update-ref", "refs/remotes/origin/master", rev]);
+        git(root, &["branch", "-q", "-u", "origin/master", "master"]);
+    }
+
+    fn summaries(log: &CommitLog) -> Vec<&str> {
+        log.commits.iter().map(|c| c.summary.as_str()).collect()
+    }
+
+    #[test]
+    fn lists_only_the_commits_a_branch_introduced_over_its_base() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        repo_with_feature_branch(root);
+        let repo = Repository::open(root).unwrap();
+
+        let log = list(&repo, "refs/heads/feature", Some("refs/heads/master"), 0, 100).unwrap();
+        assert_eq!(
+            log.range,
+            LogRange::Unmerged {
+                base_ref: "refs/heads/master".into(),
+                base_name: "master".into()
+            }
+        );
+        // `git log master..feature`: master's own "third" came in through the merge,
+        // but the branch didn't introduce it.
+        assert_eq!(summaries(&log), vec!["f3", "merge master", "f2", "f1"]);
+
+        // Paging cuts the same range.
+        let page = list(&repo, "refs/heads/feature", Some("refs/heads/master"), 1, 2).unwrap();
+        assert_eq!(summaries(&page), vec!["merge master", "f2"]);
+
+        // Without a base it is the whole history again.
+        let all = list(&repo, "refs/heads/feature", None, 0, 100).unwrap();
+        assert_eq!(all.range, LogRange::All);
+        assert_eq!(all.commits.len(), 7);
+    }
+
+    #[test]
+    fn a_branch_level_with_its_base_introduced_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        repo_with_feature_branch(root);
+        git(root, &["branch", "fresh", "master"]);
+        let repo = Repository::open(root).unwrap();
+
+        let log = list(&repo, "refs/heads/fresh", Some("refs/heads/master"), 0, 100).unwrap();
+        assert!(matches!(log.range, LogRange::Unmerged { .. }));
+        assert!(log.commits.is_empty());
+    }
+
+    #[test]
+    fn hides_the_bases_upstream_too() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        git(root, &["init", "-q", "-b", "master"]);
+        std::fs::write(root.join("a.txt"), "one\n").unwrap();
+        git(root, &["add", "."]);
+        git_at(root, 1, &["commit", "-qm", "first"]);
+        git_at(root, 2, &["commit", "-q", "--allow-empty", "-m", "pushed"]);
+        track_origin_master(root, "HEAD");
+        // Local master is stale: origin has "pushed", master doesn't.
+        git(root, &["reset", "-q", "--hard", "HEAD~1"]);
+        git(root, &["checkout", "-qb", "feature", "origin/master"]);
+        git_at(root, 3, &["commit", "-q", "--allow-empty", "-m", "f1"]);
+        let repo = Repository::open(root).unwrap();
+
+        let log = list(&repo, "refs/heads/feature", Some("refs/heads/master"), 0, 100).unwrap();
+        assert_eq!(summaries(&log), vec!["f1"], "origin/master's commit isn't feature's");
+    }
+
+    #[test]
+    fn the_base_itself_lists_what_is_unpushed() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        repo_with_feature_branch(root);
+        let repo = Repository::open(root).unwrap();
+        let master = Some("refs/heads/master");
+
+        // No upstream: nothing to hold master against but itself, so all of it.
+        let log = list(&repo, "refs/heads/master", master, 0, 100).unwrap();
+        assert_eq!(log.range, LogRange::All);
+        assert_eq!(summaries(&log), vec!["third", "second", "first"]);
+
+        // One commit ahead of origin: just that one.
+        track_origin_master(root, "master~1");
+        let log = list(&repo, "refs/heads/master", master, 0, 100).unwrap();
+        assert_eq!(
+            log.range,
+            LogRange::Unpushed {
+                upstream_ref: "refs/remotes/origin/master".into(),
+                upstream_name: "origin/master".into()
+            }
+        );
+        assert_eq!(summaries(&log), vec!["third"]);
+
+        // Everything pushed: back to the whole history rather than an empty list.
+        git(root, &["update-ref", "refs/remotes/origin/master", "master"]);
+        let log = list(&repo, "refs/heads/master", master, 0, 100).unwrap();
+        assert_eq!(log.range, LogRange::All);
+        assert_eq!(log.commits.len(), 3);
     }
 
     #[test]
@@ -283,10 +526,10 @@ mod tests {
         repo_with_history(root);
         let repo = Repository::open(root).unwrap();
 
-        let all = list(&repo, "refs/heads/master", 0, 100).unwrap();
-        let first = list(&repo, "refs/heads/master", 0, 2).unwrap();
-        let second = list(&repo, "refs/heads/master", 2, 2).unwrap();
-        let rest = list(&repo, "refs/heads/master", 4, 100).unwrap();
+        let all = list(&repo, "refs/heads/master", None, 0, 100).unwrap().commits;
+        let first = list(&repo, "refs/heads/master", None, 0, 2).unwrap().commits;
+        let second = list(&repo, "refs/heads/master", None, 2, 2).unwrap().commits;
+        let rest = list(&repo, "refs/heads/master", None, 4, 100).unwrap().commits;
         let paged: Vec<&str> = first
             .iter()
             .chain(&second)
@@ -295,7 +538,7 @@ mod tests {
             .collect();
         let expected: Vec<&str> = all.iter().map(|c| c.oid.as_str()).collect();
         assert_eq!(paged, expected);
-        assert!(list(&repo, "refs/heads/master", 100, 10).unwrap().is_empty());
+        assert!(list(&repo, "refs/heads/master", None, 100, 10).unwrap().commits.is_empty());
     }
 
     #[test]
@@ -312,7 +555,7 @@ mod tests {
         );
         let repo = Repository::open(root).unwrap();
 
-        let commits = list(&repo, "HEAD", 0, 100).unwrap();
+        let commits = list(&repo, "HEAD", None, 0, 100).unwrap().commits;
         let names = |summary: &str| -> Vec<(String, DecorationKind)> {
             let commit = commits.iter().find(|c| c.summary == summary).unwrap();
             commit.refs.iter().map(|r| (r.name.clone(), r.kind)).collect()
@@ -345,7 +588,7 @@ mod tests {
         repo_with_history(root);
         let repo = Repository::open(root).unwrap();
 
-        let commits = list(&repo, "refs/heads/master", 0, 100).unwrap();
+        let commits = list(&repo, "refs/heads/master", None, 0, 100).unwrap().commits;
         let merge = &commits[0];
         let resolved = resolve(&repo, &merge.short_oid).unwrap();
         assert_eq!(resolved.oid.to_string(), merge.oid, "short oid expands");

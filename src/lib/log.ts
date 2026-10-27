@@ -17,17 +17,27 @@ export function logRef(): string {
   return useRepoStore.getState().reviewBranch?.ref ?? "HEAD";
 }
 
-/** (Re)load the first page of the review branch's history and its review states. */
+/**
+ * What the log holds `logRef()` against, so it lists only the commits the branch
+ * introduced. The backend falls back to the branch's unpushed commits when this names
+ * the branch itself, and to its whole history when there is nothing to hold it against.
+ */
+export function logBase(): string | null {
+  return useRepoStore.getState().reviewBase?.ref ?? null;
+}
+
+/** (Re)load the first page of the review branch's commits and their review states. */
 export async function loadLog(): Promise<void> {
   const repo = useRepoStore.getState().repoPath;
   if (!repo) return;
   const ref = logRef();
+  const base = logBase();
   const ticket = ++requestSeq;
-  useLogStore.getState().begin(ref);
+  useLogStore.getState().begin(ref, base);
   try {
-    const commits = await listCommits(repo, ref, 0, PAGE);
+    const { range, commits } = await listCommits(repo, ref, base, 0, PAGE);
     if (ticket !== requestSeq) return;
-    useLogStore.getState().setPage(ref, commits, commits.length < PAGE);
+    useLogStore.getState().setPage(ref, base, range, commits, commits.length < PAGE);
     void refreshCommitReviews(commits.map((c) => c.oid));
   } catch (e) {
     if (ticket === requestSeq) useLogStore.getState().fail(String(e));
@@ -37,12 +47,12 @@ export async function loadLog(): Promise<void> {
 /** Load the next page of history, unless it is all here or a load is in flight. */
 export async function loadMoreLog(): Promise<void> {
   const repo = useRepoStore.getState().repoPath;
-  const { ref, commits, complete, loading } = useLogStore.getState();
+  const { ref, base, commits, complete, loading } = useLogStore.getState();
   if (!repo || !ref || complete || loading) return;
   const ticket = ++requestSeq;
-  useLogStore.getState().begin(ref);
+  useLogStore.getState().begin(ref, base);
   try {
-    const page = await listCommits(repo, ref, commits.length, PAGE);
+    const { commits: page } = await listCommits(repo, ref, base, commits.length, PAGE);
     if (ticket !== requestSeq) return;
     // The branch can move between pages; never list a commit twice.
     const seen = new Set(useLogStore.getState().commits.map((c) => c.oid));

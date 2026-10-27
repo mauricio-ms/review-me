@@ -19,6 +19,10 @@ pub struct RepoInfo {
     /// repo's default branch (a detached or unborn HEAD is on no branch). `None` when
     /// the repo has no branches at all. App-level only — nothing is ever checked out.
     pub review_branch_ref: Option<String>,
+    /// The canonical ref of the repo's default branch (`branches::default_branch_ref`)
+    /// — the base a review branch's commits are listed against until `:compare` picks
+    /// another. `None` when there is no such branch.
+    pub default_branch_ref: Option<String>,
     /// Whether the working tree has any uncommitted change (incl. untracked).
     pub is_dirty: bool,
 }
@@ -81,11 +85,13 @@ pub fn info(repo: &Repository) -> AppResult<RepoInfo> {
     let is_dirty = statuses
         .iter()
         .any(|entry| entry.status() != Status::CURRENT);
+    let default_branch_ref = branches::default_branch_ref(repo);
     Ok(RepoInfo {
         root: root(repo)?.to_string_lossy().into_owned(),
         head,
         branch,
-        review_branch_ref: head_branch_ref(repo).or_else(|| branches::default_branch_ref(repo)),
+        review_branch_ref: head_branch_ref(repo).or_else(|| default_branch_ref.clone()),
+        default_branch_ref,
         is_dirty,
     })
 }

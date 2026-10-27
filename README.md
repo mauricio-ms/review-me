@@ -104,7 +104,8 @@ amber — a reminder that the working-tree diff still belongs to the real checko
 Both committed-history views derive from it, so you name a branch once:
 
 - `:compare` asks only for a **base** and shows `base...reviewBranch`.
-- `:log` (the commits buffer) lists the **review branch's** history.
+- `:log` (the commits buffer) lists the commits the **review branch introduced** over
+  its base — `:compare`'s pick, the repo's default branch until you make one.
 
 Switching while comparing branches re-targets the comparison, so you can walk several
 branches against the same base. (If the new branch *is* that base, there's nothing to
@@ -118,7 +119,7 @@ status bar:
 | Comparison | What it shows | Switch with |
 | --- | --- | --- |
 | **Working tree** (default) | Everything uncommitted vs `HEAD`, staged or not, including untracked files. | `Space g w` / `:worktree` |
-| **Branches** | `git diff base...reviewBranch` — the review branch's work since it forked from the base. | `Space g b` / `:compare` |
+| **Branches** | `git diff base...reviewBranch` — the review branch's work since it forked from the base. | `Space g b` / `:compare`, or `b` in the commits buffer |
 | **Commit** | `git show <commit>` — one commit of the review branch against its first parent. | `Enter` in the commits buffer (`Space g l` / `:log`) |
 
 Both committed-history modes are strictly read-only: they never fetch, check out, stage,
@@ -292,10 +293,10 @@ chase a definition.
 | `r` | `:refresh` | Recompute the active comparison |
 | `g s` | `:checkout` | Choose the branch under review (app-level; no real checkout) |
 | `g b` | `:compare` | Compare the review branch against a base (`base...review`) |
-| `g l` | `:log` | The commits buffer: the review branch's history |
+| `g l` | `:log` | The commits buffer: the commits the review branch introduced |
 | — | `:show` | Review a commit by searching or typing its sha (commit picker) |
 | — | `:note` | (diff, commit review) Note on the lines at the cursor — a fix for later |
-| — | `:export` | Write the review branch's notes to one Markdown file |
+| — | `:export` | Write the notes on the commits buffer's commits to one Markdown file |
 | `g w` | `:worktree` | Return to the working-tree diff |
 | `g c` | `:commit` | Commit the reviewed working-tree changes |
 | `c` | `:close` | Close the repository |
@@ -322,7 +323,7 @@ chase a definition.
 | `u` | Un-review |
 | `f` | Toggle **flag** (`⚑`) on the file / hunk / selection |
 | `i` | **Ignore** (`⊘`) the file / hunk / selection |
-| `q` | Leave the commit under review for the commits buffer |
+| `q` | Leave a commit or branch comparison for the commits buffer |
 | `Esc` | Cancel a visual selection |
 
 Glyphs: `A`/`M`/`D`/`R` file status, `+adds −dels` counts, a green `●` for staged changes
@@ -341,34 +342,44 @@ badged `reviewing`, `default`, `checkout`, `local`/`remote`, plus the short oid 
 selection starts on the branch already under review. `origin/HEAD` is never listed (it's
 an alias for a branch that is).
 
-`Space g b` (**Compare against**) collects just the base, defaulting to the repo's default
-branch (from `refs/remotes/*/HEAD`, else `master`, else `main`). The branch under review is
-dimmed and unselectable — it can't be its own base. Errors (an unknown ref, two branches
-with no common ancestor) show inline without closing the picker.
+`Space g b` (**Compare against**) collects just the base, defaulting to the current one —
+the repo's default branch (from `refs/remotes/*/HEAD`, else `master`, else `main`) until
+you pick another. The pick stays the base for the session, so the commits buffer lists
+what the branch introduced over that same base. The branch under review is dimmed and
+unselectable — it can't be its own base. Errors (an unknown ref, two branches with no
+common ancestor) show inline without closing the picker.
 
 Neither picker fetches, so remote-tracking branches are as fresh as your last `git fetch`.
 
 ### Commits buffer
 
-`Space g l` / `:log` shows the review branch's history the way magit's status does: a
-`Head:` line (plus `Review:` when the branch under review isn't the checkout, and
-`Changes:` when the working tree is dirty), then **Recent commits** — short oid, ref
-decorations (local branches, remote-tracking branches, tags; the branch under review
-boxed), subject, author and age.
+`Space g l` / `:log` shows the commits the review branch introduced — `git log
+base..branch` — the way magit's status does: a `Head:` line (plus `Review:` when the
+branch under review isn't the checkout, `Base:` naming what it is held against, and
+`Changes:` when the working tree is dirty), then **Unmerged into master** (or whatever
+the base is) — short oid, ref decorations (local branches, remote-tracking branches,
+tags; the branch under review boxed), subject, author and age. Commits on the base's
+upstream are left out too, so a stale local `master` can't leak mainline work in.
+
+When the branch under review *is* its base (reviewing `master` itself), the list is its
+**Unpushed to origin/master** commits — what an agent just committed — and, with no
+upstream or nothing unpushed, its whole history under **Recent commits**.
 
 | Key | Action |
 | --- | --- |
 | `j` / `k` | Move down / up |
 | `gg` / `G` | Jump to the newest / oldest loaded commit |
 | `Enter` | Review that commit against its first parent, in the diff buffer |
+| `b` | Review the whole listed range as one diff (`base...branch`) |
 
 `q` in the diff buffer brings you back, on the same row. Each row shows its review:
 `✓` when every change is reviewed (or ignored), `done/total` while partial, `⚑ n` flags and
 `✎ n` notes. History pages in as you approach the end, and reloads whenever the buffer is
-shown, on `:refresh`, and when the review branch changes.
+shown, on `:refresh`, and when the review branch or its base changes.
 
 `:show` keeps the old commit picker for what the list can't do: filter by subject or
-author, and resolve a typed sha against the whole object database — a commit on another
+author over the branch's **whole** history, and resolve a typed sha against the whole
+object database — a commit on another
 branch entirely, reviewed with no branch context.
 
 ### Notes
@@ -390,7 +401,7 @@ Every commit's notes are written, as you make them, to
   own diff over those lines — so a reader working at a later HEAD can find the code even
   after it moved.
 
-`:export` writes every note reachable from the review branch, oldest commit first, to
+`:export` writes every note on the commits the commits buffer lists, oldest commit first, to
 `.review-me/notes/branches/<branch>.md` — one file to hand to an LLM. The files are
 generated from the tag store and never read back: edit notes in the app.
 

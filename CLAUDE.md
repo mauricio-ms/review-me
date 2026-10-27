@@ -74,10 +74,10 @@ conventions that will bite if ignored:
 
 `useRepoStore.reviewBranch` (`ReviewBranch { ref, display }`) is the app's own notion of a
 checkout and the **single place a branch is chosen**: `:compare` collects only a base and
-targets it, the commits buffer (`:log`) lists its history. It is seeded on open from
-`RepoInfo.reviewBranchRef` (HEAD's branch, else the repo's default branch, else `None` — a
-repo with no branches disables `:compare`, and the log lists `HEAD`) and changed by
-`:checkout` (`Space g s`, `CheckoutBranchHost`).
+targets it, the commits buffer (`:log`) lists the commits it introduced over that base.
+It is seeded on open from `RepoInfo.reviewBranchRef` (HEAD's branch, else the repo's
+default branch, else `None` — a repo with no branches disables `:compare`, and the log
+lists `HEAD`) and changed by `:checkout` (`Space g s`, `CheckoutBranchHost`).
 
 It is **app-level only**: nothing fetches, checks out, stages, or writes to the working
 tree, so a branch that isn't checked out reviews like any other. Worktree mode still means
@@ -122,20 +122,36 @@ it; a commit spec is immutable, so only its tags are re-read).
 
 ### The commits buffer
 
-`LogBuffer.tsx` (buffer `"log"`) is the review branch's history as a magit-status-style
-list — Head/Review/Changes lines, then "Recent commits" with decorations — and the way
-into commit review: `Enter` calls `open-repo.ts`'s **`enterCommit`** (applies a commit
-spec, switches to the diff buffer), and `q` in the diff buffer calls **`leaveCommit`**
-(back to the log, refresh that row's review, re-apply the worktree comparison so the diff
-buffer and project mode mean the current changes again). Staying mounted is what puts you
-back on the same row; the cursor is tracked by **oid**, so reloads don't move it.
+`LogBuffer.tsx` (buffer `"log"`) lists **the commits the review branch introduced** as a
+magit-status-style list — Head/Review/Base/Changes lines, then the commits with
+decorations — and is the way into commit review: `Enter` calls `open-repo.ts`'s
+**`enterCommit`** (applies a commit spec, switches to the diff buffer), `b` calls
+**`enterLogRange`** (the whole listed range as one `base...branch` comparison), and `q` in
+the diff buffer calls **`leaveHistory`** for either (back to the log, refresh a left
+commit's row, re-apply the worktree comparison so the diff buffer and project mode mean
+the current changes again). Staying mounted is what puts you back on the same row; the
+cursor is tracked by **oid**, so reloads don't move it.
+
+What is listed is `commits::resolve_range(ref, base)` — shared with `:export`, so the
+export covers exactly the log's commits — which yields a `LogRange`:
+- `unmerged` — `base..ref`, also hiding the base's upstream (a stale local `master`
+  mustn't leak `origin/master`'s commits in). An empty result is a real answer
+  ("no commits beyond master"), not a reason to fall back.
+- `unpushed` — the base names the branch itself (reviewing `master`): `upstream..ref`.
+- `all` — no base, or its own base with no upstream or nothing ahead of it.
+
+The base is **`useRepoStore.reviewBase`**: seeded on open from
+`RepoInfo.defaultBranchRef`, replaced by whatever `:compare` picks (`chooseReviewBase`,
+which reloads the log) so the log and the branch diff always share one base. `:show`'s
+picker passes no base — it is for the whole history.
 
 `useLogStore` holds the listed `ref` (`lib/log.ts`'s `logRef()`: the review branch, else
-`HEAD`), the pages loaded so far, and `reviews` by oid. `loadLog` reloads page one and is
-called whenever the log is shown, on `refresh`, and when `switchReviewBranch` changes the
-branch; `loadMoreLog` pages (`skip`) as the cursor or scrollbar nears the end. Row progress
-comes from `commit_reviews`, which only computes a diff for commits with a mark in their
-scope (`tags::marked_scopes`) — an untouched history costs nothing.
+`HEAD`) and `base` (`logBase()`) — a change to either is a different list — the `range`
+the backend resolved, the pages loaded so far, and `reviews` by oid. `loadLog` reloads
+page one and is called whenever the log is shown, on `refresh`, and when the review
+branch or its base changes; `loadMoreLog` pages (`skip`) as the cursor or scrollbar nears
+the end. Row progress comes from `commit_reviews`, which only computes a diff for commits
+with a mark in their scope (`tags::marked_scopes`) — an untouched history costs nothing.
 
 `openRepoByPath` lands on the log when the freshly applied worktree diff is empty (and
 the repo has a HEAD); a dirty tree lands on the diff buffer. Only *opening* chooses — a

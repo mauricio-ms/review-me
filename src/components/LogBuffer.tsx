@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 
 import { loadMoreLog } from "../lib/log";
-import { enterCommit } from "../lib/open-repo";
+import { enterCommit, enterLogRange } from "../lib/open-repo";
 import { timeAgo } from "../lib/time";
 import { useLogStore } from "../state/log";
 import { useRepoStore } from "../state/repo";
 import { useUIStore } from "../state/ui";
-import type { CommitInfo, CommitReview, Decoration } from "../types/repo";
+import type { CommitInfo, CommitReview, Decoration, LogRange } from "../types/repo";
 
 /** Start paging in more history once the cursor is this many rows from the end. */
 const PREFETCH_ROWS = 30;
@@ -64,11 +64,30 @@ function RefLabel({ decoration, current }: { decoration: Decoration; current: bo
   );
 }
 
+/** The commits section's title, magit-style, for the range the log lists. */
+function rangeTitle(range: LogRange | null): string {
+  switch (range?.kind) {
+    case "unmerged":
+      return `Unmerged into ${range.baseName}`;
+    case "unpushed":
+      return `Unpushed to ${range.upstreamName}`;
+    default:
+      return "Recent commits";
+  }
+}
+
+/** Style a status-line ref by where it lives: a local branch or a remote-tracking one. */
+function refKind(ref: string): "local" | "remote" {
+  return ref.startsWith("refs/remotes/") ? "remote" : "local";
+}
+
 /**
- * The commits buffer: the review branch's history as a magit-style list. `Enter` opens
- * the commit under the cursor in the diff buffer (against its first parent) and `q`
- * there comes back here. Stays mounted while hidden, so the cursor is still on the
- * commit you left. It is also where a clean checkout opens, having no changes to show.
+ * The commits buffer: the commits the review branch introduced over its base — its
+ * unpushed ones when it is its own base, else its whole history — as a magit-style
+ * list. `Enter` opens the commit under the cursor in the diff buffer (against its first
+ * parent), `b` the whole listed range as one `base...branch` diff, and `q` there comes
+ * back here. Stays mounted while hidden, so the cursor is still on the commit you left.
+ * It is also where a clean checkout opens, having no changes to show.
  */
 export default function LogBuffer() {
   const repo = useRepoStore((s) => s.repo);
@@ -76,6 +95,7 @@ export default function LogBuffer() {
   const uncommitted = useRepoStore((s) =>
     s.comparison.kind === "worktree" ? (s.diff?.files.length ?? 0) : 0,
   );
+  const range = useLogStore((s) => s.range);
   const commits = useLogStore((s) => s.commits);
   const reviews = useLogStore((s) => s.reviews);
   const loading = useLogStore((s) => s.loading);
@@ -90,6 +110,7 @@ export default function LogBuffer() {
   // Tracked by oid, not index, so a reload (the branch moved, a page arrived) keeps
   // the cursor on the same commit.
   const [cursorOid, setCursorOid] = useState<string | null>(null);
+  // What is being opened, for the header: a short oid or `base...branch`.
   const [entering, setEntering] = useState<string | null>(null);
   const [enterError, setEnterError] = useState<string | null>(null);
 
@@ -118,18 +139,39 @@ export default function LogBuffer() {
     if (commit) setCursorOid(commit.oid);
   };
 
-  const enter = async (commit: CommitInfo | undefined) => {
-    if (!commit || entering) return;
-    setCursorOid(commit.oid);
-    setEntering(commit.oid);
+  const opening = async (label: string, open: () => Promise<void>) => {
+    if (entering) return;
+    setEntering(label);
     setEnterError(null);
     try {
-      await enterCommit(commit.oid);
+      await open();
     } catch (e) {
       setEnterError(errorMessage(e));
     } finally {
       setEntering(null);
     }
+  };
+
+  const enter = (commit: CommitInfo | undefined) => {
+    if (!commit || entering) return;
+    setCursorOid(commit.oid);
+    void opening(commit.shortOid, () => enterCommit(commit.oid));
+  };
+
+  const rangeBase =
+    range?.kind === "unmerged"
+      ? { ref: range.baseRef, name: range.baseName }
+      : range?.kind === "unpushed"
+        ? { ref: range.upstreamRef, name: range.upstreamName }
+        : null;
+  const branchName = reviewBranch?.display ?? repo?.branch ?? "HEAD";
+  const listed = `${commits.length}${complete ? "" : "+"}`;
+  const plural = commits.length === 1 ? "" : "s";
+
+  // The whole listed range as one diff — only when there is a base to diff against.
+  const enterRange = () => {
+    if (!rangeBase) return;
+    void opening(`${rangeBase.name}...${branchName}`, enterLogRange);
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -164,7 +206,11 @@ export default function LogBuffer() {
         break;
       case "Enter":
         e.preventDefault();
-        void enter(commits[cursor]);
+        enter(commits[cursor]);
+        break;
+      case "b":
+        e.preventDefault();
+        enterRange();
         break;
     }
   };
@@ -197,14 +243,9 @@ export default function LogBuffer() {
           {reviewBranch?.display ?? repo.branch}
         </span>
         <span className="diff-header-count">
-          {commits.length}
-          {complete ? "" : "+"} commit{commits.length === 1 ? "" : "s"}
+          {listed} commit{plural}
         </span>
-        {entering && (
-          <span className="diff-header-status">
-            opening {entering.slice(0, 7)}…
-          </span>
-        )}
+        {entering && <span className="diff-header-status">opening {entering}…</span>}
         {loading && !entering && <span className="diff-header-status">loading…</span>}
         {shownError && <span className="diff-header-error">{shownError}</span>}
       </div>
@@ -223,6 +264,22 @@ export default function LogBuffer() {
               <span className="log-status-text">{commits[0]?.summary ?? ""}</span>
             </div>
           )}
+          {rangeBase && (
+            <div className="log-status-line">
+              <span className="log-status-label">
+                {range?.kind === "unpushed" ? "Upstream:" : "Base:"}
+              </span>
+              <span className={`log-ref is-${refKind(rangeBase.ref)}`}>{rangeBase.name}</span>
+              <span className="log-status-text">
+                {range?.kind === "unpushed"
+                  ? `${listed} unpushed commit${plural}`
+                  : `${listed} commit${plural} introduced by ${branchName}`}
+              </span>
+              <span className="log-status-hint">
+                b {range?.kind === "unpushed" ? "all unpushed" : "whole branch"}
+              </span>
+            </div>
+          )}
           {uncommitted > 0 && (
             <div className="log-status-line">
               <span className="log-status-label">Changes:</span>
@@ -235,11 +292,8 @@ export default function LogBuffer() {
         </div>
 
         <div className="diff-row diff-section-header log-section-header">
-          <span className="diff-section-label">Recent commits</span>
-          <span className="diff-section-count">
-            {commits.length}
-            {complete ? "" : "+"}
-          </span>
+          <span className="diff-section-label">{rangeTitle(range)}</span>
+          <span className="diff-section-count">{listed}</span>
         </div>
 
         {commits.map((commit, index) => (
@@ -251,7 +305,7 @@ export default function LogBuffer() {
             }}
             className={`diff-row log-row${index === cursor ? " is-selected" : ""}`}
             onClick={() => setCursorOid(commit.oid)}
-            onDoubleClick={() => void enter(commit)}
+            onDoubleClick={() => enter(commit)}
           >
             <span className="log-oid">{commit.shortOid}</span>
             {commit.refs.map((d) => (
@@ -268,7 +322,13 @@ export default function LogBuffer() {
         ))}
 
         {commits.length === 0 && !loading && (
-          <div className="log-empty">{error ? "no history to show" : "no commits yet"}</div>
+          <div className="log-empty">
+            {error
+              ? "no history to show"
+              : range?.kind === "unmerged"
+                ? `${branchName} has no commits beyond ${range.baseName}`
+                : "no commits yet"}
+          </div>
         )}
         {!complete && commits.length > 0 && (
           <div className="log-empty">{loading ? "loading more…" : "…"}</div>

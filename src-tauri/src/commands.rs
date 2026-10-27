@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::branches::{self, BranchInfo};
-use crate::commits::{self, CommitInfo};
+use crate::commits::{self, CommitInfo, CommitLog};
 use crate::coverage::{self, CommitReview};
 use crate::diff::{self, DiffSpec, DiffSummary};
 use crate::error::AppResult;
@@ -61,17 +61,24 @@ pub fn list_branches(repo: String) -> AppResult<Vec<BranchInfo>> {
     branches::list(&repository)
 }
 
-/// A page of `ref_name`'s history, newest first, for the commits buffer and the commit
-/// picker.
+/// A page of the commits `ref_name` introduced over `base_ref`, newest first, for the
+/// commits buffer; with no base, its whole history, for the commit picker.
 #[tauri::command]
 pub fn list_commits(
     repo: String,
     ref_name: String,
+    base_ref: Option<String>,
     skip: u32,
     limit: u32,
-) -> AppResult<Vec<CommitInfo>> {
+) -> AppResult<CommitLog> {
     let repository = repo::open(&PathBuf::from(repo))?;
-    commits::list(&repository, &ref_name, skip as usize, limit as usize)
+    commits::list(
+        &repository,
+        &ref_name,
+        base_ref.as_deref(),
+        skip as usize,
+        limit as usize,
+    )
 }
 
 /// Review progress for whichever of `oids` have been marked, for the commits buffer.
@@ -305,13 +312,18 @@ pub fn unmark_range(
     Ok(store)
 }
 
-/// `:export`: write every note on commits reachable from `ref_name` into one Markdown
-/// file under `.review-me/notes/branches/`.
+/// `:export`: write every note on the commits `ref_name` introduced over `base_ref`
+/// (the commits buffer's range) into one Markdown file under
+/// `.review-me/notes/branches/`.
 #[tauri::command]
-pub fn export_notes(repo: String, ref_name: String) -> AppResult<NotesExport> {
+pub fn export_notes(
+    repo: String,
+    ref_name: String,
+    base_ref: Option<String>,
+) -> AppResult<NotesExport> {
     let repository = repo::open(&PathBuf::from(repo))?;
     let root = repo::root(&repository)?;
-    notes::export(&repository, &root, &ref_name)
+    notes::export(&repository, &root, &ref_name, base_ref.as_deref())
 }
 
 #[tauri::command]

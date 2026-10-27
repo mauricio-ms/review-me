@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { applyComparison } from "../lib/open-repo";
+import { applyComparison, chooseReviewBase } from "../lib/open-repo";
 import { listBranches } from "../lib/tauri";
 import { useRepoStore } from "../state/repo";
 import { useUIStore } from "../state/ui";
@@ -27,6 +27,7 @@ export default function BranchCompareHost() {
   const requestFocus = useUIStore((s) => s.requestFocus);
   const repoPath = useRepoStore((s) => s.repoPath);
   const reviewBranch = useRepoStore((s) => s.reviewBranch);
+  const reviewBase = useRepoStore((s) => s.reviewBase);
 
   const [branches, setBranches] = useState<BranchInfo[]>([]);
   const [loading, setLoading] = useState(false);
@@ -68,14 +69,19 @@ export default function BranchCompareHost() {
     [reviewBranch],
   );
 
-  // Default to the repo's default branch — then to the first row that isn't the
-  // branch being reviewed.
+  // Default to the base the branch is already held against (the repo's default
+  // branch until a base is picked here), then to the first row that isn't the branch
+  // being reviewed.
   const initialSelected = useMemo(() => {
-    const preferred = rows.findIndex((row) => row.isDefault);
-    if (preferred >= 0 && !isDisabled(rows[preferred])) return preferred;
+    for (const preferred of [
+      rows.findIndex((row) => row.name === reviewBase?.ref),
+      rows.findIndex((row) => row.isDefault),
+    ]) {
+      if (preferred >= 0 && !isDisabled(rows[preferred])) return preferred;
+    }
     const first = rows.findIndex((row) => !isDisabled(row));
     return first >= 0 ? first : 0;
-  }, [isDisabled, rows]);
+  }, [isDisabled, reviewBase, rows]);
 
   const close = useCallback(() => {
     closePicker();
@@ -95,6 +101,8 @@ export default function BranchCompareHost() {
       setError(null);
       try {
         await applyComparison(spec);
+        // The log lists what the branch introduced over this same base from now on.
+        chooseReviewBase({ ref: row.name, display: row.display });
         close();
       } catch (e) {
         // Stay open so the reviewer can pick a different base.
