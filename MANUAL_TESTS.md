@@ -346,6 +346,16 @@ The fixture's first commit (`initial`) is the **root** commit — §6 reviews th
 - [ ] **Steps:** Open files of other types (e.g. `.ts`, `.rs`, `.py`, `.json`, `.md`, `Cargo.toml`).
 - [ ] **Expect:** Each gets language-appropriate syntax highlighting (the grammar lazy-loads by file name on first open). Unknown/plain extensions (e.g. `.txt`, `logo.bin`) render as uncolored text — no error.
 
+### 3.3b Only the changed files
+- [ ] **Steps:** With the dirty fixture on the working-tree diff, enter project mode and press `c` in the tree.
+- [ ] **Expect:** The mode line flips from `all files` to `changed · N files` and the tree lists only the uncommitted files (folders open), each with its status letter (`A`/`M`/`D`, colored as in the diff) and `✓`/`⚑` once reviewed/flagged in the diff. `Space f` is titled **Find changed file** and searches only those. `c` again (or `:changed`) restores the full tree, cursor on the open file.
+- [ ] **Steps:** With `c` on, review a commit from the log (`Space g l` → `Enter`), then `Space b p`.
+- [ ] **Expect:** The tree now lists that **commit's** files — the filter stuck, the files followed the comparison. A deleted file is struck through; `Enter` opens it from the parent (modeline `@ <sha> (parent of <sha>)`).
+- [ ] **Steps:** `q` back to the log, `b` for the whole branch, then `Space b p`.
+- [ ] **Expect:** Every file the branch changed against its base.
+- [ ] **Steps:** On a clean working tree with `c` on.
+- [ ] **Expect:** `changed · 0 files` and `nothing changed here`; the finder says the same.
+
 ### 3.4 Flag in project mode
 - [ ] **Steps:** In the viewer, visually select a few lines (`v` + `j`), then `Space` → `t` → `f`.
 - [ ] **Expect:** Those lines get an amber flag highlight; status-bar `⚑` count increments. Switch buffers / reopen the file → the flag highlight persists (and is in `.review-me/tags.json`).

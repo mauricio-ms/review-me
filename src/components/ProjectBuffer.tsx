@@ -13,16 +13,35 @@ import { gruberDarkerTheme } from "../editor/gruber-darker";
 import { defineNavVim } from "../editor/vim-nav";
 import { xrefClick } from "../editor/xref-click";
 import { xrefKeymap } from "../editor/xref-keymap";
+import { fileReviewState } from "../lib/coverage";
 import { fileIcon } from "../lib/file-icons";
 import { recordJump } from "../lib/jumps";
-import { backToDiff, openProjectFile, loadDir, toggleDir } from "../lib/project";
+import {
+  backToDiff,
+  loadDir,
+  openFileFromDiff,
+  openProjectFile,
+  toggleDir,
+} from "../lib/project";
 import { setProjectView } from "../lib/project-view";
 import { useProjectStore } from "../state/project";
+import { useRepoStore } from "../state/repo";
 import { useTagsStore } from "../state/tags";
 import { useUIStore, type VimMode } from "../state/ui";
+import type { ChangedFile } from "../types/diff";
 import type { TreeEntry } from "../types/repo";
 
-type Node = { entry: TreeEntry; depth: number };
+/** A tree row; `change` is set on the files of the changed-files view. */
+type Node = { entry: TreeEntry; depth: number; change?: ChangedFile };
+
+const EMPTY_FILES: ChangedFile[] = [];
+
+const STATUS_GLYPH: Record<ChangedFile["status"], string> = {
+  added: "A",
+  modified: "M",
+  deleted: "D",
+  renamed: "R",
+};
 
 const VIM_MODE_MAP: Record<string, VimMode> = {
   normal: "normal",
@@ -46,6 +65,53 @@ function buildVisible(
   return out;
 }
 
+/** Case-insensitive name order — the backend's `tree::list_dir` sort. */
+function byName(a: string, b: string): number {
+  const x = a.toLowerCase();
+  const y = b.toLowerCase();
+  return x < y ? -1 : x > y ? 1 : 0;
+}
+
+/**
+ * The changed-files view: a tree synthesized from the comparison's own paths (it has
+ * every file it needs, so nothing is listed from disk), folders first and open unless
+ * the reviewer folded them.
+ */
+function buildChanged(files: ChangedFile[], collapsed: Set<string>): Node[] {
+  type Dir = { dirs: Map<string, Dir>; files: ChangedFile[] };
+  const root: Dir = { dirs: new Map(), files: [] };
+  for (const file of files) {
+    let dir = root;
+    for (const part of file.path.split("/").slice(0, -1)) {
+      let next = dir.dirs.get(part);
+      if (!next) {
+        next = { dirs: new Map(), files: [] };
+        dir.dirs.set(part, next);
+      }
+      dir = next;
+    }
+    dir.files.push(file);
+  }
+  const name = (path: string) => path.slice(path.lastIndexOf("/") + 1);
+  const out: Node[] = [];
+  const walk = (dir: Dir, prefix: string, depth: number) => {
+    for (const [dirName, child] of [...dir.dirs].sort(([a], [b]) => byName(a, b))) {
+      const path = prefix ? `${prefix}/${dirName}` : dirName;
+      out.push({ entry: { name: dirName, path, isDir: true }, depth });
+      if (!collapsed.has(path)) walk(child, path, depth + 1);
+    }
+    for (const file of [...dir.files].sort((a, b) => byName(name(a.path), name(b.path)))) {
+      out.push({
+        entry: { name: name(file.path), path: file.path, isDir: false },
+        depth,
+        change: file,
+      });
+    }
+  };
+  walk(root, "", 0);
+  return out;
+}
+
 export default function ProjectBuffer() {
   const dirs = useProjectStore((s) => s.dirs);
   const expanded = useProjectStore((s) => s.expanded);
@@ -53,7 +119,13 @@ export default function ProjectBuffer() {
   const content = useProjectStore((s) => s.content);
   // Non-null while the buffer is reading a commit rather than the working tree.
   const sourceLabel = useProjectStore((s) => s.sourceLabel);
+  const filter = useProjectStore((s) => s.filter);
+  const toggleFilter = useProjectStore((s) => s.toggleFilter);
+  const changedFiles = useRepoStore((s) => s.diff?.files ?? EMPTY_FILES);
+  const comparisonEpoch = useRepoStore((s) => s.comparisonEpoch);
+  const reviewed = useTagsStore((s) => s.reviewed);
   const flags = useTagsStore((s) => s.flags);
+  const ignored = useTagsStore((s) => s.ignored);
   const activeBuffer = useUIStore((s) => s.activeBuffer);
   const focusRequest = useUIStore((s) => s.focusRequest);
   const setVimMode = useUIStore((s) => s.setVimMode);
@@ -63,8 +135,45 @@ export default function ProjectBuffer() {
   const [cursor, setCursor] = useState(0);
   const [focusPane, setFocusPane] = useState<"tree" | "viewer">("tree");
   const [langExt, setLangExt] = useState<Extension | null>(null);
+  // Folders folded in the changed-files view — open by default, so every changed file
+  // shows at once. Folds belong to one comparison.
+  const [collapsedChanged, setCollapsedChanged] = useState<Set<string>>(() => new Set());
+  const changedOnly = filter === "changed";
 
-  const nodes = useMemo(() => buildVisible(dirs, expanded), [dirs, expanded]);
+  useEffect(() => {
+    setCollapsedChanged(new Set());
+  }, [comparisonEpoch]);
+
+  const nodes = useMemo(
+    () =>
+      changedOnly
+        ? buildChanged(changedFiles, collapsedChanged)
+        : buildVisible(dirs, expanded),
+    [changedOnly, changedFiles, collapsedChanged, dirs, expanded],
+  );
+
+  const isOpenDir = (path: string) =>
+    changedOnly ? !collapsedChanged.has(path) : expanded.has(path);
+
+  const toggleFolder = (path: string) => {
+    if (!changedOnly) {
+      void toggleDir(path);
+      return;
+    }
+    setCollapsedChanged((current) => {
+      const next = new Set(current);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  };
+
+  // Switching views keeps the cursor on the open file when the new list has it.
+  useEffect(() => {
+    const at = openPath ? nodes.findIndex((n) => n.entry.path === openPath) : -1;
+    setCursor(Math.max(0, at));
+    // Only on a switch: `nodes` also changes on every fold, where the cursor stays put.
+  }, [changedOnly]);
 
   // Register the project viewer's vim mappings once (q→diff). Code navigation is an
   // Alt keymap instead — see editor/xref-keymap.ts.
@@ -72,10 +181,10 @@ export default function ProjectBuffer() {
     defineNavVim();
   }, []);
 
-  // Load the repo root the first time project mode is shown.
+  // Load the repo root the first time the full tree is shown.
   useEffect(() => {
-    if (activeBuffer === "project" && !dirs[""]) void loadDir("");
-  }, [activeBuffer, dirs]);
+    if (activeBuffer === "project" && !changedOnly && !dirs[""]) void loadDir("");
+  }, [activeBuffer, changedOnly, dirs]);
 
   useEffect(() => {
     setCursor((c) => Math.min(Math.max(0, c), Math.max(0, nodes.length - 1)));
@@ -146,7 +255,15 @@ export default function ProjectBuffer() {
   const activate = (node: Node | undefined) => {
     if (!node) return;
     if (node.entry.isDir) {
-      void toggleDir(node.entry.path);
+      toggleFolder(node.entry.path);
+    } else if (node.change) {
+      // At the revision that changed it — the old side for a deletion, the only one
+      // that still has it. Records the jump itself.
+      void openFileFromDiff(
+        node.change.path,
+        node.change.status === "deleted" ? "old" : "new",
+      );
+      setFocusPane("viewer");
     } else {
       // Opening from the tree is navigation too — `M-,` should walk back through it.
       recordJump();
@@ -157,8 +274,8 @@ export default function ProjectBuffer() {
 
   const collapseOrParent = (node: Node | undefined) => {
     if (!node) return;
-    if (node.entry.isDir && expanded.has(node.entry.path)) {
-      void toggleDir(node.entry.path);
+    if (node.entry.isDir && isOpenDir(node.entry.path)) {
+      toggleFolder(node.entry.path);
       return;
     }
     const parent = node.entry.path.split("/").slice(0, -1).join("/");
@@ -187,9 +304,14 @@ export default function ProjectBuffer() {
         // Toggle the folder under the cursor (no-op on files).
         e.preventDefault();
         const node = nodes[cursor];
-        if (node?.entry.isDir) void toggleDir(node.entry.path);
+        if (node?.entry.isDir) toggleFolder(node.entry.path);
         break;
       }
+      case "c":
+        // The whole revision ↔ only what the comparison on screen changed.
+        e.preventDefault();
+        toggleFilter();
+        break;
       case "Enter":
       case "l":
       case "ArrowRight":
@@ -217,22 +339,39 @@ export default function ProjectBuffer() {
         onKeyDown={onTreeKeyDown}
         onFocus={() => setFocusPane("tree")}
       >
+        <div className="project-tree-mode">
+          <span>
+            {changedOnly
+              ? `changed · ${changedFiles.length} file${changedFiles.length === 1 ? "" : "s"}`
+              : "all files"}
+          </span>
+          <span className="project-tree-mode-hint">
+            <kbd>c</kbd> {changedOnly ? "all files" : "changed only"}
+          </span>
+        </div>
         {nodes.length === 0 ? (
-          <div className="project-tree-empty">loading…</div>
+          <div className="project-tree-empty">
+            {changedOnly ? "nothing changed here" : "loading…"}
+          </div>
         ) : (
           nodes.map((node, idx) => {
             const icon = fileIcon(
               node.entry.name,
               node.entry.isDir,
-              expanded.has(node.entry.path),
+              isOpenDir(node.entry.path),
             );
+            const change = node.change;
+            const review = change
+              ? fileReviewState(reviewed, flags, ignored, change)
+              : null;
             return (
               <div
                 key={node.entry.path}
                 className={`tree-row ${idx === cursor ? "is-selected" : ""} ${
                   node.entry.path === openPath ? "is-open" : ""
-                }`}
+                }${change ? ` status-${change.status}` : ""}`}
                 style={{ paddingLeft: 8 + node.depth * 14 }}
+                title={change?.oldPath ? `renamed from ${change.oldPath}` : undefined}
                 onClick={() => {
                   setCursor(idx);
                   activate(node);
@@ -242,6 +381,13 @@ export default function ProjectBuffer() {
                   {icon.glyph}
                 </span>
                 <span className="tree-name">{node.entry.name}</span>
+                {change && (
+                  <span className="tree-change">
+                    {review === "flagged" && <span className="mark-flagged">⚑</span>}
+                    {review === "done" && <span className="mark-reviewed">✓</span>}
+                    <span className="diff-status-glyph">{STATUS_GLYPH[change.status]}</span>
+                  </span>
+                )}
               </div>
             );
           })
@@ -265,8 +411,9 @@ export default function ProjectBuffer() {
             </div>
             <div className="empty-hint">
               Select a file in the tree, or press <kbd>Space</kbd> <kbd>f</kbd> to
-              fuzzy-find. <kbd>Ctrl</kbd>+<kbd>h</kbd> returns to the tree;{" "}
-              <kbd>q</kbd> returns to the diff.
+              fuzzy-find; <kbd>c</kbd> in the tree lists only the changed files.{" "}
+              <kbd>Ctrl</kbd>+<kbd>h</kbd> returns to the tree; <kbd>q</kbd> returns to
+              the diff.
             </div>
           </div>
         ) : (

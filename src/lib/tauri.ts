@@ -248,13 +248,15 @@ export function commitReviewedChanges(
   });
 }
 
+/** Fuzzy-rank `source`'s files against `query` — or only the paths in `only`, if given. */
 export function fuzzyFiles(
   repo: string,
   source: ProjectSource,
   query: string,
   limit: number,
+  only: string[] | null,
 ): Promise<FileMatch[]> {
-  return invoke<FileMatch[]>("fuzzy_files", { repo, source, query, limit });
+  return invoke<FileMatch[]>("fuzzy_files", { repo, source, query, limit, only });
 }
 
 export function listRepoDir(

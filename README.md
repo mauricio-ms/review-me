@@ -63,9 +63,10 @@ Reviewing agent-generated code has a different shape than reviewing a human PR:
   make later, typically by an LLM. Every commit's notes are kept as structured Markdown
   under `.review-me/notes/`, and `:export` bundles a whole branch's into one file.
 - **Fuzzy file finder** — jump to any (non-ignored) file in the repo.
-- **Project mode** — a read-only, IDE-like browser over the *entire* repo, not just the
-  changed files. You can't mark things reviewed here (reviewing is diff-only), but you can
-  still flag regions for later.
+- **Project mode** — a read-only, IDE-like browser over the *entire* repo, or (`c`) just
+  the files the comparison on screen changed — a commit's, a branch's, the uncommitted
+  ones. You can't mark things reviewed here (reviewing is diff-only), but you can still
+  flag regions for later.
 - **Cross-references** — go-to-definition and find-references (tree-sitter, Java) so you
   can trace a changed symbol through the project.
 
@@ -302,6 +303,7 @@ chase a definition.
 | `c` | `:close` | Close the repository |
 | `b d` | `:diff` | Switch to the diff buffer |
 | `b p` | `:project` | Switch to the project buffer |
+| — | `:changed` | Project tree and finder: only the changed files ↔ all files |
 | `h` | `:diffmode` | (diff) Toggle word-diff ↔ whole-line highlighting |
 | `t f` | `:flag` | (project) Flag the current selection |
 | `g d` | `:definition` | (project) Go to definition |
@@ -407,7 +409,13 @@ generated from the tag store and never read back: edit notes in the app.
 
 ### Project buffer
 
-**Tree (left):**
+**Tree (left)** lists the whole revision, or — `c` / `:changed` — **only the files the
+comparison on screen changed**: the commit's files while reviewing a commit, every file the
+branch touched in a branch comparison (`b` in the commits buffer), the uncommitted ones in
+the working-tree diff. The choice sticks as you move between comparisons, so it keeps
+following what's under review; the fuzzy finder (`Space f`) follows it too. Changed files
+carry their status letter and a `✓` (fully reviewed) or `⚑` (flagged), and a deletion
+opens from the old side, the only revision that still has it.
 
 | Key | Action |
 | --- | --- |
@@ -415,6 +423,7 @@ generated from the tag store and never read back: edit notes in the app.
 | `l` / `Enter` | Expand a directory (lazy-loads) or open a file |
 | `h` | Collapse the directory, or jump to its parent |
 | `Tab` | Toggle the folder under the cursor |
+| `c` | Only the changed files ↔ all files |
 | `G` | Jump to bottom |
 | `Ctrl-h` | Toggle focus between tree and viewer |
 

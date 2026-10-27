@@ -1,15 +1,18 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { fileIcon } from "../lib/file-icons";
-import { openFileInProject } from "../lib/project";
+import { openFileFromDiff, openFileInProject } from "../lib/project";
 import { fuzzyFiles } from "../lib/tauri";
 import { useProjectStore } from "../state/project";
 import { useRepoStore } from "../state/repo";
 import { useUIStore } from "../state/ui";
+import type { ChangedFile } from "../types/diff";
 import type { FileMatch } from "../types/repo";
 import NeoPicker from "./NeoPicker";
 
 const LIMIT = 60;
+
+const EMPTY_FILES: ChangedFile[] = [];
 
 /** Render a path with the fuzzy-matched characters emphasized. */
 function highlight(path: string, indices: number[]) {
@@ -33,6 +36,17 @@ export default function FuzzyFinderHost() {
   const repoPath = useRepoStore((s) => s.repoPath);
   // The finder searches the revision project mode is showing, not always the disk.
   const source = useProjectStore((s) => s.source);
+  // ...and, like the tree, only the comparison's changed files when it lists those.
+  const changedOnly = useProjectStore((s) => s.filter === "changed");
+  const changedFiles = useRepoStore((s) => s.diff?.files ?? EMPTY_FILES);
+  const changedByPath = useMemo(
+    () => new Map(changedFiles.map((f) => [f.path, f])),
+    [changedFiles],
+  );
+  const only = useMemo(
+    () => (changedOnly ? [...changedByPath.keys()] : null),
+    [changedOnly, changedByPath],
+  );
 
   const [query, setQuery] = useState("");
   const [rows, setRows] = useState<FileMatch[]>([]);
@@ -42,7 +56,7 @@ export default function FuzzyFinderHost() {
     if (!open || !repoPath) return;
     let cancelled = false;
     const handle = window.setTimeout(() => {
-      void fuzzyFiles(repoPath, source, query, LIMIT).then((matches) => {
+      void fuzzyFiles(repoPath, source, query, LIMIT, only).then((matches) => {
         if (!cancelled) setRows(matches);
       });
     }, 70);
@@ -50,7 +64,7 @@ export default function FuzzyFinderHost() {
       cancelled = true;
       window.clearTimeout(handle);
     };
-  }, [open, query, repoPath, source]);
+  }, [only, open, query, repoPath, source]);
 
   // Reset when reopened.
   useEffect(() => {
@@ -64,10 +78,16 @@ export default function FuzzyFinderHost() {
 
   const openSelected = useCallback(
     (row: FileMatch) => {
-      void openFileInProject(row.path);
+      const change = only ? changedByPath.get(row.path) : undefined;
+      // A changed file opens where the tree would open it: a deletion on the old side.
+      if (change) {
+        void openFileFromDiff(change.path, change.status === "deleted" ? "old" : "new");
+      } else {
+        void openFileInProject(row.path);
+      }
       closePicker();
     },
-    [closePicker],
+    [changedByPath, closePicker, only],
   );
 
   if (!open) return null;
@@ -75,7 +95,7 @@ export default function FuzzyFinderHost() {
   return (
     <NeoPicker<FileMatch>
       open={open}
-      title="Find file"
+      title={only ? "Find changed file" : "Find file"}
       className="fuzzy-finder"
       query={query}
       onQueryChange={setQuery}
@@ -87,7 +107,7 @@ export default function FuzzyFinderHost() {
       onClose={close}
       renderCount={(s, t) => (t === 0 ? "0" : `${s + 1}/${t}`)}
       footer="↑↓ move · ↵ open · Esc cancel"
-      emptyText="no matching files"
+      emptyText={only && only.length === 0 ? "nothing changed here" : "no matching files"}
       renderRow={(row) => {
         const icon = fileIcon(row.path.split("/").pop() ?? row.path, false);
         return (

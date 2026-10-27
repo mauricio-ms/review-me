@@ -265,6 +265,26 @@ export function sectionForFile(
   return "toReview";
 }
 
+/**
+ * A changed file's review at a glance, for project mode's changed-files tree: flagged
+ * when any of its units is, done when every unit is reviewed or ignored. Units are
+ * counted as the diff buffer buckets them — reviewable hunks, else the whole file.
+ */
+export function fileReviewState(
+  reviewed: ReviewedTag[],
+  flags: FlagTag[],
+  ignored: IgnoredTag[],
+  file: ChangedFile,
+): "flagged" | "done" | "open" {
+  const hunks = file.binary ? [] : file.hunks.filter((h) => hunkTarget(h) != null);
+  const sections =
+    hunks.length === 0
+      ? [sectionForFile(reviewed, flags, ignored, file.path)]
+      : hunks.map((h) => sectionForHunk(reviewed, flags, ignored, file.path, h));
+  if (sections.includes("flagged")) return "flagged";
+  return sections.every((s) => s === "reviewed" || s === "ignored") ? "done" : "open";
+}
+
 /** reviewed unit count / total reviewable unit count (text hunks + binary files). */
 export function reviewProgress(
   files: ChangedFile[],

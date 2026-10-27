@@ -9,6 +9,12 @@ import {
 
 const EMPTY_ENTRIES: TreeEntry[] = [];
 
+/**
+ * What the tree and the finder list: the whole revision, or only the files the
+ * comparison on screen changed — a commit's, a branch's, or the uncommitted ones.
+ */
+export type ProjectFilter = "all" | "changed";
+
 type ProjectState = {
   /** Lazily-loaded directory listings, keyed by repo-relative dir path ("" = root). */
   dirs: Record<string, TreeEntry[]>;
@@ -25,6 +31,11 @@ type ProjectState = {
   source: ProjectSource;
   /** How to name `source` in the modeline (e.g. "feature@e780b4a"); null = worktree. */
   sourceLabel: string | null;
+  /**
+   * A standing preference, not a property of the revision: it survives source changes
+   * (and closing the repo), so "changed" keeps following whatever is under review.
+   */
+  filter: ProjectFilter;
 
   setDir: (path: string, entries: TreeEntry[]) => void;
   setExpanded: (path: string, open: boolean) => void;
@@ -36,6 +47,7 @@ type ProjectState = {
    * a no-op that keeps the reviewer's place.
    */
   setSource: (source: ProjectSource, label: string | null) => void;
+  toggleFilter: () => void;
   reset: () => void;
 };
 
@@ -47,6 +59,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
   loadingFile: false,
   source: WORKTREE_SOURCE,
   sourceLabel: null,
+  filter: "all",
 
   setDir: (path, entries) =>
     set((s) => ({ dirs: { ...s.dirs, [path]: entries } })),
@@ -74,6 +87,8 @@ export const useProjectStore = create<ProjectState>((set) => ({
             loadingFile: false,
           },
     ),
+  toggleFilter: () =>
+    set((s) => ({ filter: s.filter === "all" ? "changed" : "all" })),
   reset: () =>
     set({
       dirs: {},

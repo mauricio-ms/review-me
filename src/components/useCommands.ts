@@ -60,6 +60,8 @@ export function useCommands(rawClose: CommandClose): {
   // A branch pair or a single commit: both sides are already committed history.
   const comparingHistory = readsCommittedHistory(comparison);
   const openPath = useProjectStore((s) => s.openPath);
+  const projectFilter = useProjectStore((s) => s.filter);
+  const toggleProjectFilter = useProjectStore((s) => s.toggleFilter);
   // Selecting the length, not the array: the command only needs "is there anywhere
   // to go back to", and a length never trips the fresh-reference rerender trap.
   const jumpDepth = useJumpStore((s) => s.stack.length);
@@ -157,6 +159,11 @@ export function useCommands(rawClose: CommandClose): {
     toggleDiffHighlight();
     close();
   }, [close, toggleDiffHighlight]);
+
+  const handleToggleProjectFilter = useCallback(() => {
+    toggleProjectFilter();
+    close();
+  }, [close, toggleProjectFilter]);
 
   const handleProjectFlag = useCallback(async () => {
     close({ restoreFocus: false });
@@ -340,6 +347,22 @@ export function useCommands(rawClose: CommandClose): {
       buffer: "project",
       enabled: jumpDepth > 0,
       run: handleJumpBack,
+    },
+    {
+      id: "changed",
+      name: "changed",
+      aliases: ["filter", "allfiles", "changedfiles"],
+      label:
+        projectFilter === "changed"
+          ? "project files → all files"
+          : "project files → only what this comparison changed",
+      group: "project",
+      prefix: null,
+      key: "",
+      // `c` in the project tree does the same; no palette chord.
+      palette: false,
+      enabled: !!repo,
+      run: handleToggleProjectFilter,
     },
     {
       id: "close",

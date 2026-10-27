@@ -226,16 +226,17 @@ pub fn clear_tags(repo: String, scope: ReviewScope) -> AppResult<TagStore> {
     Ok(store)
 }
 
-/// Fuzzy-rank `source`'s files for the file finder.
+/// Fuzzy-rank `source`'s files for the file finder — or just `only`, when given.
 #[tauri::command]
 pub fn fuzzy_files(
     repo: String,
     source: ProjectSource,
     query: String,
     limit: u32,
+    only: Option<Vec<String>>,
 ) -> AppResult<Vec<FileMatch>> {
     let repository = repo::open(&PathBuf::from(repo))?;
-    fuzzy::fuzzy_files(&repository, &source, &query, limit as usize)
+    fuzzy::fuzzy_files(&repository, &source, &query, limit as usize, only)
 }
 
 /// List the children of a repo-relative directory for project-mode navigation.

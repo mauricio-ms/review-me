@@ -257,9 +257,18 @@ it at the target commit in branch mode (so a moved branch re-points it on refres
 reviewed commit in commit mode, and at the worktree otherwise (`lib/project.ts`'s
 `ambientSource`); `openFileFromDiff` switches to the **old side's** revision for deletions
 — the merge base, or the commit's first parent (`baseSource`) — since that's the only
-revision containing them. Changing the source
-drops cached listings and the open file — they belong to the old snapshot — and
-`ProjectBuffer`'s modeline names the revision whenever it isn't the worktree.
+revision containing them. Changing the source drops cached listings and the open file —
+they belong to the old snapshot — and `ProjectBuffer`'s modeline names the revision
+whenever it isn't the worktree.
+
+`useProjectStore.filter` (`all` | `changed`, `c` in the tree / `:changed`) narrows the
+tree and the fuzzy finder to **the applied comparison's files** (`useRepoStore.diff`): a
+commit's, a branch's, or the uncommitted ones. It is a standing preference — `setSource`
+and `reset` leave it alone — so it keeps following whatever is under review. The changed
+tree is synthesized from those paths (`buildChanged`), never listed from disk; the finder
+passes them to `fuzzy_files` as `only`. Changed files open through `openFileFromDiff`,
+so a deletion reads from `baseSource`. Xref still indexes the whole revision —
+definitions mostly live in files the change didn't touch.
 
 ### Cross-references
 

@@ -53,15 +53,25 @@ pub fn repo_files(repo: &Repository, source: &ProjectSource) -> AppResult<Vec<St
         .collect())
 }
 
-/// Fuzzy-rank the repo's files against `query`. Empty query returns the first
-/// `limit` files (path-sorted) so the finder shows content immediately.
+/// Fuzzy-rank the repo's files against `query` — or only the paths in `only`, when
+/// given (project mode's changed-files view hands in the comparison's files). Empty
+/// query returns the first `limit` files (path-sorted) so the finder shows content
+/// immediately.
 pub fn fuzzy_files(
     repo: &Repository,
     source: &ProjectSource,
     query: &str,
     limit: usize,
+    only: Option<Vec<String>>,
 ) -> AppResult<Vec<FileMatch>> {
-    let files = repo_files(repo, source)?;
+    let files = match only {
+        Some(mut paths) => {
+            paths.sort();
+            paths.dedup();
+            paths
+        }
+        None => repo_files(repo, source)?,
+    };
     let query = query.trim();
 
     if query.is_empty() {
@@ -149,8 +159,31 @@ mod tests {
         assert!(all.contains(&"Untracked.java".to_string()));
         assert!(!all.contains(&"ignored.txt".to_string()), "ignored excluded");
 
-        let hits = fuzzy_files(&repo, &ProjectSource::Worktree, "appjava", 10).unwrap();
+        let hits = fuzzy_files(&repo, &ProjectSource::Worktree, "appjava", 10, None).unwrap();
         assert_eq!(hits.first().map(|m| m.path.as_str()), Some("src/main/App.java"));
+    }
+
+    #[test]
+    fn ranks_only_the_given_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path();
+        run(path, &["init", "-q", "-b", "master"]);
+        fs::write(path.join("App.java"), "x").unwrap();
+        fs::write(path.join("AppTest.java"), "x").unwrap();
+        run(path, &["add", "."]);
+        run(path, &["commit", "-qm", "init"]);
+        let repo = Repository::open(path).unwrap();
+        let only = || Some(vec!["Gone.java".to_string(), "AppTest.java".to_string()]);
+
+        // Only the listed paths are candidates — even one no longer on disk (a deletion
+        // is still a changed file) — and an empty query lists them sorted.
+        let listed = fuzzy_files(&repo, &ProjectSource::Worktree, "", 10, only()).unwrap();
+        let listed: Vec<&str> = listed.iter().map(|m| m.path.as_str()).collect();
+        assert_eq!(listed, vec!["AppTest.java", "Gone.java"]);
+
+        let hits = fuzzy_files(&repo, &ProjectSource::Worktree, "app", 10, only()).unwrap();
+        let hits: Vec<&str> = hits.iter().map(|m| m.path.as_str()).collect();
+        assert_eq!(hits, vec!["AppTest.java"], "App.java isn't in the list");
     }
 
     #[test]
