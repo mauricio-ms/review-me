@@ -125,7 +125,9 @@ The fixture's first commit (`initial`) is the **root** commit — §6 reviews th
 
 ### 1.3 Open via `:` command line
 - [ ] **Steps:** `Esc`/close any repo, press `:`, type `open`, `Enter`.
-- [ ] **Expect:** Same directory browser opens (noice-style command line filters commands as you type).
+- [ ] **Expect:** Same directory browser opens (the command line filters commands as you type).
+- [ ] **Steps:** Press `:` and type nothing.
+- [ ] **Expect:** Every command available in the current buffer is listed (unavailable ones dimmed), the counter reads `0/N`, and **no row is selected** — `Enter` on a bare `:` does nothing. `↓`/`Tab` selects the first row, `↑` the last; holding `↓` scrolls the selection into view past the bottom of the list. A mouse resting over the list selects nothing until it moves. Typing narrows the list and selects the best match; deleting back to empty deselects again.
 
 ### 1.4 Recent repositories
 - [ ] **Steps:** After opening once, press `Space` → `o` → `r`.

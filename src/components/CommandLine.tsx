@@ -21,7 +21,9 @@ export default function CommandLine() {
   const requestFocus = useUIStore((s) => s.requestFocus);
 
   const [query, setQuery] = useState("");
-  const [selected, setSelected] = useState(0);
+  // -1 is "nothing selected": a bare `:` lists every command but `Enter` runs none of
+  // them until a row is picked with the arrows/Tab or the list is narrowed by typing.
+  const [selected, setSelected] = useState(-1);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const modalRef = useRef<HTMLDivElement | null>(null);
   useModalFocus({ open: true, rootRef: modalRef, initialFocusRef: inputRef });
@@ -29,7 +31,7 @@ export default function CommandLine() {
   const rawClose = useCallback<CommandClose>(
     (options = {}) => {
       setQuery("");
-      setSelected(0);
+      setSelected(-1);
       closeCommandLine();
       if (options.restoreFocus !== false) requestFocus();
     },
@@ -40,8 +42,8 @@ export default function CommandLine() {
 
   const rows = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    // Noice-style: no completion list until something is typed.
-    if (!needle) return [];
+    // Nothing typed yet: every command available here, in registry order.
+    if (!needle) return commands;
     return commands
       .map((command, index) => ({
         command,
@@ -54,29 +56,34 @@ export default function CommandLine() {
   }, [commands, query]);
 
   useEffect(() => {
-    setSelected((current) =>
-      rows.length === 0 ? 0 : Math.min(current, rows.length - 1),
-    );
+    setSelected((current) => Math.min(current, rows.length - 1));
   }, [rows]);
 
-  const selectedRow = rows[selected];
+  const selectedRow = selected >= 0 ? rows[selected] : undefined;
 
   const move = (delta: number) => {
     if (rows.length === 0) return;
-    setSelected((current) => (current + delta + rows.length) % rows.length);
+    setSelected((current) =>
+      current < 0
+        ? delta > 0
+          ? 0
+          : rows.length - 1
+        : (current + delta + rows.length) % rows.length,
+    );
   };
+
+  // The list opens under wherever the pointer rests; only a real move selects, so a
+  // pointer that happens to be there can't pick what `Enter` runs.
+  const pointerRef = useRef<{ x: number; y: number } | null>(null);
 
   const run = (command: AppCommand | undefined) => {
     if (command && command.enabled) void command.run();
   };
 
-  const hasQuery = query.trim().length > 0;
-  const count = !hasQuery
-    ? ""
-    : rows.length === 0
-      ? "0/0"
-      : `${selected + 1}/${rows.length}`;
-  const footer = busy ? `${busy}...` : (selectedRow?.label ?? "type a command");
+  const count = `${selected + 1}/${rows.length}`;
+  const footer = busy
+    ? `${busy}...`
+    : (selectedRow?.label ?? "type a command, or ↑/↓ to pick one");
 
   return (
     <div className="asset-picker-backdrop">
@@ -101,6 +108,8 @@ export default function CommandLine() {
             if (selectedRow) {
               setQuery(selectedRow.name);
               setSelected(0);
+            } else {
+              move(1);
             }
           } else if (e.key === "Enter") {
             e.preventDefault();
@@ -119,36 +128,47 @@ export default function CommandLine() {
             autoComplete="off"
             onChange={(e) => {
               setQuery(e.target.value);
-              setSelected(0);
+              // Typing narrows to the best match; clearing back to a bare `:` picks
+              // nothing again.
+              setSelected(e.target.value.trim() ? 0 : -1);
             }}
             aria-label="Type a command"
           />
         </div>
-        {hasQuery && (
-          <>
-            <div className="neo-separator" />
-            <div className="neo-list">
-              {rows.length === 0 ? (
-                <div className="neo-empty">no matching command</div>
-              ) : (
-                rows.map((row, idx) => (
-                  <div
-                    key={row.id}
-                    className={`neo-row ${idx === selected ? "is-selected" : ""} ${
-                      row.enabled ? "" : "is-disabled"
-                    }`}
-                    onMouseEnter={() => setSelected(idx)}
-                    onClick={() => run(row)}
-                  >
-                    <span className="neo-icon">:</span>
-                    <span className="neo-name">{row.name}</span>
-                    <span className="neo-detail">{row.label}</span>
-                  </div>
-                ))
-              )}
-            </div>
-          </>
-        )}
+        <div className="neo-separator" />
+        <div className="neo-list">
+          {rows.length === 0 ? (
+            <div className="neo-empty">no matching command</div>
+          ) : (
+            rows.map((row, idx) => (
+              <div
+                key={row.id}
+                ref={(el) => {
+                  if (el && idx === selected) {
+                    window.requestAnimationFrame(() => {
+                      el.scrollIntoView({ block: "nearest" });
+                    });
+                  }
+                }}
+                className={`neo-row ${idx === selected ? "is-selected" : ""} ${
+                  row.enabled ? "" : "is-disabled"
+                }`}
+                onPointerMove={(e) => {
+                  const next = { x: e.clientX, y: e.clientY };
+                  const prev = pointerRef.current;
+                  pointerRef.current = next;
+                  if (prev && prev.x === next.x && prev.y === next.y) return;
+                  setSelected(idx);
+                }}
+                onClick={() => run(row)}
+              >
+                <span className="neo-icon">:</span>
+                <span className="neo-name">{row.name}</span>
+                <span className="neo-detail">{row.label}</span>
+              </div>
+            ))
+          )}
+        </div>
         <div className="neo-footer">
           <span>{footer}</span>
         </div>

@@ -279,7 +279,7 @@ chase a definition.
 | Key | Action |
 | --- | --- |
 | `Space` | Open the transient command palette (chord menu) |
-| `:` | Open the command line (type a command name, filters as you go) |
+| `:` | Open the command line (lists every command; type to filter, `↑`/`↓` to pick) |
 | `Esc` | Dismiss any overlay / cancel a visual selection |
 
 ### Palette / command-line commands
