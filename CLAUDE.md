@@ -277,7 +277,9 @@ maximal removed+added run of a hunk) and only while the viewer reads the compari
 new side (`changeForOpenFile`: the source must be `ambientSource`, so a file opened at
 the merge base shows no marks). What is shown is `useProjectStore.inlineDiff` (`:hunks`,
 all files) XOR `inlineFlipped` (`:hunk`, the blocks at the cursor/selection, cleared when
-the comparison changes). Block widgets must come from a `StateField`, never a view
+the comparison changes). The changed-files view (`filter === "changed"`) always shows the
+removed lines (`ShownBlock.showRemoved`); the full diff — green new lines, word marks —
+still follows `:hunk`/`:hunks`. Block widgets must come from a `StateField`, never a view
 plugin — CodeMirror rejects them there.
 
 ### Cross-references

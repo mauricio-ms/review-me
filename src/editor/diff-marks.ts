@@ -11,8 +11,12 @@ import {
 import type { ChangeBlock } from "../lib/project-diff";
 import type { WordSeg } from "../lib/word-diff";
 
-/** A change block plus whether its removed lines are shown inline. */
-export type ShownBlock = ChangeBlock & { shown: boolean };
+/**
+ * A change block plus how much of its diff the viewer shows: `shown` is the full inline
+ * diff (`:hunk`/`:hunks`), `showRemoved` just the removed lines — the changed-files view
+ * always has those.
+ */
+export type ShownBlock = ChangeBlock & { shown: boolean; showRemoved: boolean };
 
 /**
  * Replace the change marks of the file in the project viewer: gutter signs and line
@@ -43,12 +47,14 @@ class RemovedLines extends WidgetType {
     readonly id: string,
     readonly lines: string[],
     readonly segs: (WordSeg[] | null)[],
+    /** Highlight the changed words — only as part of the full inline diff. */
+    readonly words: boolean,
   ) {
     super();
   }
 
   eq(other: WidgetType): boolean {
-    return other instanceof RemovedLines && other.id === this.id;
+    return other instanceof RemovedLines && other.id === this.id && other.words === this.words;
   }
 
   toDOM(): HTMLElement {
@@ -57,7 +63,7 @@ class RemovedLines extends WidgetType {
     this.lines.forEach((text, i) => {
       const line = document.createElement("div");
       line.className = "cm-diff-removed-line";
-      const segs = this.segs[i];
+      const segs = this.words ? this.segs[i] : null;
       if (!segs) {
         // A run with nothing to pair against: the line simply went.
         line.textContent = text || "​";
@@ -121,12 +127,12 @@ function buildMarks(doc: Text, blocks: ShownBlock[]): Marks {
       removalSign(written[written.length - 1] + 1);
     }
 
-    if (!block.shown) continue;
-    if (block.removed.length > 0) {
+    if (block.removed.length > 0 && (block.shown || block.showRemoved)) {
       const widget = new RemovedLines(
         block.id,
         block.removed.map((l) => l.content),
         block.removedSegs,
+        block.shown,
       );
       deco.push(
         block.removedAt > doc.lines
@@ -136,6 +142,7 @@ function buildMarks(doc: Text, blocks: ShownBlock[]): Marks {
             ),
       );
     }
+    if (!block.shown) continue;
     for (const [ln, segs] of block.newSegs) {
       // Only where the viewer still holds the text the diff saw — a file changed on
       // disk since the diff was computed would put the highlights on the wrong words.

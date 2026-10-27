@@ -436,7 +436,9 @@ and a red notch between the lines where something was removed (the modeline adds
 file's `+adds −dels`). `:hunk` opens the diff of the change under the cursor or the
 visual selection right there — the removed lines appear in red above what replaced them,
 changed words highlighted — and `:hunk` again closes it; `:hunks` does the same for every
-change in every file, and `:hunk` then hides just the one you're on.
+change in every file, and `:hunk` then hides just the one you're on. While the tree lists
+only the changed files (`c`), the removed lines are always shown in place; `:hunk` and
+`:hunks` then add the word highlighting.
 
 | Key | Action |
 | --- | --- |

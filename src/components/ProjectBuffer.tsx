@@ -223,16 +223,18 @@ export default function ProjectBuffer() {
   }, [flags, openPath, content]);
 
   // Push the open file's change marks into the viewer; `content` re-pushes them onto a
-  // freshly loaded document.
+  // freshly loaded document. Browsing only the changed files, the removed lines always
+  // show — there, what went matters as much as what came.
   useEffect(() => {
     const view = viewRef.current;
     if (!view) return;
     const shown = blocks.map((b) => ({
       ...b,
       shown: inlineDiff !== inlineFlipped.has(b.id),
+      showRemoved: changedOnly,
     }));
     view.dispatch({ effects: setDiffMarks.of(shown) });
-  }, [blocks, content, inlineDiff, inlineFlipped, openPath]);
+  }, [blocks, changedOnly, content, inlineDiff, inlineFlipped, openPath]);
 
   // Lazily load the CodeMirror language for the open file, dispatched by file
   // name (extension, plus special names like Dockerfile). The Gruber Darker
