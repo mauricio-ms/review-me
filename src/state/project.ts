@@ -36,6 +36,16 @@ type ProjectState = {
    * (and closing the repo), so "changed" keeps following whatever is under review.
    */
   filter: ProjectFilter;
+  /**
+   * Show every change's removed lines inline, in every file (`:hunks`). Like `filter`,
+   * a standing preference.
+   */
+  inlineDiff: boolean;
+  /**
+   * Change blocks (`lib/project-diff.ts`'s ids) `:hunk` flipped away from
+   * `inlineDiff`: a block's diff shows when `inlineDiff !== inlineFlipped.has(id)`.
+   */
+  inlineFlipped: Set<string>;
 
   setDir: (path: string, entries: TreeEntry[]) => void;
   setExpanded: (path: string, open: boolean) => void;
@@ -48,6 +58,12 @@ type ProjectState = {
    */
   setSource: (source: ProjectSource, label: string | null) => void;
   toggleFilter: () => void;
+  /** Flip every change's inline diff, dropping per-change exceptions. */
+  toggleInlineDiff: () => void;
+  /** Show `ids` if any of them is hidden, else hide them all. */
+  flipChanges: (ids: string[]) => void;
+  /** Forget per-change exceptions (they name the changes of one comparison). */
+  clearFlipped: () => void;
   reset: () => void;
 };
 
@@ -60,6 +76,8 @@ export const useProjectStore = create<ProjectState>((set) => ({
   source: WORKTREE_SOURCE,
   sourceLabel: null,
   filter: "all",
+  inlineDiff: false,
+  inlineFlipped: new Set(),
 
   setDir: (path, entries) =>
     set((s) => ({ dirs: { ...s.dirs, [path]: entries } })),
@@ -89,6 +107,21 @@ export const useProjectStore = create<ProjectState>((set) => ({
     ),
   toggleFilter: () =>
     set((s) => ({ filter: s.filter === "all" ? "changed" : "all" })),
+  toggleInlineDiff: () =>
+    set((s) => ({ inlineDiff: !s.inlineDiff, inlineFlipped: new Set<string>() })),
+  flipChanges: (ids) =>
+    set((s) => {
+      const shown = (id: string) => s.inlineDiff !== s.inlineFlipped.has(id);
+      const show = !ids.every(shown);
+      const next = new Set(s.inlineFlipped);
+      for (const id of ids) {
+        if (show !== s.inlineDiff) next.add(id);
+        else next.delete(id);
+      }
+      return { inlineFlipped: next };
+    }),
+  clearFlipped: () =>
+    set((s) => (s.inlineFlipped.size === 0 ? {} : { inlineFlipped: new Set<string>() })),
   reset: () =>
     set({
       dirs: {},
@@ -98,6 +131,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
       loadingFile: false,
       source: WORKTREE_SOURCE,
       sourceLabel: null,
+      inlineFlipped: new Set(),
     }),
 }));
 

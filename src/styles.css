@@ -977,6 +977,94 @@ kbd {
   min-height: 0;
 }
 
+/* ---------- change marks in the project viewer (editor/diff-marks.ts) ---------- */
+
+.project-viewer-change {
+  flex: none;
+}
+
+/* Between the line numbers and the text, like an editor's git signs. */
+.cm-diff-gutter {
+  width: 5px;
+}
+
+.cm-diff-gutter .cm-gutterElement > div {
+  position: relative;
+  height: 100%;
+}
+
+.cm-diff-sign-added,
+.cm-diff-sign-modified,
+.cm-diff-sign-removed-lines {
+  margin-left: 1px;
+  width: 3px;
+}
+
+.cm-diff-sign-added {
+  background: var(--accent-green);
+}
+
+.cm-diff-sign-modified {
+  background: var(--accent-teal);
+}
+
+.cm-diff-sign-removed-lines {
+  background: var(--accent-red);
+}
+
+/* Lines were taken out here: a red notch on the edge between two lines. */
+.cm-diff-sign-removed::before,
+.cm-diff-sign-removed-below::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  border-left: 5px solid var(--accent-red);
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+}
+
+.cm-diff-sign-removed::before {
+  top: -4px;
+}
+
+.cm-diff-sign-removed-below::after {
+  bottom: -4px;
+}
+
+.cm-diff-line-added {
+  background: rgba(var(--accent-green-rgb), 0.07);
+}
+
+.cm-diff-line-modified {
+  background: rgba(var(--accent-teal-rgb), 0.08);
+}
+
+/* A change shown inline reads like the diff buffer: new lines green, old ones red. */
+.cm-diff-line-new {
+  background: rgba(var(--accent-green-rgb), 0.1);
+}
+
+.cm-diff-removed {
+  background: rgba(var(--accent-red-rgb), 0.1);
+  color: var(--accent-red);
+}
+
+.cm-diff-removed-line {
+  padding: 0 2px 0 6px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.cm-diff-line-new .cm-diff-word {
+  background: rgba(var(--accent-green-rgb), 0.3);
+  border-radius: 2px;
+}
+
+.cm-diff-removed .cm-diff-word {
+  background: rgba(var(--accent-red-rgb), 0.3);
+  border-radius: 2px;
+}
+
 .cm-flagged-line {
   background: rgba(var(--accent-amber-rgb), 0.14);
   box-shadow: inset 2px 0 0 var(--accent-amber);

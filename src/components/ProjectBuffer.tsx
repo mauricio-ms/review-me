@@ -8,6 +8,7 @@ import { getCM, vim } from "@replit/codemirror-vim";
 import CodeMirror from "@uiw/react-codemirror";
 
 import { leaderKeymap, vimEscapeKeymap } from "../editor/cm-shared";
+import { diffMarks, setDiffMarks } from "../editor/diff-marks";
 import { flagDecorations, setFlagLines } from "../editor/flag-decorations";
 import { gruberDarkerTheme } from "../editor/gruber-darker";
 import { defineNavVim } from "../editor/vim-nav";
@@ -23,6 +24,7 @@ import {
   openProjectFile,
   toggleDir,
 } from "../lib/project";
+import { changeBlocks, changeForOpenFile } from "../lib/project-diff";
 import { setProjectView } from "../lib/project-view";
 import { useProjectStore } from "../state/project";
 import { useRepoStore } from "../state/repo";
@@ -121,7 +123,12 @@ export default function ProjectBuffer() {
   const sourceLabel = useProjectStore((s) => s.sourceLabel);
   const filter = useProjectStore((s) => s.filter);
   const toggleFilter = useProjectStore((s) => s.toggleFilter);
-  const changedFiles = useRepoStore((s) => s.diff?.files ?? EMPTY_FILES);
+  const diff = useRepoStore((s) => s.diff);
+  const changedFiles = diff?.files ?? EMPTY_FILES;
+  const source = useProjectStore((s) => s.source);
+  const inlineDiff = useProjectStore((s) => s.inlineDiff);
+  const inlineFlipped = useProjectStore((s) => s.inlineFlipped);
+  const clearFlipped = useProjectStore((s) => s.clearFlipped);
   const comparisonEpoch = useRepoStore((s) => s.comparisonEpoch);
   const reviewed = useTagsStore((s) => s.reviewed);
   const flags = useTagsStore((s) => s.flags);
@@ -142,7 +149,15 @@ export default function ProjectBuffer() {
 
   useEffect(() => {
     setCollapsedChanged(new Set());
-  }, [comparisonEpoch]);
+    clearFlipped();
+  }, [clearFlipped, comparisonEpoch]);
+
+  // The open file's changes in the comparison on screen, as the viewer marks them.
+  const openChange = useMemo(
+    () => changeForOpenFile(diff, source, openPath),
+    [diff, openPath, source],
+  );
+  const blocks = useMemo(() => (openChange ? changeBlocks(openChange) : []), [openChange]);
 
   const nodes = useMemo(
     () =>
@@ -207,6 +222,18 @@ export default function ProjectBuffer() {
     view.dispatch({ effects: setFlagLines.of(ranges) });
   }, [flags, openPath, content]);
 
+  // Push the open file's change marks into the viewer; `content` re-pushes them onto a
+  // freshly loaded document.
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view) return;
+    const shown = blocks.map((b) => ({
+      ...b,
+      shown: inlineDiff !== inlineFlipped.has(b.id),
+    }));
+    view.dispatch({ effects: setDiffMarks.of(shown) });
+  }, [blocks, content, inlineDiff, inlineFlipped, openPath]);
+
   // Lazily load the CodeMirror language for the open file, dispatched by file
   // name (extension, plus special names like Dockerfile). The Gruber Darker
   // theme supplies colors; this just supplies the grammar.
@@ -232,6 +259,7 @@ export default function ProjectBuffer() {
       vimEscapeKeymap,
       xrefKeymap,
       xrefClick,
+      diffMarks,
       flagDecorations,
       EditorState.readOnly.of(true),
       EditorView.lineWrapping,
@@ -420,6 +448,15 @@ export default function ProjectBuffer() {
           <>
             <div className="project-viewer-path">
               <span className="project-viewer-file">{openPath}</span>
+              {openChange && (
+                <span
+                  className="project-viewer-change"
+                  title="changed in the comparison on screen — :hunk shows the diff at the cursor, :hunks every one"
+                >
+                  <span className="stat-add">+{openChange.addedLines}</span>{" "}
+                  <span className="stat-del">−{openChange.removedLines}</span>
+                </span>
+              )}
               {sourceLabel && (
                 <span
                   className="project-viewer-rev"

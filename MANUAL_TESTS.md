@@ -356,6 +356,18 @@ The fixture's first commit (`initial`) is the **root** commit — §6 reviews th
 - [ ] **Steps:** On a clean working tree with `c` on.
 - [ ] **Expect:** `changed · 0 files` and `nothing changed here`; the finder says the same.
 
+### 3.3c Change marks and inline diffs
+- [ ] **Steps:** On the dirty fixture (working-tree diff), open `kept.txt` in project mode (`Enter` on it in the diff buffer, or from the tree).
+- [ ] **Expect:** Beside the line numbers, a **blue** bar on each modified line, a **green** bar on each added line, and a **red notch** on the edge between two lines wherever lines were only removed (at the bottom of the last line when they went from the end). Changed lines are faintly tinted. The modeline shows the file's `+a −r`.
+- [ ] **Steps:** Put the cursor on a marked line and run `:hunk`.
+- [ ] **Expect:** That change opens inline: the removed lines in red above the lines that replaced them (which turn green), the words that differ highlighted on both, a red gutter bar beside the removed lines. Other changes stay closed. `:hunk` again closes it. On a line with no change it flashes `no change at the cursor`.
+- [ ] **Steps:** Select several changes (`V` + `j`…) and `:hunk`.
+- [ ] **Expect:** All the selected changes open (or close, if all were open).
+- [ ] **Steps:** `:hunks`, then open another changed file; `:hunk` on one change; `:hunks` again.
+- [ ] **Expect:** Every change in every file opens; `:hunk` then closes just that one; the second `:hunks` closes all of them.
+- [ ] **Steps:** Open a file the comparison didn't touch, and `Enter` a deleted file in a commit review (opens from the parent).
+- [ ] **Expect:** No marks on either, and no `+a −r` in the modeline.
+
 ### 3.4 Flag in project mode
 - [ ] **Steps:** In the viewer, visually select a few lines (`v` + `j`), then `Space` → `t` → `f`.
 - [ ] **Expect:** Those lines get an amber flag highlight; status-bar `⚑` count increments. Switch buffers / reopen the file → the flag highlight persists (and is in `.review-me/tags.json`).

@@ -304,6 +304,8 @@ chase a definition.
 | `b d` | `:diff` | Switch to the diff buffer |
 | `b p` | `:project` | Switch to the project buffer |
 | — | `:changed` | Project tree and finder: only the changed files ↔ all files |
+| — | `:hunk` | (project) Show/hide the diff of the change at the cursor or selection |
+| — | `:hunks` | (project) Show/hide the diff of every change, in every file |
 | `h` | `:diffmode` | (diff) Toggle word-diff ↔ whole-line highlighting |
 | `t f` | `:flag` | (project) Flag the current selection |
 | `g d` | `:definition` | (project) Go to definition |
@@ -427,7 +429,14 @@ opens from the old side, the only revision that still has it.
 | `G` | Jump to bottom |
 | `Ctrl-h` | Toggle focus between tree and viewer |
 
-**Viewer (right)** — read-only CodeMirror with vim motions and per-file syntax highlighting:
+**Viewer (right)** — read-only CodeMirror with vim motions and per-file syntax highlighting.
+When the open file is part of the comparison on screen, its changes are marked the way an
+editor's git signs are: a green bar beside added lines, a blue one beside modified lines,
+and a red notch between the lines where something was removed (the modeline adds the
+file's `+adds −dels`). `:hunk` opens the diff of the change under the cursor or the
+visual selection right there — the removed lines appear in red above what replaced them,
+changed words highlighted — and `:hunk` again closes it; `:hunks` does the same for every
+change in every file, and `:hunk` then hides just the one you're on.
 
 | Key | Action |
 | --- | --- |

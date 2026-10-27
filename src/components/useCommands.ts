@@ -3,6 +3,7 @@ import { useCallback, useState } from "react";
 import { showLog } from "../lib/log";
 import { exportNotes, openNoteEditor } from "../lib/notes";
 import { applyComparison, refreshDiff } from "../lib/open-repo";
+import { toggleChangesAtCursor } from "../lib/project-diff";
 import { projectSelectionRange } from "../lib/project-view";
 import { addFlag } from "../lib/review-actions";
 import { findUsages, gotoDefinition, jumpBack } from "../lib/xref";
@@ -62,6 +63,8 @@ export function useCommands(rawClose: CommandClose): {
   const openPath = useProjectStore((s) => s.openPath);
   const projectFilter = useProjectStore((s) => s.filter);
   const toggleProjectFilter = useProjectStore((s) => s.toggleFilter);
+  const inlineDiff = useProjectStore((s) => s.inlineDiff);
+  const toggleInlineDiff = useProjectStore((s) => s.toggleInlineDiff);
   // Selecting the length, not the array: the command only needs "is there anywhere
   // to go back to", and a length never trips the fresh-reference rerender trap.
   const jumpDepth = useJumpStore((s) => s.stack.length);
@@ -164,6 +167,16 @@ export function useCommands(rawClose: CommandClose): {
     toggleProjectFilter();
     close();
   }, [close, toggleProjectFilter]);
+
+  const handleToggleChangeAtCursor = useCallback(() => {
+    close();
+    toggleChangesAtCursor();
+  }, [close]);
+
+  const handleToggleAllChanges = useCallback(() => {
+    toggleInlineDiff();
+    close();
+  }, [close, toggleInlineDiff]);
 
   const handleProjectFlag = useCallback(async () => {
     close({ restoreFocus: false });
@@ -363,6 +376,34 @@ export function useCommands(rawClose: CommandClose): {
       palette: false,
       enabled: !!repo,
       run: handleToggleProjectFilter,
+    },
+    {
+      id: "hunk",
+      name: "hunk",
+      aliases: ["preview", "showdiff", "inline"],
+      label: "show/hide the diff of the change at the cursor or selection",
+      group: "project",
+      prefix: null,
+      key: "",
+      buffer: "project",
+      palette: false,
+      enabled: !!openPath,
+      run: handleToggleChangeAtCursor,
+    },
+    {
+      id: "hunks",
+      name: "hunks",
+      aliases: ["diffs", "showdiffs", "inlineall"],
+      label: inlineDiff
+        ? "hide the inline diff of every change, in every file"
+        : "show the inline diff of every change, in every file",
+      group: "project",
+      prefix: null,
+      key: "",
+      buffer: "project",
+      palette: false,
+      enabled: !!repo,
+      run: handleToggleAllChanges,
     },
     {
       id: "close",

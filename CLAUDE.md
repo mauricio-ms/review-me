@@ -270,6 +270,16 @@ passes them to `fuzzy_files` as `only`. Changed files open through `openFileFrom
 so a deletion reads from `baseSource`. Xref still indexes the whole revision —
 definitions mostly live in files the change didn't touch.
 
+The viewer marks the open file's changes (`editor/diff-marks.ts`): gutter signs and line
+tints always, and inline diffs — removed lines as block widgets, changed words as marks —
+for the blocks shown. Blocks come from `lib/project-diff.ts`'s `changeBlocks` (one per
+maximal removed+added run of a hunk) and only while the viewer reads the comparison's
+new side (`changeForOpenFile`: the source must be `ambientSource`, so a file opened at
+the merge base shows no marks). What is shown is `useProjectStore.inlineDiff` (`:hunks`,
+all files) XOR `inlineFlipped` (`:hunk`, the blocks at the cursor/selection, cleared when
+the comparison changes). Block widgets must come from a `StateField`, never a view
+plugin — CodeMirror rejects them there.
+
 ### Cross-references
 
 `xref.rs` parses every `.java` file once into a cached index, keyed by
