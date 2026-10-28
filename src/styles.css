@@ -515,6 +515,17 @@ kbd {
   color: var(--fg-faint);
 }
 
+/* Where the cursor is among the file's changes (`] c` / `[ c`), just before the path. */
+.status-change {
+  flex: none;
+  margin-left: auto;
+  color: var(--accent-teal);
+}
+
+.status-change + .status-here {
+  margin-left: 0;
+}
+
 .status-changes {
   color: var(--fg-2);
 }

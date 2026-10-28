@@ -36,6 +36,11 @@ export type KeyBinding = {
   readonly label?: string;
   /** Provided by vim or the mouse rather than dispatched from here: listed only. */
   readonly external?: true;
+  /**
+   * Bound as a vim mapping (`editor/vim-nav.ts`) rather than a CodeMirror key: a key
+   * sequence vim also uses (`]` begins `]]`, `]c`, …) must reach vim whole.
+   */
+  readonly vim?: true;
 };
 
 type ActionOfEntry<E> = E extends { readonly action: infer A extends string } ? A : never;
@@ -185,12 +190,26 @@ const TREE_KEYS = [
 
 /** The code viewer is CodeMirror in vim normal mode; these go through its keymap. */
 const VIEWER_KEYS = [
+  { keys: ["] c"], action: "next-change", vim: true, doc: "next change in this file" },
+  { keys: ["[ c"], action: "prev-change", vim: true, doc: "previous change in this file" },
+  {
+    keys: ["] f"],
+    action: "next-file",
+    vim: true,
+    doc: "next changed file, at its first change",
+  },
+  { keys: ["[ f"], action: "prev-file", vim: true, doc: "previous changed file" },
   { keys: ["M-."], action: "definition", command: "goto-def", doc: "go to definition" },
   { keys: ["M-,"], action: "back", command: "jump-back", doc: "back to where you jumped from" },
   { keys: ["M-?"], action: "references", command: "find-refs", doc: "find references" },
   { keys: ["M-g g"], action: "goto-line", doc: "go to line" },
   { keys: ["C-<mouse-1>"], label: "C-click", external: true, doc: "go to definition" },
-  { keys: ["q"], external: true, doc: "back to what this window showed before (the diff)" },
+  {
+    keys: ["q"],
+    action: "quit",
+    vim: true,
+    doc: "back to what this window showed before (the diff); a split-off window closes",
+  },
   {
     keys: ["h", "j", "k", "l"],
     label: "h j k l w b / …",

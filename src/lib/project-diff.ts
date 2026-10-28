@@ -4,8 +4,9 @@ import { useUIStore } from "../state/ui";
 import type { ChangedFile, DiffLine, DiffSummary } from "../types/diff";
 import { sameSource, type ProjectSource } from "../types/repo";
 import { currentFile } from "./buffers";
-import { ambientSource } from "./project";
-import { projectSelectionRange } from "./project-view";
+import { changedFileOrder } from "./changed-tree";
+import { ambientSource, openFileFromDiff } from "./project";
+import { projectCursor, projectSelectionRange, setProjectCursor } from "./project-view";
 import { refineHunk, type WordSeg } from "./word-diff";
 
 /**
@@ -37,8 +38,19 @@ export type ChangeBlock = {
   trailingRemoval: boolean;
 };
 
+/** Blocks per changed file: the viewer and the mode line both ask, for every move. */
+const blockCache = new WeakMap<ChangedFile, ChangeBlock[]>();
+
 /** Split a changed file's hunks into change blocks, in file order. */
 export function changeBlocks(file: ChangedFile): ChangeBlock[] {
+  const cached = blockCache.get(file);
+  if (cached) return cached;
+  const blocks = splitBlocks(file);
+  blockCache.set(file, blocks);
+  return blocks;
+}
+
+function splitBlocks(file: ChangedFile): ChangeBlock[] {
   const blocks: ChangeBlock[] = [];
   for (const hunk of file.hunks) {
     const segs = refineHunk(hunk.lines);
@@ -112,6 +124,81 @@ function blockSpan(block: ChangeBlock): [number, number] {
   }
   const last = lines[lines.length - 1];
   return [lines[0], block.trailingRemoval ? last + 1 : last];
+}
+
+/** The line a block starts on: its first new line, or the line after what it removed. */
+function blockStart(block: ChangeBlock): number {
+  return block.modified[0] ?? block.added[0] ?? block.removedAt;
+}
+
+/** The block at `line` (its index), if the line is on one. */
+export function changeAtLine(blocks: ChangeBlock[], line: number): number {
+  return blocks.findIndex((block) => {
+    const [lo, hi] = blockSpan(block);
+    return line >= lo && line <= hi;
+  });
+}
+
+/** The file in the selected window and its change in the comparison, or why there's none. */
+function currentChange(): { change: ChangedFile } | { why: string } {
+  const file = currentFile();
+  const change = file
+    ? changeForFile(useRepoStore.getState().diff, file.source, file.path)
+    : null;
+  if (change) return { change };
+  return { why: file ? "This file has no changes in the comparison on screen" : "No file here" };
+}
+
+/**
+ * `] c` / `[ c` (vimdiff's): the start of the next or previous change in the file, `count`
+ * changes on. At the last, the echo area points on to the next changed file.
+ */
+export function gotoChange(step: 1 | -1, count = 1): void {
+  const ui = useUIStore.getState();
+  const found = currentChange();
+  if ("why" in found) {
+    ui.showFlash(found.why);
+    return;
+  }
+  const line = projectCursor()?.line ?? 0;
+  const starts = [...new Set(changeBlocks(found.change).map(blockStart))].sort((a, b) => a - b);
+  const ahead = step > 0 ? starts.filter((s) => s > line) : starts.filter((s) => s < line).reverse();
+  if (ahead.length === 0) {
+    ui.showFlash(
+      step > 0
+        ? "No more changes below — ] f for the next changed file"
+        : "No more changes above — [ f for the previous changed file",
+    );
+    return;
+  }
+  setProjectCursor(ahead[Math.min(count, ahead.length) - 1], 0, true);
+}
+
+/**
+ * `] f` / `[ f` in a file: the next or previous file the comparison changed — in the
+ * changed-files tree's order — opened at its first change, as `] f` walks files in the
+ * diff buffer. From a file the comparison didn't change, the first (or last) one.
+ */
+export function gotoChangedFile(step: 1 | -1, count = 1): void {
+  const ui = useUIStore.getState();
+  const diff = useRepoStore.getState().diff;
+  const files = changedFileOrder(diff?.files ?? []).filter((f) => !f.binary);
+  if (files.length === 0) {
+    ui.showFlash("The comparison on screen changes no files");
+    return;
+  }
+  const path = currentFile()?.path;
+  const at = files.findIndex((f) => f.path === path);
+  if (at >= 0 && (at + step < 0 || at + step >= files.length)) {
+    ui.showFlash(step > 0 ? "No more changed files" : "No earlier changed files");
+    return;
+  }
+  const next = at < 0 ? (step > 0 ? count - 1 : files.length - count) : at + step * count;
+  const target = files[Math.min(Math.max(next, 0), files.length - 1)];
+  const deleted = target.status === "deleted";
+  const first = deleted ? undefined : changeBlocks(target)[0];
+  openFileFromDiff(target.path, deleted ? "old" : "new", first ? blockStart(first) : 1);
+  ui.showFlash(`${target.path} — changed file ${files.indexOf(target) + 1}/${files.length}`);
 }
 
 /**

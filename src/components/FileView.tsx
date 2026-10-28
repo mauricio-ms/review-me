@@ -58,6 +58,7 @@ function trackPosition(win: WindowId, buffer: FileBufferId): Extension {
     const head = view.state.selection.main.head;
     const line = view.state.doc.lineAt(head);
     savePosition(win, buffer, { line: line.number, col: head - line.from, top: topLine(view) });
+    useUIStore.getState().setFileLine(win, line.number);
   };
   return [
     EditorView.updateListener.of((update) => {

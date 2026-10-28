@@ -1,5 +1,8 @@
+import { useMemo } from "react";
+
 import { useCurrentFile } from "../lib/buffers";
 import { reviewProgress } from "../lib/coverage";
+import { changeAtLine, changeBlocks, changeForFile } from "../lib/project-diff";
 import { timeAgo } from "../lib/time";
 import { useRepoStore } from "../state/repo";
 import { useTagsStore } from "../state/tags";
@@ -55,6 +58,14 @@ export default function BufferStatusBar() {
   const vimMode = useUIStore((s) => s.vimMode);
   const diffCursor = useUIStore((s) => s.diffCursor);
   const file = useCurrentFile();
+  const selected = useWindowStore((s) => s.selected);
+  const line = useUIStore((s) => s.fileLines[selected] ?? null);
+  // Where the cursor is among the file's changes: `change 2/5`, or how many there are.
+  const blocks = useMemo(() => {
+    const change = file ? changeForFile(diff, file.source, file.path) : null;
+    return change ? changeBlocks(change) : null;
+  }, [diff, file]);
+  const onChange = blocks && line != null ? changeAtLine(blocks, line) : -1;
 
   const files = diff?.files ?? [];
   // The file you're on, named in full at the right edge, as Emacs's mode line names the
@@ -63,7 +74,7 @@ export default function BufferStatusBar() {
     shown === "diff" && diffCursor
       ? diffCursor
       : file
-        ? { path: file.path, line: null }
+        ? { path: file.path, line }
         : null;
   const bufferLabel = treeFocused ? "tree" : isFileKey(shown) ? "file" : shown;
   const { done, total } = reviewProgress(files, reviewed);
@@ -119,6 +130,13 @@ export default function BufferStatusBar() {
             </span>
           )}
         </>
+      )}
+      {file && !treeFocused && blocks && blocks.length > 0 && (
+        <span className="status-segment status-change" title="] c / [ c move between them">
+          {onChange >= 0
+            ? `change ${onChange + 1}/${blocks.length}`
+            : `${blocks.length} change${blocks.length === 1 ? "" : "s"}`}
+        </span>
       )}
       {here && (
         <span className="status-segment status-here">

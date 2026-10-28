@@ -490,8 +490,10 @@ shows in the window, as a buffer of its own.
 **A file** — read-only CodeMirror with vim motions and per-file syntax highlighting.
 When the open file is part of the comparison on screen, its changes are marked the way an
 editor's git signs are: a green bar beside added lines, a blue one beside modified lines,
-and a red notch between the lines where something was removed (the modeline adds the
-file's `+adds −dels`). `M-x hunk` opens the diff of the change under the cursor or the
+and a red notch between the lines where something was removed (the header adds the
+file's `+adds −dels`). `]c` / `[c` jump from change to change — the mode line says which
+one you're on, `change 2/5` — and `]f` / `[f` go on to the next or previous changed file,
+in the changed-files tree's order, the way they walk files in the diff buffer. `M-x hunk` opens the diff of the change under the cursor or the
 visual selection right there — the removed lines appear in red above what replaced them,
 changed words highlighted — and `M-x hunk` again closes it; `M-x hunks` does the same for every
 change in every file, and `M-x hunk` then hides just the one you're on. While the tree lists
@@ -505,6 +507,8 @@ only the changed files (`c`), the removed lines are always shown in place; `M-x 
 | `C-x 4 .` | Go to definition in the other window |
 | `M-,` | Back to where you jumped from |
 | `M-g g` | Go to line |
+| `]c` / `[c` | Next / previous **change** in the file (a count works: `3]c`) |
+| `]f` / `[f` | Next / previous **changed file**, at its first change |
 | `Ctrl`/`Cmd` + click | Jump to definition of the symbol clicked |
 | `v` + `j`, then `M-x flag` | Flag the selected lines |
 | `C-x o` | To the next window |

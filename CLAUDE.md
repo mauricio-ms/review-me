@@ -108,7 +108,10 @@ buffer (`C-h b`, `C-h m`; `C-h k` describes a key in the echo area). Dispatch li
   handlers)` with a typed `Record<…Action, KeyHandler>`, so an action nothing handles
   fails the build; a handler returning `false` lets the key go on.
 - The viewer's keys are a CodeMirror keymap built from the table
-  (`editor/viewer-keymap.ts`); the note and commit editors read `C-c C-c` / `C-c C-k` in a
+  (`editor/viewer-keymap.ts`) — except `vim: true` entries (`q`, `] c`, `[ c`, `] f`,
+  `[ f`), which `editor/vim-nav.ts` maps as vim commands, because a sequence vim also uses
+  (`]]`, `[(`) must reach vim whole; they stay in the table for help and `C-h k`, and
+  get vim's count (`3]c`). The note and commit editors read `C-c C-c` / `C-c C-k` in a
   capture handler on the dialog, before vim sees them (vim's own `:wq`/`:q` stay).
 - New command: give it an `M-x` name; give it a key only if it's used often, in Emacs
   conventions. Rare or destructive ones stay `M-x` only (`show`, `note`, `export`,
@@ -375,7 +378,11 @@ tints always, and inline diffs — removed lines as block widgets, changed words
 for the blocks shown. Blocks come from `lib/project-diff.ts`'s `changeBlocks` (one per
 maximal removed+added run of a hunk) and only while the buffer reads the comparison's
 new side (`changeForFile`: its source must be `ambientSource`, so a file opened at
-the merge base shows no marks). What is shown is `useProjectStore.inlineDiff` (`M-x hunks`,
+the merge base shows no marks). `] c` / `[ c` (`gotoChange`) walk a file's blocks by their
+first line, `] f` / `[ f` (`gotoChangedFile`) the comparison's files in the changed-files
+tree's order (`lib/changed-tree.ts`), opened at their first change; the mode line says
+`change i/n` from each window's published cursor line (`useUIStore.fileLines`).
+`changeBlocks` is cached per `ChangedFile`. What is shown is `useProjectStore.inlineDiff` (`M-x hunks`,
 all files) XOR `inlineFlipped` (`M-x hunk`, the blocks at the cursor/selection, cleared when
 the comparison changes). The changed-files view (`filter === "changed"`) always shows the
 removed lines (`ShownBlock.showRemoved`); the full diff — green new lines, word marks —

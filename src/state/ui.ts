@@ -43,6 +43,8 @@ type UIState = {
   /** A half-typed key sequence (`C-x-`) or `C-h k`'s prompt, for the echo area. */
   keyEcho: string | null;
   diffCursor: CursorPath | null;
+  /** The cursor line of the file in each window, for the mode line. */
+  fileLines: Record<number, number>;
 
   setHelp: (help: HelpView) => void;
   setVimMode: (m: VimMode) => void;
@@ -56,6 +58,7 @@ type UIState = {
   showFlash: (message: string) => void;
   setKeyEcho: (echo: string | null) => void;
   setDiffCursor: (cursor: CursorPath | null) => void;
+  setFileLine: (win: number, line: number) => void;
 };
 
 /** How long an echo-area message stays up. */
@@ -73,6 +76,7 @@ export const useUIStore = create<UIState>((set) => ({
   flash: null,
   keyEcho: null,
   diffCursor: null,
+  fileLines: {},
 
   setHelp: (help) => set({ help }),
   setVimMode: (m) => set({ vimMode: m }),
@@ -93,6 +97,8 @@ export const useUIStore = create<UIState>((set) => ({
     set({ flash: message });
   },
   setKeyEcho: (echo) => set({ keyEcho: echo }),
+  setFileLine: (win, line) =>
+    set((s) => (s.fileLines[win] === line ? {} : { fileLines: { ...s.fileLines, [win]: line } })),
   setDiffCursor: (cursor) =>
     set((s) =>
       s.diffCursor?.path === cursor?.path && s.diffCursor?.line === cursor?.line

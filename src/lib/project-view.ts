@@ -48,11 +48,14 @@ export function projectCursor(): { line: number; col: number } | null {
   return { line: line.number, col: head - line.from };
 }
 
-/** Move the selected window's cursor to a 1-based line / 0-based col and scroll to it. */
-export function setProjectCursor(line: number, col = 0): void {
+/**
+ * Move the selected window's cursor to a 1-based line / 0-based col and scroll to it —
+ * to the middle of the view with `center`, as a jump does.
+ */
+export function setProjectCursor(line: number, col = 0, center = false): void {
   const view = activeView();
   if (!view) return;
-  applyPosition(view, { line, col });
+  applyPosition(view, { line, col, center });
   view.focus();
 }
 
