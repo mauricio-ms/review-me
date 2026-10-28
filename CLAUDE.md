@@ -57,17 +57,24 @@ symbol index in a global `Mutex`.
 
 **Frontend (`src/`)** — Emacs's model: a **frame** (`AppShell`'s `Frame`) holds the
 **windows** (`Window`), each showing one **buffer** (`state/windows.ts`'s `BufferKey`):
-`"diff"`, `"log"`, `"help"`, or an open file (`file:<n>`, `state/files.ts`) — and, in
-**project mode** only, the file tree (`ProjectTree`) fixed at its left. Project mode
-(`inProjectMode`) is the main window (the first in the layout) showing a file, or the tree
-having the keyboard; the diff, the log and help — and the diff with a file opened beside
-it by `o` — never show the tree (it stays mounted, hidden, keeping its cursor and folds).
-`M-x project` from outside brings the tree up to pick a file with, and that file goes to
-the main window. `useWindowStore` holds what each window shows, what it showed before
-(`prev`, where `q` — `lib/buffers.ts`'s `quitWindow` — and `C-x ←` go back to), what `C-x ←`
-stepped back from (`ahead`, where `C-x →` goes), the selected window, `treeFocused`, and `recent` (`C-x b`'s order); which kind of buffer has
-the keyboard (`activeBuffer`: diff/log/help, or `project` for a file or the tree) is
-derived, never stored. `DiffBuffer` and `LogBuffer` are rendered **once**, as portals into
+`"diff"`, `"log"`, `"help"`, or the **project buffer** — an open file (`file:<n>`,
+`state/files.ts`), or `"project"` with none open ("no file open"). The project buffer is
+what it always was — the file tree (`ProjectTree`) fixed at the left, the viewer beside
+it — and the tree exists **only there**: project mode (`inProjectMode`) is the main window
+(the first in the layout) showing the project buffer. The diff, the log and help — and the
+diff with a file opened beside it by `o` — never show the tree (it stays mounted, hidden,
+keeping its cursor and folds). `C-x b project` / `M-x project` (`showProject`) switch the
+main window to it — the file it last showed, else "no file open" — with the keyboard where
+it was left (`projectPane`: tree or viewer); `q` in the tree or a file (`backToDiff` /
+`quitFile`) goes back to the diff, except that a window split off beside it closes. A file
+opened by a plain gesture (RET in the diff, the finder, the tree, a definition) goes to
+`targetWindow()`: the selected window when it's in the project buffer or reading a file,
+else the main window — so from the diff or the log it opens the project buffer, as it
+always has. `useWindowStore` holds what each window shows, what it showed before (`prev`,
+where help's `q` — `quitWindow` — and `C-x ←` go back to), what `C-x ←` stepped back from
+(`ahead`, where `C-x →` goes), the selected window, `treeFocused`, and `recent` (`C-x b`'s
+order); which kind of buffer has the keyboard (`activeBuffer`: diff/log/help, or `project`
+for the project buffer or the tree) is derived, never stored. `DiffBuffer` and `LogBuffer` are rendered **once**, as portals into
 persistent host elements that `Window`'s `BufferSlot` moves into whichever window shows
 them — so their cursor, folds and scroll survive any move — and the slot carries scroll
 offsets and focus across the detach/re-attach (StrictMode re-runs it in dev). Each holds
@@ -344,10 +351,12 @@ have drifted.
 the fuzzy finder list — `list_repo_dir` and `fuzzy_files` take it. `applyComparison` points
 it at the target commit in branch mode (so a moved branch re-points it on refresh), at the
 reviewed commit in commit mode, and at the worktree otherwise (`lib/project.ts`'s
-`ambientSource`). Changing it drops cached listings.
+`ambientSource`); after that it follows the revision of the file in the selected window
+(`Frame`'s effect) — a deletion opened at the old side puts the tree there too, as it
+always has. Changing it drops cached listings.
 
 Opening a file never replaces another: **`visitFile(path, choice, at?)`** (Emacs's
-find-file) shows the buffer already open for `(revision, path)` in the selected window, or
+find-file) shows the buffer already open for `(revision, path)` in `targetWindow()`, or
 opens a new one (`FileBuffer`: path, its own `source`, content read by `read_file`). Each
 buffer carries its revision: `openFileFromDiff` opens a deletion at the **old side's**
 revision — the merge base, or the commit's first parent (`baseSource`), the only revision
@@ -367,10 +376,10 @@ switch drops the way forward); once its history runs out, back goes on through t
 shown buffers. `<left>`/`<right>` alone repeat.
 
 The tree's width (`useProjectStore.treeWidth`: dragged on its edge or `C-x {` / `C-x }`,
-remembered, clamped so the windows keep 320px) and `treeHidden` (`M-x toggle-tree`,
-remembered; `C-x o` and `M-x project` bring it back) are layout state, not per-revision.
-In project mode `C-x o` moves between the tree and the windows; the tree opens files in the
-selected window, and its `q` hands the keyboard back to it.
+remembered, clamped so the windows keep 320px) and `treeHidden` (`M-x toggle-tree`; `C-x o`
+brings it back) are layout state, not per-revision. In the project buffer `C-x o` moves
+between the tree and the viewer (and on through any other windows); the tree opens files in
+the selected window, and its `q` goes back to the diff.
 
 `useProjectStore.filter` (`all` | `changed`, `c` in the tree / `M-x changed`) narrows the
 tree and the fuzzy finder to **the applied comparison's files** (`useRepoStore.diff`): a

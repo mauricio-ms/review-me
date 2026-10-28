@@ -17,8 +17,6 @@ export type ProjectFilter = "all" | "changed";
 
 /** The file tree's width: dragged on its edge or `C-x {` / `C-x }`, remembered. */
 const TREE_WIDTH_KEY = "review-me.tree-width";
-/** Whether the tree is hidden (`M-x toggle-tree`), remembered too. */
-const TREE_HIDDEN_KEY = "review-me.tree-hidden";
 export const TREE_WIDTH_DEFAULT = 380;
 export const TREE_WIDTH_MIN = 180;
 
@@ -36,22 +34,6 @@ function saveTreeWidth(width: number): void {
     window.localStorage.setItem(TREE_WIDTH_KEY, String(width));
   } catch {
     // Best effort: the width still applies for this session.
-  }
-}
-
-function savedTreeHidden(): boolean {
-  try {
-    return window.localStorage.getItem(TREE_HIDDEN_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-
-function saveTreeHidden(hidden: boolean): void {
-  try {
-    window.localStorage.setItem(TREE_HIDDEN_KEY, hidden ? "1" : "0");
-  } catch {
-    // Best effort, as with the width.
   }
 }
 
@@ -85,7 +67,7 @@ type ProjectState = {
   inlineFlipped: Set<string>;
   /** The file tree's width in px (the layout clamps it to what fits). */
   treeWidth: number;
-  /** `M-x toggle-tree`: the windows alone, no tree beside them. */
+  /** `M-x toggle-tree`: the viewer alone. */
   treeHidden: boolean;
 
   setDir: (path: string, entries: TreeEntry[]) => void;
@@ -118,7 +100,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
   inlineDiff: false,
   inlineFlipped: new Set(),
   treeWidth: savedTreeWidth(),
-  treeHidden: savedTreeHidden(),
+  treeHidden: false,
 
   setDir: (path, entries) =>
     set((s) => ({ dirs: { ...s.dirs, [path]: entries } })),
@@ -162,10 +144,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
     if (remember) saveTreeWidth(next);
     set({ treeWidth: next });
   },
-  setTreeHidden: (hidden) => {
-    saveTreeHidden(hidden);
-    set({ treeHidden: hidden });
-  },
+  setTreeHidden: (hidden) => set({ treeHidden: hidden }),
   reset: () =>
     set({
       dirs: {},

@@ -21,8 +21,8 @@ import { adjustTextScale } from "../lib/text-scale";
 import {
   deleteOtherWindows,
   deleteWindow,
-  focusTree,
   otherWindow,
+  showProject,
   splitWindow,
   windmove,
   type Direction,
@@ -38,7 +38,12 @@ import { useProjectStore } from "../state/project";
 import { useRepoStore } from "../state/repo";
 import { useTagsStore } from "../state/tags";
 import { useUIStore } from "../state/ui";
-import { activeBuffer as activeBufferOf, useWindowStore, type BufferName } from "../state/windows";
+import {
+  activeBuffer as activeBufferOf,
+  inProjectMode,
+  useWindowStore,
+  type BufferName,
+} from "../state/windows";
 import { readsCommittedHistory, WORKTREE_SPEC } from "../types/diff";
 
 /** Closes the minibuffer that ran a command (a no-op when a key ran it). */
@@ -125,6 +130,8 @@ export function useCommands(close: CommandClose): {
   all: AppCommand[];
 } {
   const activeBuffer = useWindowStore(activeBufferOf);
+  // The tree is project mode's: its commands only mean something there.
+  const projectMode = useWindowStore(inProjectMode);
   const openPicker = useUIStore((s) => s.openPicker);
   const requestFocus = useUIStore((s) => s.requestFocus);
   const repo = useRepoStore((s) => s.repo);
@@ -574,12 +581,13 @@ export function useCommands(close: CommandClose): {
     {
       id: "project",
       name: "project",
-      aliases: ["files"],
-      label: "the file tree (shown if hidden)",
+      aliases: [],
+      label: "project buffer",
       enabled: !!repo,
       run: () => {
         close({ restoreFocus: false });
-        focusTree();
+        recordJump();
+        showProject();
       },
     },
     {
@@ -756,7 +764,8 @@ export function useCommands(close: CommandClose): {
       name: "shrink-window-horizontally",
       aliases: ["shrink-tree", "narrower"],
       label: "narrower file tree",
-      enabled: !!repo,
+      buffer: "project",
+      enabled: projectMode,
       run: () => {
         close();
         resizeTree(-1);
@@ -767,7 +776,8 @@ export function useCommands(close: CommandClose): {
       name: "enlarge-window-horizontally",
       aliases: ["enlarge-tree", "wider"],
       label: "wider file tree",
-      enabled: !!repo,
+      buffer: "project",
+      enabled: projectMode,
       run: () => {
         close();
         resizeTree(1);
@@ -777,8 +787,9 @@ export function useCommands(close: CommandClose): {
       id: "toggle-tree",
       name: "toggle-tree",
       aliases: ["hide-tree", "show-tree", "tree"],
-      label: "hide or show the file tree beside the windows",
-      enabled: !!repo,
+      label: "hide or show the file tree (the viewer alone)",
+      buffer: "project",
+      enabled: projectMode,
       run: () => {
         close({ restoreFocus: false });
         toggleTree();

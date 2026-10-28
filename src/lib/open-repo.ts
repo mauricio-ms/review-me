@@ -52,9 +52,9 @@ export async function applyComparison(spec: DiffSpec): Promise<void> {
     // when the revision changed — including when a branch has moved under a plain
     // refresh — and is a no-op when it hasn't.
     const ambient = ambientSource(diff.comparison);
-    // History starts fresh with a new comparison: its places — diff rows, files at
-    // the old revision — mean nothing in this one.
-    if (!same || !sameSource(useProjectStore.getState().source, ambient.source)) {
+    // History starts fresh with a new comparison (or its revision moving): its places —
+    // diff rows, files at the old revision — mean nothing in this one.
+    if (!same || !prev || !sameSource(ambientSource(prev).source, ambient.source)) {
       useHistoryStore.getState().clear();
     }
     useProjectSource(ambient);

@@ -5,10 +5,11 @@ export type FileBufferId = `file:${string}`;
 
 /**
  * Anything a window can show: one of the buffers that always exist, or an open file.
- * The diff, the log and help each keep a single cursor, so each shows in one window
- * at most; a file can show in several, each with its own cursor.
+ * `project` is the project buffer with no file open (the tree, and "no file open"); an
+ * open file is the project buffer showing it. The diff, the log, help and `project` each
+ * show in one window at most; a file can show in several, each with its own cursor.
  */
-export type BufferKey = "diff" | "log" | "help" | FileBufferId;
+export type BufferKey = "diff" | "log" | "help" | "project" | FileBufferId;
 
 /** What has the keyboard, by kind — what buffer-scoped commands and keymaps key on. */
 export type BufferName = "diff" | "log" | "project" | "help";
@@ -20,6 +21,11 @@ export function isFileKey(key: BufferKey): key is FileBufferId {
 /** The buffers that exist once: never in two windows at a time. */
 export function isSingleton(key: BufferKey): boolean {
   return !isFileKey(key);
+}
+
+/** The project buffer: a file, or `project` with none open. */
+export function isProjectKey(key: BufferKey | undefined): boolean {
+  return key === "project" || (key != null && isFileKey(key));
 }
 
 export type WindowId = number;
@@ -114,8 +120,10 @@ type WindowState = {
   ahead: Record<WindowId, BufferKey[]>;
   /** The window commands act on — and where the tree opens files. */
   selected: WindowId;
-  /** The file tree has the keyboard rather than the selected window. */
+  /** The file tree has the keyboard rather than the selected window (project mode only). */
   treeFocused: boolean;
+  /** Which half of the project buffer had the keyboard when it was left, for coming back. */
+  projectPane: "tree" | "viewer";
   /** Every buffer shown so far, most recent first: `C-x b`'s order. */
   recent: BufferKey[];
   nextId: WindowId;
@@ -133,6 +141,7 @@ type WindowState = {
   /** Give window `win` the selection (and the keyboard, from the tree). */
   select: (win: WindowId) => void;
   setTreeFocused: (focused: boolean) => void;
+  setProjectPane: (pane: "tree" | "viewer") => void;
   /** Split window `win`; the new window — returned — shows `key`. */
   split: (win: WindowId, dir: "row" | "column", key: BufferKey) => WindowId;
   /** Close window `win` (never the last one); its space goes to its sibling. */
@@ -152,6 +161,7 @@ const initial = () => ({
   ahead: { [FIRST_WINDOW]: [] } as Record<WindowId, BufferKey[]>,
   selected: FIRST_WINDOW,
   treeFocused: false,
+  projectPane: "tree" as "tree" | "viewer",
   recent: ["diff"] as BufferKey[],
   nextId: FIRST_WINDOW + 1,
 });
@@ -221,6 +231,8 @@ export const useWindowStore = create<WindowState>((set, get) => ({
   setTreeFocused: (focused) =>
     set((s) => (s.treeFocused === focused ? {} : { treeFocused: focused })),
 
+  setProjectPane: (pane) => set((s) => (s.projectPane === pane ? {} : { projectPane: pane })),
+
   split: (win, dir, key) => {
     const added = get().nextId;
     set((s) => ({
@@ -278,14 +290,17 @@ export const useWindowStore = create<WindowState>((set, get) => ({
     };
     const prev = kept(s.prev);
     const orphans: WindowId[] = [];
+    const main = windowOrder(s.layout)[0];
     for (const win of windowOrder(s.layout)) {
       if (!gone.has(shown[win])) continue;
       const visible = new Set(Object.values(shown));
-      // Back to what it showed before — never a single-cursor buffer that another
-      // window already shows. A window with nothing left to show closes.
+      // The main window stays in the project buffer: another open file it showed, else
+      // "no file open". Another window goes back to what it showed before — never a
+      // single-cursor buffer a window already shows — and with nothing left, closes.
       const next =
-        prev[win].find((k) => isFileKey(k) || !visible.has(k)) ??
-        (["diff", "log", "help"] as const).find((k) => !visible.has(k));
+        win === main
+          ? (prev[win].find((k) => isFileKey(k)) ?? "project")
+          : prev[win].find((k) => isFileKey(k) || !visible.has(k));
       if (!next) {
         orphans.push(win);
         continue;
@@ -305,11 +320,11 @@ export function selectedBuffer(s: WindowState): BufferKey {
   return s.shown[s.selected] ?? "diff";
 }
 
-/** Which kind of buffer has the keyboard (the tree counts as the project). */
+/** Which kind of buffer has the keyboard: a file, the tree, or no file open is the project. */
 export function activeBuffer(s: WindowState): BufferName {
   if (s.treeFocused) return "project";
   const key = selectedBuffer(s);
-  return isFileKey(key) ? "project" : key;
+  return isProjectKey(key) ? "project" : (key as BufferName);
 }
 
 /** The main window: the first in the layout (left, top). */
@@ -318,12 +333,12 @@ export function mainWindow(s: WindowState): WindowId {
 }
 
 /**
- * Project mode, the file tree's: the main window shows a file, or the tree has the
- * keyboard (`M-x project`, to pick one). The diff, the log and help are not — nor the
- * diff with a file opened beside it (`o`), which is still the diff's.
+ * Project mode, the file tree's: the main window shows the project buffer — a file, or
+ * no file open. The diff, the log and help are not — nor the diff with a file opened
+ * beside it (`o`), which is still the diff's.
  */
 export function inProjectMode(s: WindowState): boolean {
-  return s.treeFocused || isFileKey(s.shown[mainWindow(s)] ?? "diff");
+  return isProjectKey(s.shown[mainWindow(s)]);
 }
 
 /** Whether any window shows `key`. */

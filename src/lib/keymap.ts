@@ -191,7 +191,7 @@ const TREE_KEYS = [
     command: "changed",
     doc: "all files ↔ only what the comparison changed",
   },
-  { keys: ["q"], action: "quit", doc: "back to the window" },
+  { keys: ["q"], action: "quit", doc: "back to the diff" },
 ] as const satisfies readonly KeyBinding[];
 
 /** The code viewer is CodeMirror in vim normal mode; these go through its keymap. */
@@ -213,7 +213,7 @@ const VIEWER_KEYS = [
     keys: ["q"],
     action: "quit",
     vim: true,
-    doc: "back to what this window showed before (the diff); a split-off window closes",
+    doc: "back to the diff (a window split off beside it closes)",
   },
   {
     keys: ["h", "j", "k", "l"],

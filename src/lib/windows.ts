@@ -4,6 +4,7 @@ import { useUIStore } from "../state/ui";
 import {
   inProjectMode,
   isFileKey,
+  isProjectKey,
   isSingleton,
   mainWindow,
   useWindowStore,
@@ -29,6 +30,10 @@ export function display(key: BufferKey, win: WindowId, select = true): WindowId 
   const ws = useWindowStore.getState();
   const elsewhere = isSingleton(key) ? windowShowing(ws, key, win) : null;
   const target = elsewhere ?? win;
+  // Leaving the project buffer: remember which half had the keyboard, for coming back.
+  if (target === mainWindow(ws) && inProjectMode(ws) && !isProjectKey(key)) {
+    ws.setProjectPane(ws.treeFocused ? "tree" : "viewer");
+  }
   if (elsewhere == null) ws.show(target, key);
   if (select) ws.select(target);
   else if (ws.treeFocused) ws.setTreeFocused(false);
@@ -121,18 +126,44 @@ export function treeShown(): boolean {
   return inProjectMode(useWindowStore.getState()) && !useProjectStore.getState().treeHidden;
 }
 
-/**
- * `M-x project`: the file tree, shown if it was hidden, with the keyboard. From outside
- * project mode (the diff, the log) it comes up to pick a file with, and that file goes
- * to the main window — which is what makes it project mode.
- */
+/** The tree, shown if it was hidden, with the keyboard (project mode only). */
 export function focusTree(): void {
   const ps = useProjectStore.getState();
   if (ps.treeHidden) ps.setTreeHidden(false);
-  const ws = useWindowStore.getState();
-  if (!inProjectMode(ws)) ws.select(mainWindow(ws));
   useWindowStore.getState().setTreeFocused(true);
   useUIStore.getState().requestFocus();
+}
+
+/**
+ * Where a file opened by a plain gesture goes (RET in the diff, the finder, the tree,
+ * a definition): the selected window when it's in the project buffer or already reading
+ * a file; from the diff or the log, the main window — which switches to the project
+ * buffer, as opening a file always has.
+ */
+export function targetWindow(): WindowId {
+  const ws = useWindowStore.getState();
+  if (inProjectMode(ws) || isFileKey(ws.shown[ws.selected])) return ws.selected;
+  return mainWindow(ws);
+}
+
+/**
+ * `C-x b project` / `M-x project`: the project buffer, in the main window — the file it
+ * last showed (the most recent open one), else "no file open" — with the keyboard where
+ * it was when you left (the tree, with no file to read).
+ */
+export function showProject(): void {
+  const ws = useWindowStore.getState();
+  const main = mainWindow(ws);
+  if (!inProjectMode(ws)) {
+    const files = new Set(useFilesStore.getState().buffers.map((b) => b.id));
+    const last = ws.recent.find((k) => isFileKey(k) && files.has(k));
+    display(last ?? "project", main);
+  }
+  const now = useWindowStore.getState();
+  const noFile = now.shown[main] === "project";
+  if (!inProjectMode(now)) return;
+  if (noFile || now.projectPane === "tree") focusTree();
+  else selectWindow(main);
 }
 
 /**

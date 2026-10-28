@@ -1,7 +1,7 @@
 import { Prec } from "@codemirror/state";
 import { EditorView, keymap, type KeyBinding as CmKeyBinding } from "@codemirror/view";
 
-import { quitWindow } from "../lib/buffers";
+import { quitFile } from "../lib/buffers";
 import { recordJump } from "../lib/jumps";
 import { KEYMAP, type ViewerAction } from "../lib/keymap";
 import { gotoChange, gotoChangedFile } from "../lib/project-diff";
@@ -43,7 +43,7 @@ export const VIEWER_HANDLERS: Record<ViewerAction, (count: number) => void> = {
   "prev-change": (count) => gotoChange(-1, count),
   "next-file": (count) => gotoChangedFile(1, count),
   "prev-file": (count) => gotoChangedFile(-1, count),
-  quit: quitWindow,
+  quit: quitFile,
 };
 
 /** `M-g g` → `Alt-g g`: keymap.ts's Emacs notation in CodeMirror's spelling. */

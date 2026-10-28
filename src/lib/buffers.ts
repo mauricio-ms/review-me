@@ -2,9 +2,11 @@ import { useFilesStore, fileBuffer, type FileBuffer } from "../state/files";
 import { useUIStore } from "../state/ui";
 import {
   isFileKey,
+  mainWindow,
   selectedBuffer,
   useWindowStore,
   windowOrder,
+  windowShowing,
   type BufferKey,
   type FileBufferId,
 } from "../state/windows";
@@ -57,7 +59,34 @@ export function openHelp(from: KeyScope, only: boolean, options: ShowOptions = {
 }
 
 /**
- * `q` (Emacs's quit-window): the selected window goes back to what it showed before,
+ * `q` in the project buffer — the tree or a file — goes back to the diff, as it always
+ * has: in the main window, leaving project mode. (A diff another window showed moves
+ * here rather than being in two places.)
+ */
+export function backToDiff(): void {
+  const ws = useWindowStore.getState();
+  const main = mainWindow(ws);
+  const elsewhere = windowShowing(ws, "diff", main);
+  if (elsewhere != null) ws.remove(elsewhere);
+  display("diff", main);
+}
+
+/**
+ * `q` in a file: back to the diff from the main window; a window split off beside it
+ * (`C-x 4 .`, `o` in the diff) just closes.
+ */
+export function quitFile(): void {
+  const ws = useWindowStore.getState();
+  if (ws.selected !== mainWindow(ws) && windowOrder(ws.layout).length > 1) {
+    ws.remove(ws.selected);
+    useUIStore.getState().requestFocus();
+    return;
+  }
+  backToDiff();
+}
+
+/**
+ * `q` in help (Emacs's quit-window): the selected window goes back to what it showed before,
  * forgetting the buffer it quit, so a second `q` keeps going back rather than returning
  * to it. A window with nothing to go back to — one split off to show something —
  * closes, as long as it isn't the only one; the only one goes back to the diff.

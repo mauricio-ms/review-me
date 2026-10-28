@@ -12,12 +12,14 @@ import { recordJump } from "../lib/jumps";
 import { contextScope, dispatchKey, type KeyHandler } from "../lib/key-dispatch";
 import { commandKeys, KEYMAP, type MinibufferAction } from "../lib/keymap";
 import { showLog } from "../lib/log";
+import { showProject } from "../lib/windows";
 import { useFilesStore } from "../state/files";
 import { useMinibufferStore, type MinibufferRequest } from "../state/minibuffer";
 import { useRepoStore } from "../state/repo";
 import { useUIStore, type PickerKind } from "../state/ui";
 import {
   isFileKey,
+  isProjectKey,
   selectedBuffer,
   useWindowStore,
   type BufferKey,
@@ -105,7 +107,7 @@ function highlight(text: string, query: string): ReactNode {
 }
 
 /** The buffers that always exist, after whatever was shown most recently. */
-const STANDING: BufferKey[] = ["diff", "log", "help"];
+const STANDING: BufferKey[] = ["diff", "log", "project", "help"];
 
 /** The name column's width for a list of buffers: the longest name, 16 to 48ch. */
 function nameWidth(candidates: Candidate[] | null): number {
@@ -174,6 +176,7 @@ function Prompt({ request }: { request: MinibufferRequest }) {
       const label = {
         diff: "the changes under review",
         log: `commits on ${reviewBranch?.display ?? "HEAD"}`,
+        project: "the files of the revision under review",
         help: "every key binding and command",
       };
       const files = new Map(fileBuffers.map((b) => [b.id, b]));
@@ -182,7 +185,13 @@ function Prompt({ request }: { request: MinibufferRequest }) {
       // as in Emacs; then the rest, open files last.
       const order = [
         ...new Set<BufferKey>([...recent, ...STANDING, ...fileBuffers.map((b) => b.id)]),
-      ].filter((key) => key !== shownBuffer && (!isFileKey(key) || files.has(key)));
+      ].filter(
+        (key) =>
+          key !== shownBuffer &&
+          (!isFileKey(key) || files.has(key)) &&
+          // Already in the project buffer: `project` is where you are.
+          !(key === "project" && isProjectKey(shownBuffer)),
+      );
       return order.map((key) => {
         const file = isFileKey(key) ? files.get(key) : undefined;
         return {
@@ -202,6 +211,7 @@ function Prompt({ request }: { request: MinibufferRequest }) {
             if (key !== "help") recordJump();
             if (key === "log") showLog({ other });
             else if (key === "help") openHelp(scope, false, { other });
+            else if (key === "project" && !other) showProject();
             else showBuffer(key, { other });
           },
         };

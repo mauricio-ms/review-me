@@ -7,6 +7,8 @@ import {
   type SplitPath,
   type WindowId,
 } from "../state/windows";
+import { focusTree } from "../lib/windows";
+import { useProjectStore } from "../state/project";
 import FileView from "./FileView";
 import HelpBuffer from "./HelpBuffer";
 
@@ -68,6 +70,30 @@ function BufferSlot({ name }: { name: "diff" | "log" }) {
 }
 
 /**
+ * The project buffer with no file open. There is no viewer to take the keyboard, so the
+ * tree does whenever this window would.
+ */
+function NoFileOpen({ win }: { win: WindowId }) {
+  const sourceLabel = useProjectStore((s) => s.sourceLabel);
+  const wantsKeyboard = useWindowStore((s) => s.selected === win && !s.treeFocused);
+  useEffect(() => {
+    if (wantsKeyboard) focusTree();
+  }, [wantsKeyboard]);
+  return (
+    <div className="project-viewer">
+      <div className="project-viewer-empty">
+        <div className="empty-title">no file open{sourceLabel ? ` — ${sourceLabel}` : ""}</div>
+        <div className="empty-hint">
+          Select a file in the tree, or <kbd>C-x C-f</kbd> to find one; <kbd>c</kbd> in the
+          tree lists only the changed files. <kbd>C-x o</kbd> switches between the tree and
+          the viewer; <kbd>q</kbd> returns to the diff.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
  * One Emacs window: a view onto a buffer. Focus landing anywhere in it — a click, or
  * a buffer taking the keyboard — makes it the selected one, and the tree lets go.
  */
@@ -99,6 +125,8 @@ function Window({
         <BufferSlot name={key} />
       ) : key === "help" ? (
         <HelpBuffer />
+      ) : key === "project" ? (
+        <NoFileOpen win={id} />
       ) : key && isFileKey(key) ? (
         <FileView key={key} win={id} bufferId={key} />
       ) : null}

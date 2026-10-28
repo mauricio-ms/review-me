@@ -13,7 +13,9 @@ import {
   settle,
   type KeyHandler,
 } from "../lib/key-dispatch";
+import { useCurrentFile } from "../lib/buffers";
 import { KEYMAP, type GlobalAction, type KeyBinding } from "../lib/keymap";
+import { useProjectSource } from "../lib/project";
 import { useMinibufferStore } from "../state/minibuffer";
 import { useProjectStore } from "../state/project";
 import { useRepoStore } from "../state/repo";
@@ -139,6 +141,12 @@ function GlobalKeys() {
 function Frame() {
   const treeHidden = useProjectStore((s) => s.treeHidden);
   const projectMode = useWindowStore(inProjectMode);
+  // The tree and the finder read the revision of the file you're reading — the old
+  // side's, for a deletion — as they always have.
+  const file = useCurrentFile();
+  useEffect(() => {
+    if (file) useProjectSource({ source: file.source, label: file.sourceLabel });
+  }, [file?.source, file?.sourceLabel]);
   return (
     <div className="frame">
       {/* Hidden rather than unmounted, so its cursor and folds wait for project mode. */}

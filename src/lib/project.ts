@@ -9,7 +9,7 @@ import { findFileBuffer, killFileBuffers, type ShowOptions } from "./buffers";
 import { recordJump } from "./jumps";
 import { armRepeat } from "./key-dispatch";
 import { placeCursor } from "./project-view";
-import { display, focusTree, otherWindowFor, treeShown } from "./windows";
+import { display, focusTree, otherWindowFor, targetWindow } from "./windows";
 import { listRepoDir, readFile } from "./tauri";
 
 /** The repo + revision every project read below goes through. */
@@ -105,14 +105,10 @@ export function resizeTree(step: 1 | -1): void {
   armRepeat({ "{": () => resizeTree(-1), "}": () => resizeTree(1) });
 }
 
-/**
- * `M-x toggle-tree`: project mode's windows alone, or the tree back beside them (with
- * the keyboard). Outside project mode the tree isn't there to hide: it comes up to pick
- * a file with, as `M-x project` does.
- */
+/** `M-x toggle-tree`: the viewer alone, or the tree back beside it (with the keyboard). */
 export function toggleTree(): void {
   const ps = useProjectStore.getState();
-  if (!treeShown()) {
+  if (ps.treeHidden) {
     focusTree();
     return;
   }
@@ -190,7 +186,7 @@ export function visitFile(
   if (!useRepoStore.getState().repoPath) return;
   const id = bufferFor(path, choice);
   const { selected } = useWindowStore.getState();
-  const win = options.other ? otherWindowFor(id, selected) : selected;
+  const win = options.other ? otherWindowFor(id, selected) : targetWindow();
   if (at) placeCursor(win, id, at.line, at.col ?? 0);
   display(id, win, options.select ?? true);
 }

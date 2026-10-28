@@ -195,7 +195,8 @@ export function contextScope(): KeyScope {
   const key = selectedBuffer(ws);
   if (key === "help" && !ws.treeFocused) return "help";
   if (!useRepoStore.getState().repo) return "start";
-  if (ws.treeFocused) return "tree";
+  // With no file open, the tree is what takes keys.
+  if (ws.treeFocused || key === "project") return "tree";
   return isFileKey(key) ? "viewer" : key;
 }
 

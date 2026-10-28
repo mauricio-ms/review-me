@@ -14,7 +14,6 @@ import { gruberDarkerTheme } from "../editor/gruber-darker";
 import { viewerKeymap } from "../editor/viewer-keymap";
 import { defineNavVim } from "../editor/vim-nav";
 import { xrefClick } from "../editor/xref-click";
-import { ambientSource } from "../lib/project";
 import { changeBlocks, changeForFile } from "../lib/project-diff";
 import {
   applyPosition,
@@ -29,7 +28,6 @@ import { useRepoStore } from "../state/repo";
 import { useTagsStore } from "../state/tags";
 import { useUIStore, type VimMode } from "../state/ui";
 import { useWindowStore, type FileBufferId, type WindowId } from "../state/windows";
-import { sameSource } from "../types/repo";
 import PathLabel from "./PathLabel";
 
 // Identity-stable: the CodeMirror wrapper reconfigures whenever this object changes.
@@ -107,9 +105,6 @@ export default function FileView({ win, bufferId }: { win: WindowId; bufferId: F
     [diff, path, source],
   );
   const blocks = useMemo(() => (change ? changeBlocks(change) : []), [change]);
-  // Flags anchor lines of the comparison's new side; at another revision they'd sit on
-  // the wrong lines.
-  const readsNewSide = !!source && sameSource(source, ambientSource(diff?.comparison).source);
 
   // The viewer's vim mappings (`q` quits the window) are global to vim: defined once.
   useEffect(() => {
@@ -124,13 +119,11 @@ export default function FileView({ win, bufferId }: { win: WindowId; bufferId: F
 
   useEffect(() => {
     if (!view) return;
-    const ranges = readsNewSide
-      ? flags
-          .filter((f) => f.anchor.file === path && !f.anchor.stale)
-          .map((f) => [f.anchor.startLine, f.anchor.endLine] as [number, number])
-      : [];
+    const ranges = flags
+      .filter((f) => f.anchor.file === path && !f.anchor.stale)
+      .map((f) => [f.anchor.startLine, f.anchor.endLine] as [number, number]);
     view.dispatch({ effects: setFlagLines.of(ranges) });
-  }, [content, flags, path, readsNewSide, view]);
+  }, [content, flags, path, view]);
 
   // The change marks; `content` re-pushes them onto a re-read document. Browsing only
   // the changed files, the removed lines always show — there, what went matters as

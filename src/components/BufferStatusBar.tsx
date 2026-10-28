@@ -7,7 +7,7 @@ import { timeAgo } from "../lib/time";
 import { useRepoStore } from "../state/repo";
 import { useTagsStore } from "../state/tags";
 import { useUIStore } from "../state/ui";
-import { isFileKey, selectedBuffer, useWindowStore } from "../state/windows";
+import { activeBuffer, selectedBuffer, useWindowStore } from "../state/windows";
 import { comparisonLabel, shortOid, type Comparison } from "../types/diff";
 import PathLabel from "./PathLabel";
 
@@ -76,7 +76,7 @@ export default function BufferStatusBar() {
       : file
         ? { path: file.path, line }
         : null;
-  const bufferLabel = treeFocused ? "tree" : isFileKey(shown) ? "file" : shown;
+  const bufferLabel = useWindowStore(activeBuffer);
   const { done, total } = reviewProgress(files, reviewed);
 
   return (
