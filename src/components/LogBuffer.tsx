@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ShowOptions } from "../lib/buffers";
 import { dispatchKey, type KeyHandler } from "../lib/key-dispatch";
 import { KEYMAP, type LogAction } from "../lib/keymap";
-import { loadMoreLog } from "../lib/log";
+import { loadMoreLog, setLogHandle } from "../lib/log";
 import { enterCommit, enterLogRange } from "../lib/open-repo";
 import { timeAgo } from "../lib/time";
 import { useLogStore } from "../state/log";
@@ -124,6 +124,13 @@ export default function LogBuffer() {
 
   const found = cursorOid ? commits.findIndex((c) => c.oid === cursorOid) : -1;
   const cursor = found >= 0 ? found : 0;
+
+  // History (`M-,`) reads the commit under the cursor and puts it back there.
+  const cursorCommit = commits[cursor]?.oid ?? null;
+  useEffect(() => {
+    setLogHandle({ cursor: () => cursorCommit, move: setCursorOid });
+    return () => setLogHandle(null);
+  }, [cursorCommit]);
 
   useEffect(() => {
     if (focused) rootRef.current?.focus({ preventScroll: true });

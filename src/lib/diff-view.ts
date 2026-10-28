@@ -21,3 +21,15 @@ export function setDiffTargetSource(next: (() => DiffTarget | null) | null): voi
 export function diffTarget(): DiffTarget | null {
   return source?.() ?? null;
 }
+
+// The same, for moving the cursor: history (`M-,`) puts it back on a row.
+let mover: ((path: string | null, line: number | null) => void) | null = null;
+
+export function setDiffMover(next: ((path: string | null, line: number | null) => void) | null): void {
+  mover = next;
+}
+
+/** Put the diff buffer's cursor on `path`'s row for `line` — else its file row. */
+export function moveDiffCursor(path: string | null, line: number | null): void {
+  mover?.(path, line);
+}

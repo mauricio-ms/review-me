@@ -1,5 +1,4 @@
 import { fileBuffer, newFileBufferId, useFilesStore, type FileBuffer } from "../state/files";
-import { useJumpStore } from "../state/jumps";
 import { useProjectStore } from "../state/project";
 import { useRepoStore } from "../state/repo";
 import { useUIStore } from "../state/ui";
@@ -80,11 +79,7 @@ export function baseSource(comparison: Comparison | undefined): SourceChoice {
 
 /** Point the tree and the finder at a revision (no-op when they're already there). */
 export function useProjectSource(choice: SourceChoice): void {
-  const store = useProjectStore.getState();
-  // Jump entries name a file and a line in the revision they were recorded in;
-  // nothing they point at survives a change of source.
-  if (!sameSource(store.source, choice.source)) useJumpStore.getState().clear();
-  store.setSource(choice.source, choice.label);
+  useProjectStore.getState().setSource(choice.source, choice.label);
 }
 
 /** How far one `C-x {` / `C-x }` moves the tree's edge. */

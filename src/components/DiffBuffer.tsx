@@ -17,7 +17,7 @@ import {
   type ReviewSection,
 } from "../lib/coverage";
 import type { ShowOptions } from "../lib/buffers";
-import { setDiffTargetSource } from "../lib/diff-view";
+import { setDiffMover, setDiffTargetSource } from "../lib/diff-view";
 import { dispatchKey, type KeyHandler } from "../lib/key-dispatch";
 import { KEYMAP, type DiffAction } from "../lib/keymap";
 import { flagTarget, hasNote, openNoteFor } from "../lib/notes";
@@ -751,6 +751,24 @@ export default function DiffBuffer() {
     });
   });
   useEffect(() => () => setDiffTargetSource(null), []);
+
+  // History (`M-,`) puts the cursor back on a row: the line, else its file's row (a
+  // folded file has no line rows).
+  useEffect(() => {
+    setDiffMover((path, line) => {
+      if (path == null) return;
+      const onLine = rows.findIndex(
+        (r) =>
+          r.kind === "line" &&
+          r.file.path === path &&
+          (r.line.newLine ?? r.line.oldLine) === line,
+      );
+      const idx =
+        onLine >= 0 ? onLine : rows.findIndex((r) => r.kind === "file" && r.file.path === path);
+      if (idx >= 0) setCursor(idx);
+    });
+  });
+  useEffect(() => () => setDiffMover(null), []);
 
   // Opening a note consumes the selection, as marking it would.
   const noteOpen = useNotesStore((s) => s.editing != null);

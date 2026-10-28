@@ -1,11 +1,17 @@
 import { useFilesStore } from "../state/files";
+import { useHistoryStore } from "../state/history";
 import { useLogStore } from "../state/log";
 import { useProjectStore } from "../state/project";
 import { useRepoStore } from "../state/repo";
 import { useTagsStore } from "../state/tags";
 import { useWindowStore } from "../state/windows";
 import { sameSpec, WORKTREE_SPEC, type DiffSpec } from "../types/diff";
-import { branchShorthand, rangeBaseRef, type ReviewBranch } from "../types/repo";
+import {
+  branchShorthand,
+  rangeBaseRef,
+  sameSource,
+  type ReviewBranch,
+} from "../types/repo";
 import { scopeForSpec } from "../types/tags";
 import { showBuffer, type ShowOptions } from "./buffers";
 import { loadLog, refreshCommitReviews, showLog } from "./log";
@@ -42,12 +48,15 @@ export async function applyComparison(spec: DiffSpec): Promise<void> {
     // `M-x hunk`'s per-change exceptions name the changes of the comparison they were
     // made in.
     if (!same) useProjectStore.getState().clearFlipped();
-    // Project mode follows the comparison. Re-pointing it drops listings and the
-    // open file when the revision changed — including when a branch has moved
-    // under a plain refresh — and is a no-op when it hasn't.
-    // Goes through `useProjectSource` so a changed revision also drops the jump
-    // history, whose entries name files at the *old* revision.
+    // The tree and the finder follow the comparison. Re-pointing them drops listings
+    // when the revision changed — including when a branch has moved under a plain
+    // refresh — and is a no-op when it hasn't.
     const ambient = ambientSource(diff.comparison);
+    // History starts fresh with a new comparison: its places — diff rows, files at
+    // the old revision — mean nothing in this one.
+    if (!same || !sameSource(useProjectStore.getState().source, ambient.source)) {
+      useHistoryStore.getState().clear();
+    }
     useProjectSource(ambient);
     // Open files follow it too: re-read, re-pointed, or — a review that's over — killed.
     reconcileFileBuffers(prev, diff.comparison, same);
@@ -75,6 +84,7 @@ export async function openRepoByPath(path: string): Promise<void> {
   useLogStore.getState().reset();
   useFilesStore.getState().reset();
   useWindowStore.getState().reset();
+  useHistoryStore.getState().clear();
   // The branch under review starts as whatever the checkout is on (else the repo's
   // default branch) — the backend already picked; we only need its display name.
   repoStore.setReviewBranch(

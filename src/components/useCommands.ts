@@ -27,9 +27,11 @@ import {
   windmove,
   type Direction,
 } from "../lib/windows";
-import { findUsages, gotoDefinition, jumpBack } from "../lib/xref";
+import { goBack, goForward } from "../lib/history";
+import { recordJump } from "../lib/jumps";
+import { findUsages, gotoDefinition } from "../lib/xref";
 import { useFilesStore } from "../state/files";
-import { useJumpStore } from "../state/jumps";
+import { useHistoryStore } from "../state/history";
 import { useLogStore } from "../state/log";
 import { useMinibufferStore } from "../state/minibuffer";
 import { useProjectStore } from "../state/project";
@@ -53,7 +55,8 @@ export type CommandId =
   | "export-notes"
   | "goto-def"
   | "find-refs"
-  | "jump-back"
+  | "back"
+  | "forward"
   | "changed"
   | "hunk"
   | "hunks"
@@ -135,9 +138,11 @@ export function useCommands(close: CommandClose): {
   const toggleProjectFilter = useProjectStore((s) => s.toggleFilter);
   const inlineDiff = useProjectStore((s) => s.inlineDiff);
   const toggleInlineDiff = useProjectStore((s) => s.toggleInlineDiff);
-  // Selecting the length, not the array: the command only needs "is there anywhere
-  // to go back to", and a length never trips the fresh-reference rerender trap.
-  const jumpDepth = useJumpStore((s) => s.stack.length);
+  // Selecting lengths, not the arrays: the labels only need how far there is to go,
+  // and a length never trips the fresh-reference rerender trap.
+  const backDepth = useHistoryStore((s) => s.back.length);
+  const forwardDepth = useHistoryStore((s) => s.forward.length);
+  const places = (n: number) => (n === 0 ? "nothing yet" : `${n} place${n === 1 ? "" : "s"}`);
   const diffHighlight = useUIStore((s) => s.diffHighlight);
   const toggleDiffHighlight = useUIStore((s) => s.toggleDiffHighlight);
   const openMinibuffer = useMinibufferStore((s) => s.open);
@@ -202,6 +207,7 @@ export function useCommands(close: CommandClose): {
 
   const handleShowLog = useCallback(() => {
     close({ restoreFocus: false });
+    recordJump();
     showLog();
   }, [close]);
 
@@ -276,9 +282,14 @@ export function useCommands(close: CommandClose): {
     void findUsages();
   }, [close]);
 
-  const handleJumpBack = useCallback(() => {
+  const handleBack = useCallback(() => {
     close({ restoreFocus: false });
-    void jumpBack();
+    goBack();
+  }, [close]);
+
+  const handleForward = useCallback(() => {
+    close({ restoreFocus: false });
+    goForward();
   }, [close]);
 
   const handleSwitchBuffer = useCallback(
@@ -321,6 +332,7 @@ export function useCommands(close: CommandClose): {
 
   const handleShowDiff = useCallback(() => {
     close({ restoreFocus: false });
+    recordJump();
     showBuffer("diff");
   }, [close]);
 
@@ -425,13 +437,21 @@ export function useCommands(close: CommandClose): {
       run: handleFindRefs,
     },
     {
-      id: "jump-back",
+      id: "back",
       name: "back",
-      aliases: ["pop", "jumpback"],
-      label: "back to where you jumped from",
-      buffer: "project",
-      enabled: jumpDepth > 0,
-      run: handleJumpBack,
+      aliases: ["pop", "jumpback", "go-back"],
+      label: `back to where you were: a file, the diff, the log (${places(backDepth)})`,
+      // Always runnable: at the end it says so, rather than "isn't available here".
+      enabled: !!repo,
+      run: handleBack,
+    },
+    {
+      id: "forward",
+      name: "forward",
+      aliases: ["go-forward"],
+      label: `forward again, to where back came from (${places(forwardDepth)})`,
+      enabled: !!repo,
+      run: handleForward,
     },
     {
       id: "changed",

@@ -78,6 +78,24 @@ export async function refreshCommitReviews(oids: string[]): Promise<void> {
   }
 }
 
+/** The commits buffer's cursor, read and moved by history (`M-,`); it registers these. */
+type LogHandle = { cursor: () => string | null; move: (oid: string) => void };
+let logHandle: LogHandle | null = null;
+
+export function setLogHandle(handle: LogHandle | null): void {
+  logHandle = handle;
+}
+
+/** The commit under the log's cursor. */
+export function logCursor(): string | null {
+  return logHandle?.cursor() ?? null;
+}
+
+/** Put the log's cursor on commit `oid` (once it's listed). */
+export function moveLogCursor(oid: string): void {
+  logHandle?.move(oid);
+}
+
 /**
  * Show the commits buffer. The history is reloaded every time — the branch may have
  * moved since (an agent committing in the background) — and the buffer keeps its

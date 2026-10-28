@@ -312,6 +312,7 @@ just the current buffer's keys; `C-h k` tells you what a key does.
 | `M-x` | — | Run any command by name: type to narrow, `↑`/`↓` or `C-n`/`C-p`, `TAB` completes, `RET` runs |
 | `C-g` | — | Cancel: a half-typed key, the minibuffer, a picker, a selection |
 | `C-x C-f` | `find` | Fuzzy file finder → opens the file as a buffer |
+| `M-,` / `C-M-,` | `back` / `forward` | Back to where you were — a file, the diff, the log — and forward again |
 | `C-x b` | `switch-buffer` | Switch buffer (diff, log, help, every open file); `RET` alone goes back to the last one |
 | `C-x k` | `kill-buffer` | Close the file in the window |
 | `C-x ←` / `C-x →` | `previous-buffer` / `next-buffer` | Previous / next open file (then `←` `→` alone keep going) |
@@ -505,7 +506,6 @@ only the changed files (`c`), the removed lines are always shown in place; `M-x 
 | `j`/`k`, `gg`/`G`, `w`/`b`, `/search` | Standard vim motions |
 | `M-.` / `M-?` | Go to definition / find references |
 | `C-x 4 .` | Go to definition in the other window |
-| `M-,` | Back to where you jumped from |
 | `M-g g` | Go to line |
 | `]c` / `[c` | Next / previous **change** in the file (a count works: `3]c`) |
 | `]f` / `[f` | Next / previous **changed file**, at its first change |
@@ -531,9 +531,15 @@ same-named symbol are dropped, and ones that can't be proven either way are kept
 separate **unconfirmed** section rather than hidden — in a review tool, a missed caller
 is worse than a spurious one.
 
-`M-,` pops a jump stack that records every file you open — definitions, reference picks,
-Ctrl+click, the fuzzy finder, the tree, and `RET` in the diff. It's emacs-style and pop-only
-(no forward), and it resets when you switch to a different revision.
+### Going back and forth
+
+`M-,` goes back to where you were, and `C-M-,` forward again — like a browser, across
+everything: a definition, a reference picked, a Ctrl+click, a file from the finder or the
+tree, `RET` in the diff, a test ↔ code jump, `M-g g`, a buffer switch (`C-x b`, `C-x g`). A
+place is a line in a file, a row of the diff, or a commit in the log; small moves (`]c`,
+`j`) aren't recorded. Going back to a file that another window shows goes to that window:
+after `C-x 4 .`, `M-,` returns to the test beside the code. A new comparison starts a fresh
+history.
 
 ---
 

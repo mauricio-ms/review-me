@@ -55,6 +55,8 @@ const GLOBAL_KEYS = [
     doc: "cancel: a half-typed key, the minibuffer, a selection",
   },
   { keys: ["C-x C-f"], command: "find", doc: "find a file in the revision under review" },
+  { keys: ["M-,"], command: "back", doc: "back to where you were (a file, the diff, the log)" },
+  { keys: ["C-M-,"], command: "forward", doc: "forward again, to where M-, came back from" },
   { keys: ["C-x b"], command: "switch-buffer", doc: "switch buffer (open files too)" },
   { keys: ["C-x k"], command: "kill-buffer", doc: "close the file in this window" },
   {
@@ -200,7 +202,6 @@ const VIEWER_KEYS = [
   },
   { keys: ["[ f"], action: "prev-file", vim: true, doc: "previous changed file" },
   { keys: ["M-."], action: "definition", command: "goto-def", doc: "go to definition" },
-  { keys: ["M-,"], action: "back", command: "jump-back", doc: "back to where you jumped from" },
   { keys: ["M-?"], action: "references", command: "find-refs", doc: "find references" },
   { keys: ["M-g g"], action: "goto-line", doc: "go to line" },
   { keys: ["C-<mouse-1>"], label: "C-click", external: true, doc: "go to definition" },

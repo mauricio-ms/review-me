@@ -8,6 +8,7 @@ import {
 } from "react";
 
 import { bufferNames, openHelp, showBuffer } from "../lib/buffers";
+import { recordJump } from "../lib/jumps";
 import { contextScope, dispatchKey, type KeyHandler } from "../lib/key-dispatch";
 import { commandKeys, KEYMAP, type MinibufferAction } from "../lib/keymap";
 import { showLog } from "../lib/log";
@@ -197,6 +198,8 @@ function Prompt({ request }: { request: MinibufferRequest }) {
           enabled: true,
           run: () => {
             close({ restoreFocus: false });
+            // A switch is a move `M-,` comes back from (help is nowhere to come back to).
+            if (key !== "help") recordJump();
             if (key === "log") showLog({ other });
             else if (key === "help") openHelp(scope, false, { other });
             else showBuffer(key, { other });

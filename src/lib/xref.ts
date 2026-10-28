@@ -1,4 +1,3 @@
-import { useJumpStore } from "../state/jumps";
 import { useRepoStore } from "../state/repo";
 import { useXrefStore } from "../state/xref";
 import type { XrefResult } from "../types/xref";
@@ -33,12 +32,6 @@ export function navigateTo(result: XrefResult, choice: SourceChoice, other = fal
   visitFile(result.file, choice, { line: result.line, col: result.col }, { other });
 }
 
-/** Return to the position before the last jump (`M-,`). Empty stack: no-op. */
-export function jumpBack(): void {
-  const entry = useJumpStore.getState().pop();
-  if (!entry) return;
-  visitFile(entry.file, entry.choice, { line: entry.line, col: entry.col });
-}
 
 /**
  * Resolve and jump to the definition of the symbol at an explicit viewer position

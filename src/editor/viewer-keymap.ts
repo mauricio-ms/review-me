@@ -6,7 +6,7 @@ import { recordJump } from "../lib/jumps";
 import { KEYMAP, type ViewerAction } from "../lib/keymap";
 import { gotoChange, gotoChangedFile } from "../lib/project-diff";
 import { setProjectCursor } from "../lib/project-view";
-import { findUsages, gotoDefinition, jumpBack } from "../lib/xref";
+import { findUsages, gotoDefinition } from "../lib/xref";
 import { useMinibufferStore } from "../state/minibuffer";
 import { inVimInsertMode } from "./cm-shared";
 
@@ -37,7 +37,6 @@ function promptGotoLine(): void {
 /** Every viewer action; `count` is vim's (`3]c`), 1 from a CodeMirror key. */
 export const VIEWER_HANDLERS: Record<ViewerAction, (count: number) => void> = {
   definition: () => void gotoDefinition(),
-  back: () => void jumpBack(),
   references: () => void findUsages(),
   "goto-line": promptGotoLine,
   "next-change": (count) => gotoChange(1, count),
@@ -73,12 +72,13 @@ const bindings: CmKeyBinding[] = KEYMAP.viewer.flatMap((binding) =>
 
 /**
  * The viewer's own keys (`keymap.ts`'s `viewer` scope): emacs-xref navigation —
- * `M-.` definition · `M-,` back · `M-?` references — and `M-g g` go to line.
+ * `M-.` definition · `M-?` references (`M-,` back is global: history spans every
+ * buffer) — and `M-g g` go to line.
  *
  * Alt chords rather than vim's `C-o`/`C-i` on purpose. codemirror-vim binds those to
- * its own jump list, whose marks are anchored into the document — and the viewer
- * *replaces* its document whenever a file is opened, so that list can't follow a jump
- * across files. Alt sidesteps it rather than overriding it.
+ * its own jump list, whose marks are anchored into the document — and each buffer has
+ * its own document, so that list can't follow a jump across files. Alt sidesteps it
+ * rather than overriding it.
  */
 export const viewerKeymap = Prec.highest(
   keymap.of([

@@ -147,7 +147,7 @@ modal (`asset-picker`): the clear confirmation, the commit dialog, the note edit
 are gated by `useUIStore.picker` or a dedicated store and use `useModalFocus` (which is
 what turns the global keys off while they're up).
 
-**State** is Zustand in `src/state/` (`ui`, `windows`, `files`, `minibuffer`, `repo`, `tags`, `log`, `notes`, `project`, `xref`, `jumps`). Cross-cutting
+**State** is Zustand in `src/state/` (`ui`, `windows`, `files`, `minibuffer`, `repo`, `tags`, `log`, `notes`, `project`, `xref`, `history`). Cross-cutting
 conventions that will bite if ignored:
 - **Wire format:** Rust structs are `#[serde(rename_all = "camelCase")]`; `AppError`
   serializes to a string. serde emits `null` for `Option::None`, so TS types use `| null`
@@ -438,20 +438,26 @@ a spurious one in a review tool. `rank` puts confirmed hits first, then same-fil
 The frontend binds emacs-xref keys in the viewer (`editor/viewer-keymap.ts`, an Alt
 keymap rather than vim mappings — codemirror-vim's own `C-o`/`C-i` jump list anchors
 marks into a document the viewer replaces on every file open, so it can't follow a jump
-across files): **`M-.`** definition, **`M-,`** back, **`M-?`** references, plus
-`M-x definition`/`references`/`back`. A Ctrl/Cmd+click (`editor/xref-click.ts`) also
+across files): **`M-.`** definition, **`M-?`** references, plus
+`M-x definition`/`references` (`M-,` back is global — see below). A Ctrl/Cmd+click (`editor/xref-click.ts`) also
 jumps to definition; it and `M-.` both route through `xref.ts`'s
 `gotoDefinitionAt(line, col)`. The index is warmed in the background on repo
 open/refresh (`applyComparison`).
 
-`useJumpStore` (`state/jumps.ts`) is the emacs marker stack: pop-only, no forward.
-`lib/jumps.ts`'s **`recordJump`** is called by the navigation *gestures* — `navigateTo`,
-`openFileInProject`, `openFileFromDiff` — and deliberately not by `visitFile`, which they
-all share, so `jumpBack` can reuse the same open path without recording the position it's
-leaving (which would make `M-,` ping-pong). Recording inside `navigateTo` rather than
-`gotoDefinitionAt` also means dismissing the picker records nothing. Entries name a file
-at a revision and a cursor; `useProjectSource` clears the stack whenever the comparison's
-revision changes.
+**History** (`state/history.ts`'s `useHistoryStore`) is back/forward, as a browser or
+Emacs 29's xref keeps it: **`M-,`** back, **`C-M-,`** forward, both global, and a new move
+drops the way forward. A `Place` is a spot in a file at a revision, a diff row (path +
+line, read from `useUIStore.diffCursor`, put back through `diff-view.ts`'s `moveDiffCursor`),
+or a log commit (`log.ts`'s `logCursor` / `moveLogCursor`). `lib/jumps.ts`'s
+**`recordJump`** records the selected window's place and is called by the navigation
+*gestures* — `navigateTo`, `openFileInProject`, `openFileFromDiff`, `visitCounterpart`,
+`M-g g`, `C-x b`, `C-x g`, `M-x diff` — and deliberately not by `visitFile` or
+`showBuffer`, which they share, so `lib/history.ts` can reuse them to go back and forth
+without recording the place it's leaving. Recording inside `navigateTo` rather than
+`gotoDefinitionAt` also means dismissing the picker records nothing; small moves (`] c`,
+`j`) aren't recorded at all. Going to a file already shown in another window selects
+that window — after `C-x 4 .`, `M-,` returns to the test beside the code. `applyComparison`
+clears the history whenever the comparison (or its revision) changes.
 
 ## Extending
 
