@@ -106,38 +106,55 @@ export function killCurrentBuffer(): void {
     ui.showFlash(`The ${key} buffer can't be killed — C-x b switches away from it`);
     return;
   }
-  const name = bufferNames(useFilesStore.getState().buffers).get(key) ?? key;
+  const name = bufferLabel(key);
   killFileBuffers([key]);
   ui.showFlash(`Killed ${name}`);
 }
 
+/** A buffer's name as `C-x b` writes it. */
+function bufferLabel(key: BufferKey): string {
+  if (!isFileKey(key)) return key;
+  return bufferNames(useFilesStore.getState().buffers).get(key) ?? key;
+}
+
 /**
- * `C-x <left>` / `C-x <right>`: the previous or next open file, in the order they were
- * opened; then `<left>` and `<right>` alone keep going (Emacs's repeat map).
+ * `C-x ←` / `C-x →` (Emacs's previous-buffer / next-buffer): back through what the
+ * selected window has shown — the diff, the log, help and files alike — and forward
+ * again; then `←` / `→` alone keep going (a repeat map). Once the window's own history
+ * runs out, `C-x ←` goes on through the other buffers, most recently shown first, as
+ * Emacs's does. The diff, the log and help are skipped while another window has them.
  */
-export function cycleFileBuffers(step: 1 | -1): void {
-  const { buffers } = useFilesStore.getState();
+export function stepBuffer(dir: "back" | "ahead"): void {
+  const ws = useWindowStore.getState();
   const ui = useUIStore.getState();
-  if (buffers.length === 0) {
-    ui.showFlash("No files are open");
+  const win = ws.selected;
+  const current = ws.shown[win];
+  const elsewhere = new Set(
+    Object.entries(ws.shown)
+      .filter(([id]) => Number(id) !== win)
+      .map(([, key]) => key),
+  );
+  const usable = (key: BufferKey) =>
+    key !== current && (isFileKey(key) ? fileBuffer(key) !== undefined : !elsewhere.has(key));
+  let target = (dir === "back" ? ws.prev[win] : ws.ahead[win])?.find(usable);
+  if (!target && dir === "back") {
+    const ahead = new Set(ws.ahead[win] ?? []);
+    const files = useFilesStore.getState().buffers.map((b) => b.id);
+    target = [...ws.recent, "diff" as const, "log" as const, ...files].find(
+      (key) => usable(key) && !ahead.has(key),
+    );
+  }
+  if (!target) {
+    ui.showFlash(dir === "back" ? "No previous buffer" : "No next buffer");
     return;
   }
-  const key = selectedBuffer(useWindowStore.getState());
-  const at = buffers.findIndex((b) => b.id === key);
-  const next =
-    at < 0
-      ? step > 0
-        ? 0
-        : buffers.length - 1
-      : (at + step + buffers.length) % buffers.length;
-  showBuffer(buffers[next].id);
-  const name = bufferNames(buffers).get(buffers[next].id) ?? buffers[next].path;
-  ui.showFlash(
-    `${name} (${next + 1}/${buffers.length}) — use <left>, <right> for further cycling`,
-  );
+  ws.step(win, target, dir);
+  ws.setTreeFocused(false);
+  ui.requestFocus();
+  ui.showFlash(`${bufferLabel(target)} — use <left>, <right> for further cycling`);
   armRepeat({
-    "<left>": () => cycleFileBuffers(-1),
-    "<right>": () => cycleFileBuffers(1),
+    "<left>": () => stepBuffer("back"),
+    "<right>": () => stepBuffer("ahead"),
   });
 }
 

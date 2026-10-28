@@ -9,7 +9,7 @@ import { findFileBuffer, killFileBuffers, type ShowOptions } from "./buffers";
 import { recordJump } from "./jumps";
 import { armRepeat } from "./key-dispatch";
 import { placeCursor } from "./project-view";
-import { display, focusTree, otherWindowFor } from "./windows";
+import { display, focusTree, otherWindowFor, treeShown } from "./windows";
 import { listRepoDir, readFile } from "./tauri";
 
 /** The repo + revision every project read below goes through. */
@@ -105,10 +105,14 @@ export function resizeTree(step: 1 | -1): void {
   armRepeat({ "{": () => resizeTree(-1), "}": () => resizeTree(1) });
 }
 
-/** `M-x toggle-tree`: the windows alone, or the tree back beside them (with the keyboard). */
+/**
+ * `M-x toggle-tree`: project mode's windows alone, or the tree back beside them (with
+ * the keyboard). Outside project mode the tree isn't there to hide: it comes up to pick
+ * a file with, as `M-x project` does.
+ */
 export function toggleTree(): void {
   const ps = useProjectStore.getState();
-  if (ps.treeHidden) {
+  if (!treeShown()) {
     focusTree();
     return;
   }

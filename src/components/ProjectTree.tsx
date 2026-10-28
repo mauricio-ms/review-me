@@ -61,11 +61,12 @@ function buildVisible(
 }
 
 /**
- * The file tree, a sidebar beside every window (treemacs-style): the revision under
- * review, or only the files its comparison changed (`c`). Opening a file shows it in
- * the selected window; `C-x o` moves between the tree and the windows.
+ * The file tree, fixed at the left of project mode (`inProjectMode`: the main window
+ * shows a file, or you're in the tree) and hidden everywhere else: the revision under
+ * review, or only the files its comparison changed (`c`). Opening a file shows it in the
+ * selected window; `C-x o` moves between the tree and the windows.
  */
-export default function ProjectTree() {
+export default function ProjectTree({ hidden }: { hidden: boolean }) {
   const dirs = useProjectStore((s) => s.dirs);
   const expanded = useProjectStore((s) => s.expanded);
   const filter = useProjectStore((s) => s.filter);
@@ -167,8 +168,8 @@ export default function ProjectTree() {
 
   // Load the repo root the first time the full tree is shown.
   useEffect(() => {
-    if (!changedOnly && !dirs[""]) void loadDir("");
-  }, [changedOnly, dirs]);
+    if (!hidden && !changedOnly && !dirs[""]) void loadDir("");
+  }, [changedOnly, dirs, hidden]);
 
   useEffect(() => {
     setCursor((c) => Math.min(Math.max(0, c), Math.max(0, nodes.length - 1)));
@@ -242,7 +243,7 @@ export default function ProjectTree() {
       <div
         ref={treeRef}
         className={`project-tree ${focused ? "is-focused" : ""}`}
-        style={{ width: treeWidth }}
+        style={{ width: treeWidth, display: hidden ? "none" : undefined }}
         tabIndex={0}
         onKeyDown={(e) => dispatchKey("tree", e, KEYMAP.tree, handlers)}
         onFocus={() => setTreeFocused(true)}
@@ -303,6 +304,7 @@ export default function ProjectTree() {
       </div>
       <div
         className="project-split"
+        style={hidden ? { display: "none" } : undefined}
         role="separator"
         aria-orientation="vertical"
         aria-label="Resize the file tree"

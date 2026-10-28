@@ -88,16 +88,20 @@ windows — and every buffer keeps its cursor and scroll while you're elsewhere.
 | **Commits** | The review branch's history, magit-style; `Enter` opens a commit in the diff buffer. | — |
 | **Files** | Each file you open is a buffer of its own: read-only, syntax-highlighted, at the compared revision. | Flag only |
 
-The **file tree** sits beside the windows, whatever they show: the whole revision, or only
-the files the comparison changed.
+**Project mode** is when you're reading files: `RET` on a line of the diff, a file from
+`C-x C-f`, a definition. It has the **file tree** fixed at its left — the whole revision, or
+only the files the comparison changed. The diff, the commits and help don't: opening a file
+*beside* the diff (`o`) keeps you in the diff, with no tree, and `RET` takes you into project
+mode. `M-x project` brings the tree up from anywhere to pick a file.
 
 ### Windows
 
 Split the screen as in Emacs — `C-x 3` side by side, `C-x 2` stacked — to read two things
 at once: a test and the code it tests, the diff and the whole file, the commits and one
 commit. Each window shows any buffer (a file can be in two windows, each with its own
-cursor); `C-x o` cycles through them, `C-w h`/`j`/`k`/`l` moves left/down/up/right (left of
-the first window is the file tree), and the window with the keyboard wears an amber edge.
+cursor); `C-x o` cycles through them, `C-w h`/`j`/`k`/`l` moves left/down/up/right (in project mode,
+left of the first window is the file tree), and the window with the keyboard wears an amber
+edge.
 Drag a boundary to resize.
 
 The `C-x 4` keys open something **in the other window**, keeping the one you're in on
@@ -295,9 +299,9 @@ no-display error, meaning every library loaded and the app started.
 Open the app and pick a repository on the start screen (`j`/`k` and `RET`, or its
 number), `C-x p p` for every recent one, or `M-x open` to browse the disk. The diff buffer
 shows everything changed in the working tree. Expand a file, walk its hunks, and tag as
-you review. `RET` opens a file at the line under the cursor; `C-x o` moves to the file tree
-to browse the rest of the repo; every file you open stays open as a buffer, and `C-x b`
-switches between them.
+you review. `RET` opens a file at the line under the cursor, in project mode, with the file
+tree beside it to browse the rest of the repo (`C-x o` moves to it); every file you open
+stays open as a buffer, and `C-x b` switches between them.
 
 The keys are Emacs's: `M-x` runs any command by name in a minibuffer at the bottom of the
 window — where every picker reads too (find file, branches, commits, recent repositories,
@@ -315,8 +319,8 @@ just the current buffer's keys; `C-h k` tells you what a key does.
 | `M-,` / `C-M-,` | `back` / `forward` | Back to where you were — a file, the diff, the log — and forward again |
 | `C-x b` | `switch-buffer` | Switch buffer (diff, log, help, every open file); `RET` alone goes back to the last one |
 | `C-x k` | `kill-buffer` | Close the file in the window |
-| `C-x ←` / `C-x →` | `previous-buffer` / `next-buffer` | Previous / next open file (then `←` `→` alone keep going) |
-| `C-x o` | `other-window` | The next window (the file tree first) |
+| `C-x ←` / `C-x →` | `previous-buffer` / `next-buffer` | Back through what this window showed — the diff, the log, files — and forward again (then `←` `→` alone keep going) |
+| `C-x o` | `other-window` | The next window (the file tree first, in project mode) |
 | `C-w h` / `j` / `k` / `l` | `windmove-left` / `-down` / `-up` / `-right` | The window to the left / below / above / to the right |
 | `C-x 3` / `C-x 2` | `split-window-right` / `-below` | Split the window side by side / stacked |
 | `C-x 0` / `C-x 1` | `delete-window` / `delete-other-windows` | Close this window / every other window |
@@ -353,7 +357,7 @@ just the current buffer's keys; `C-h k` tells you what a key does.
 | `hunks` | (project) Show/hide the diff of every change, in every file |
 | `flag` | (project) Flag the current selection |
 | `diff` | Switch to the diff buffer |
-| `project` | To the file tree (showing it if hidden) |
+| `project` | The file tree — from the diff or the log, to pick a file into project mode |
 | `toggle-tree` | Hide or show the file tree (remembered) |
 
 ### Diff buffer
@@ -461,7 +465,7 @@ generated from the tag store and never read back: edit notes in the app.
 
 ### File tree and files
 
-**The tree (left of the window)** lists the whole revision, or — `c` / `M-x changed` — **only the files the
+**The tree (left of project mode's windows)** lists the whole revision, or — `c` / `M-x changed` — **only the files the
 comparison on screen changed**: the commit's files while reviewing a commit, every file the
 branch touched in a branch comparison (`b` in the commits buffer), the uncommitted ones in
 the working-tree diff. The choice sticks as you move between comparisons, so it keeps

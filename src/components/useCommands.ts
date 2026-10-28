@@ -2,10 +2,10 @@ import { useCallback } from "react";
 
 import {
   currentFile,
-  cycleFileBuffers,
   killCurrentBuffer,
   openHelp,
   showBuffer,
+  stepBuffer,
   useCurrentFile,
 } from "../lib/buffers";
 import { visitCounterpart } from "../lib/counterpart";
@@ -700,23 +700,23 @@ export function useCommands(close: CommandClose): {
     {
       id: "previous-buffer",
       name: "previous-buffer",
-      aliases: ["prev-file"],
-      label: "the previous open file (then <left>, <right> keep going)",
+      aliases: ["prev-buffer"],
+      label: "back to what this window showed before (then <left>, <right> keep going)",
       enabled: !!repo,
       run: () => {
         close({ restoreFocus: false });
-        cycleFileBuffers(-1);
+        stepBuffer("back");
       },
     },
     {
       id: "next-buffer",
       name: "next-buffer",
-      aliases: ["next-file"],
-      label: "the next open file (then <left>, <right> keep going)",
+      aliases: [],
+      label: "forward again, to what previous-buffer stepped back from",
       enabled: !!repo,
       run: () => {
         close({ restoreFocus: false });
-        cycleFileBuffers(1);
+        stepBuffer("ahead");
       },
     },
     {

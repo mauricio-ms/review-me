@@ -62,9 +62,13 @@ const GLOBAL_KEYS = [
   {
     keys: ["C-x <left>"],
     command: "previous-buffer",
-    doc: "previous open file (then <left> <right> alone keep going)",
+    doc: "back to what this window showed before (then <left> <right> alone keep going)",
   },
-  { keys: ["C-x <right>"], command: "next-buffer", doc: "next open file" },
+  {
+    keys: ["C-x <right>"],
+    command: "next-buffer",
+    doc: "forward again, to what C-x <left> stepped back from",
+  },
   { keys: ["C-x o"], command: "other-window", doc: "the next window (the file tree first)" },
   { keys: ["C-w h"], command: "windmove-left", doc: "the window to the left (or the tree)" },
   { keys: ["C-w j"], command: "windmove-down", doc: "the window below" },

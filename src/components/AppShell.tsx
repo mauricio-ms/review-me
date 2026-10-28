@@ -18,7 +18,12 @@ import { useMinibufferStore } from "../state/minibuffer";
 import { useProjectStore } from "../state/project";
 import { useRepoStore } from "../state/repo";
 import { useUIStore } from "../state/ui";
-import { activeBuffer as activeBufferOf, selectedBuffer, useWindowStore } from "../state/windows";
+import {
+  activeBuffer as activeBufferOf,
+  inProjectMode,
+  selectedBuffer,
+  useWindowStore,
+} from "../state/windows";
 import BranchCompareHost from "./BranchCompareHost";
 import BufferStatusBar from "./BufferStatusBar";
 import CheckoutBranchHost from "./CheckoutBranchHost";
@@ -126,12 +131,18 @@ function GlobalKeys() {
   return null;
 }
 
-/** The windows, with the file tree beside them unless it's hidden. */
+/**
+ * The windows — with the file tree beside them in project mode (the main window shows a
+ * file, or you're in the tree), unless it's hidden. The diff, the log and help never
+ * have it.
+ */
 function Frame() {
   const treeHidden = useProjectStore((s) => s.treeHidden);
+  const projectMode = useWindowStore(inProjectMode);
   return (
     <div className="frame">
-      {!treeHidden && <ProjectTree />}
+      {/* Hidden rather than unmounted, so its cursor and folds wait for project mode. */}
+      <ProjectTree hidden={!projectMode || treeHidden} />
       <WindowArea />
     </div>
   );

@@ -108,8 +108,10 @@ type WindowState = {
   layout: Layout;
   /** What each window shows. */
   shown: Record<WindowId, BufferKey>;
-  /** What each window showed before, most recent first. */
+  /** What each window showed before, most recent first: where `C-x ←` and `q` go. */
   prev: Record<WindowId, BufferKey[]>;
+  /** What `C-x ←` stepped back from, most recent first: where `C-x →` goes. */
+  ahead: Record<WindowId, BufferKey[]>;
   /** The window commands act on — and where the tree opens files. */
   selected: WindowId;
   /** The file tree has the keyboard rather than the selected window. */
@@ -120,6 +122,12 @@ type WindowState = {
 
   /** Show `key` in window `win` (it goes on remembering what was there). */
   show: (win: WindowId, key: BufferKey) => void;
+  /**
+   * `C-x ←` / `C-x →` (Emacs's previous-buffer / next-buffer): show `key`, taken from
+   * the window's history behind (`back`) or ahead, and move what was shown to the other
+   * side — so stepping one way and then the other comes back.
+   */
+  step: (win: WindowId, key: BufferKey, dir: "back" | "ahead") => void;
   /** Go back to `key` in window `win`, forgetting the buffer it is leaving there. */
   quitTo: (win: WindowId, key: BufferKey) => void;
   /** Give window `win` the selection (and the keyboard, from the tree). */
@@ -141,11 +149,16 @@ const initial = () => ({
   layout: { kind: "window", id: FIRST_WINDOW } as Layout,
   shown: { [FIRST_WINDOW]: "diff" } as Record<WindowId, BufferKey>,
   prev: { [FIRST_WINDOW]: [] } as Record<WindowId, BufferKey[]>,
+  ahead: { [FIRST_WINDOW]: [] } as Record<WindowId, BufferKey[]>,
   selected: FIRST_WINDOW,
   treeFocused: false,
   recent: ["diff"] as BufferKey[],
   nextId: FIRST_WINDOW + 1,
 });
+
+/** `old` in front of a window's history list, without `old` or `key` further down. */
+const pushFront = (list: BufferKey[] | undefined, old: BufferKey, key: BufferKey) =>
+  [old, ...(list ?? []).filter((k) => k !== old && k !== key)].slice(0, PREV_DEPTH);
 
 const touch = (recent: BufferKey[], key: BufferKey) =>
   recent[0] === key ? recent : [key, ...recent.filter((k) => k !== key)];
@@ -167,14 +180,25 @@ export const useWindowStore = create<WindowState>((set, get) => ({
       if (old === key) return recent === s.recent ? {} : { recent };
       return {
         shown: { ...s.shown, [win]: key },
-        prev: {
-          ...s.prev,
-          [win]: [old, ...(s.prev[win] ?? []).filter((k) => k !== old && k !== key)].slice(
-            0,
-            PREV_DEPTH,
-          ),
-        },
+        prev: { ...s.prev, [win]: pushFront(s.prev[win], old, key) },
+        // A new switch, as a new move in a browser, drops the way forward.
+        ahead: { ...s.ahead, [win]: [] },
         recent,
+      };
+    }),
+
+  step: (win, key, dir) =>
+    set((s) => {
+      const old = s.shown[win];
+      if (old === key) return {};
+      const [from, to] = dir === "back" ? [s.prev, s.ahead] : [s.ahead, s.prev];
+      const taken = (from[win] ?? []).filter((k) => k !== key && k !== old);
+      const given = pushFront(to[win], old, key);
+      return {
+        shown: { ...s.shown, [win]: key },
+        prev: { ...s.prev, [win]: dir === "back" ? taken : given },
+        ahead: { ...s.ahead, [win]: dir === "back" ? given : taken },
+        recent: touch(s.recent, key),
       };
     }),
 
@@ -184,6 +208,7 @@ export const useWindowStore = create<WindowState>((set, get) => ({
       return {
         shown: { ...s.shown, [win]: key },
         prev: { ...s.prev, [win]: (s.prev[win] ?? []).filter((k) => k !== key && k !== old) },
+        ahead: { ...s.ahead, [win]: [] },
         recent: touch(s.recent, key),
       };
     }),
@@ -202,6 +227,7 @@ export const useWindowStore = create<WindowState>((set, get) => ({
       layout: withSplit(s.layout, win, dir, added),
       shown: { ...s.shown, [added]: key },
       prev: { ...s.prev, [added]: [] },
+      ahead: { ...s.ahead, [added]: [] },
       recent: touch(s.recent, key),
       nextId: added + 1,
     }));
@@ -217,6 +243,7 @@ export const useWindowStore = create<WindowState>((set, get) => ({
         layout,
         shown: dropWindows(s.shown, [win]),
         prev: dropWindows(s.prev, [win]),
+        ahead: dropWindows(s.ahead, [win]),
         // The selection moves to the window that took the space.
         selected: s.selected === win ? (heir(s.layout, win) ?? order[0]) : s.selected,
       };
@@ -230,6 +257,7 @@ export const useWindowStore = create<WindowState>((set, get) => ({
         layout: { kind: "window", id: win },
         shown: dropWindows(s.shown, others),
         prev: dropWindows(s.prev, others),
+        ahead: dropWindows(s.ahead, others),
         selected: win,
       };
     }),
@@ -241,10 +269,14 @@ export const useWindowStore = create<WindowState>((set, get) => ({
     const gone = new Set<BufferKey>(keys);
     const s = get();
     const shown = { ...s.shown };
-    const prev: Record<WindowId, BufferKey[]> = {};
-    for (const [id, list] of Object.entries(s.prev)) {
-      prev[Number(id)] = list.filter((k) => !gone.has(k));
-    }
+    const kept = (lists: Record<WindowId, BufferKey[]>) => {
+      const out: Record<WindowId, BufferKey[]> = {};
+      for (const [id, list] of Object.entries(lists)) {
+        out[Number(id)] = list.filter((k) => !gone.has(k));
+      }
+      return out;
+    };
+    const prev = kept(s.prev);
     const orphans: WindowId[] = [];
     for (const win of windowOrder(s.layout)) {
       if (!gone.has(shown[win])) continue;
@@ -261,7 +293,7 @@ export const useWindowStore = create<WindowState>((set, get) => ({
       shown[win] = next;
       prev[win] = prev[win].filter((k) => k !== next);
     }
-    set({ shown, prev, recent: s.recent.filter((k) => !gone.has(k)) });
+    set({ shown, prev, ahead: kept(s.ahead), recent: s.recent.filter((k) => !gone.has(k)) });
     for (const win of orphans) get().remove(win);
   },
 
@@ -278,6 +310,20 @@ export function activeBuffer(s: WindowState): BufferName {
   if (s.treeFocused) return "project";
   const key = selectedBuffer(s);
   return isFileKey(key) ? "project" : key;
+}
+
+/** The main window: the first in the layout (left, top). */
+export function mainWindow(s: WindowState): WindowId {
+  return windowOrder(s.layout)[0];
+}
+
+/**
+ * Project mode, the file tree's: the main window shows a file, or the tree has the
+ * keyboard (`M-x project`, to pick one). The diff, the log and help are not — nor the
+ * diff with a file opened beside it (`o`), which is still the diff's.
+ */
+export function inProjectMode(s: WindowState): boolean {
+  return s.treeFocused || isFileKey(s.shown[mainWindow(s)] ?? "diff");
 }
 
 /** Whether any window shows `key`. */

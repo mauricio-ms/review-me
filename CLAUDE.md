@@ -55,12 +55,17 @@ symbol index in a global `Mutex`.
 - `queries.rs` + `xref.rs` tree-sitter symbol index and find-definition/references.
 - `window.rs` builds the main window in `setup` (`tauri.conf.json` has it `"create": false`) so decorations can follow the desktop: off on tiling compositors, on elsewhere, `REVIEW_ME_DECORATIONS` overrides.
 
-**Frontend (`src/`)** — Emacs's model: a **frame** (`AppShell`'s `Frame`) holds the file
-tree as a sidebar (`ProjectTree`, for every window) and the **windows** (`Window`), each
-showing one **buffer** (`state/windows.ts`'s `BufferKey`): `"diff"`, `"log"`, `"help"`, or an
-open file (`file:<n>`, `state/files.ts`). `useWindowStore` holds what each window shows,
-what it showed before (`prev`, where `q` — `lib/buffers.ts`'s `quitWindow` — goes back to),
-the selected window, `treeFocused`, and `recent` (`C-x b`'s order); which kind of buffer has
+**Frontend (`src/`)** — Emacs's model: a **frame** (`AppShell`'s `Frame`) holds the
+**windows** (`Window`), each showing one **buffer** (`state/windows.ts`'s `BufferKey`):
+`"diff"`, `"log"`, `"help"`, or an open file (`file:<n>`, `state/files.ts`) — and, in
+**project mode** only, the file tree (`ProjectTree`) fixed at its left. Project mode
+(`inProjectMode`) is the main window (the first in the layout) showing a file, or the tree
+having the keyboard; the diff, the log and help — and the diff with a file opened beside
+it by `o` — never show the tree (it stays mounted, hidden, keeping its cursor and folds).
+`M-x project` from outside brings the tree up to pick a file with, and that file goes to
+the main window. `useWindowStore` holds what each window shows, what it showed before
+(`prev`, where `q` — `lib/buffers.ts`'s `quitWindow` — and `C-x ←` go back to), what `C-x ←`
+stepped back from (`ahead`, where `C-x →` goes), the selected window, `treeFocused`, and `recent` (`C-x b`'s order); which kind of buffer has
 the keyboard (`activeBuffer`: diff/log/help, or `project` for a file or the tree) is
 derived, never stored. `DiffBuffer` and `LogBuffer` are rendered **once**, as portals into
 persistent host elements that `Window`'s `BufferSlot` moves into whichever window shows
@@ -70,7 +75,7 @@ one cursor, so each shows in one window at most — showing one that another win
 selects that window instead (`lib/windows.ts`'s `display`, Emacs's reuse-window). Help
 renders in its window; a file renders as a `FileView` (CodeMirror) per window, so one file
 can be in two windows with two cursors. Every switch goes through `lib/buffers.ts`
-(`showBuffer`, `openHelp`, `quitWindow`, `killCurrentBuffer`, `cycleFileBuffers`), every
+(`showBuffer`, `openHelp`, `quitWindow`, `killCurrentBuffer`, `stepBuffer`), every
 window operation through `lib/windows.ts`.
 
 **Windows** split as Emacs's do: `useWindowStore.layout` is a tree of `split`s (`row` side
@@ -78,7 +83,7 @@ by side, `column` stacked, a draggable `ratio`) over window ids, and `WindowArea
 each window absolutely by its tile rather than nesting it, so a split or a close never
 remounts the others. `C-x 3` / `C-x 2` split (a file shows in both halves, at the same
 place; a single-cursor buffer can't, so the new half gets the most recent buffer not on
-screen), `C-x 0` / `C-x 1` close, `C-x o` cycles (tree first), `C-w h/j/k/l` moves by
+screen), `C-x 0` / `C-x 1` close, `C-x o` cycles (the tree first, in project mode), `C-w h/j/k/l` moves by
 screen position (`windmove`, the tree counts as the leftmost). **"The other window"**
 (`otherWindowFor`, every `C-x 4` command, `o` in the diff/log/tree, `C-o` in the diff
 which shows without selecting) is one already showing the buffer, else the next window,
@@ -355,14 +360,17 @@ moved under a refresh (a branch got commits), and kills the rest — a review th
 Where each window stands in each buffer (cursor and top line) is remembered per
 `(window, buffer)` in `lib/project-view.ts` (`placeCursor` puts a jump target there before
 the view even mounts), which also keeps each window's CodeMirror view for commands that
-read the selected window's cursor. `C-x k` kills the selected window's file; `C-x <left>`
-/ `C-x <right>` cycle open files (then `<left>`/`<right>` repeat).
+read the selected window's cursor. `C-x k` kills the selected window's file. `C-x <left>` /
+`C-x <right>` (`stepBuffer`, Emacs's previous-buffer / next-buffer) walk the selected
+window's own history — back through what it showed, any buffer, then forward again (a new
+switch drops the way forward); once its history runs out, back goes on through the recently
+shown buffers. `<left>`/`<right>` alone repeat.
 
 The tree's width (`useProjectStore.treeWidth`: dragged on its edge or `C-x {` / `C-x }`,
 remembered, clamped so the windows keep 320px) and `treeHidden` (`M-x toggle-tree`,
 remembered; `C-x o` and `M-x project` bring it back) are layout state, not per-revision.
-`C-x o` moves between the tree and the window; the tree opens files in the selected
-window, and its `q` hands the keyboard back to it.
+In project mode `C-x o` moves between the tree and the windows; the tree opens files in the
+selected window, and its `q` hands the keyboard back to it.
 
 `useProjectStore.filter` (`all` | `changed`, `c` in the tree / `M-x changed`) narrows the
 tree and the fuzzy finder to **the applied comparison's files** (`useRepoStore.diff`): a

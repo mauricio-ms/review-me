@@ -2,8 +2,10 @@ import { useFilesStore } from "../state/files";
 import { useProjectStore } from "../state/project";
 import { useUIStore } from "../state/ui";
 import {
+  inProjectMode,
   isFileKey,
   isSingleton,
+  mainWindow,
   useWindowStore,
   windowOrder,
   windowShowing,
@@ -114,27 +116,39 @@ export function deleteOtherWindows(): void {
   useUIStore.getState().requestFocus();
 }
 
-/** `M-x project`: the file tree, shown if it was hidden, with the keyboard. */
+/** Whether the file tree is on screen: project mode, and not hidden. */
+export function treeShown(): boolean {
+  return inProjectMode(useWindowStore.getState()) && !useProjectStore.getState().treeHidden;
+}
+
+/**
+ * `M-x project`: the file tree, shown if it was hidden, with the keyboard. From outside
+ * project mode (the diff, the log) it comes up to pick a file with, and that file goes
+ * to the main window — which is what makes it project mode.
+ */
 export function focusTree(): void {
   const ps = useProjectStore.getState();
   if (ps.treeHidden) ps.setTreeHidden(false);
+  const ws = useWindowStore.getState();
+  if (!inProjectMode(ws)) ws.select(mainWindow(ws));
   useWindowStore.getState().setTreeFocused(true);
   useUIStore.getState().requestFocus();
 }
 
 /**
- * `C-x o`: the next window, in order — the file tree first, when it's shown. With one
- * window and the tree hidden, it brings the tree back rather than going nowhere.
+ * `C-x o`: the next window, in order — the file tree first, in project mode. With one
+ * window there and the tree hidden, it brings the tree back rather than going nowhere.
  */
 export function otherWindow(): void {
   const ws = useWindowStore.getState();
-  const { treeHidden } = useProjectStore.getState();
   const order = windowOrder(ws.layout);
-  if (treeHidden && order.length === 1) {
-    focusTree();
+  const tree = treeShown();
+  if (order.length === 1 && !tree) {
+    if (inProjectMode(ws)) focusTree();
+    else useUIStore.getState().showFlash("No other window");
     return;
   }
-  const stops: ("tree" | WindowId)[] = treeHidden ? order : ["tree", ...order];
+  const stops: ("tree" | WindowId)[] = tree ? ["tree", ...order] : order;
   const at = stops.indexOf(ws.treeFocused ? "tree" : ws.selected);
   const next = stops[(at + 1) % stops.length];
   if (next === "tree") ws.setTreeFocused(true);
@@ -161,7 +175,7 @@ export function windmove(dir: Direction): void {
   const rectOf = (selector: string) => document.querySelector(selector)?.getBoundingClientRect();
   const stops: { stop: "tree" | WindowId; rect: DOMRect }[] = [];
   const tree = rectOf(".project-tree");
-  if (tree && !useProjectStore.getState().treeHidden) stops.push({ stop: "tree", rect: tree });
+  if (tree && treeShown()) stops.push({ stop: "tree", rect: tree });
   for (const win of windowOrder(ws.layout)) {
     const rect = rectOf(`.window[data-window="${win}"]`);
     if (rect) stops.push({ stop: win, rect });
