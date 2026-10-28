@@ -1,10 +1,10 @@
 import { useFilesStore, fileBuffer, type FileBuffer } from "../state/files";
-import { useProjectStore } from "../state/project";
 import { useUIStore } from "../state/ui";
 import {
   isFileKey,
   selectedBuffer,
   useWindowStore,
+  windowOrder,
   type BufferKey,
   type FileBufferId,
 } from "../state/windows";
@@ -13,6 +13,7 @@ import { sameSource, type ProjectSource } from "../types/repo";
 import { armRepeat } from "./key-dispatch";
 import type { KeyScope } from "./keymap";
 import { forgetPositions } from "./project-view";
+import { display, otherWindowFor } from "./windows";
 
 /** The file buffer in the selected window, if it shows one. */
 export function currentFile(): FileBuffer | null {
@@ -35,24 +36,31 @@ export function findFileBuffer(source: ProjectSource, path: string): FileBuffer 
     .buffers.find((b) => b.path === path && sameSource(b.source, source));
 }
 
-/** Show `key` in the selected window and give that window the keyboard. */
-export function showBuffer(key: BufferKey): void {
-  const ws = useWindowStore.getState();
-  ws.show(ws.selected, key);
-  ws.setTreeFocused(false);
-  useUIStore.getState().requestFocus();
+/** Where to show a buffer: the selected window, or the other one (`C-x 4`). */
+export type ShowOptions = {
+  /** In the other window (Emacs's `C-x 4` commands) rather than the selected one. */
+  other?: boolean;
+  /** Give that window the keyboard (the default); false just shows it there (`C-o`). */
+  select?: boolean;
+};
+
+/** Show `key` in the selected window — or the other one — and give it the keyboard. */
+export function showBuffer(key: BufferKey, options: ShowOptions = {}): void {
+  const { selected } = useWindowStore.getState();
+  display(key, options.other ? otherWindowFor(key, selected) : selected, options.select ?? true);
 }
 
 /** `C-h b` / `C-h m`: the help buffer, listing `from`'s keys first (or only). */
-export function openHelp(from: KeyScope, only: boolean): void {
+export function openHelp(from: KeyScope, only: boolean, options: ShowOptions = {}): void {
   useUIStore.getState().setHelp({ from, only });
-  showBuffer("help");
+  showBuffer("help", options);
 }
 
 /**
- * `q` (Emacs's quit-window): the selected window goes back to what it showed before —
- * the diff, when it remembers nothing — and forgets the buffer it quit, so a second
- * `q` keeps going back rather than returning to it.
+ * `q` (Emacs's quit-window): the selected window goes back to what it showed before,
+ * forgetting the buffer it quit, so a second `q` keeps going back rather than returning
+ * to it. A window with nothing to go back to — one split off to show something —
+ * closes, as long as it isn't the only one; the only one goes back to the diff.
  */
 export function quitWindow(): void {
   const ws = useWindowStore.getState();
@@ -62,11 +70,11 @@ export function quitWindow(): void {
       .filter(([id]) => Number(id) !== win)
       .map(([, key]) => key),
   );
-  const next =
-    (ws.prev[win] ?? []).find((k) =>
-      isFileKey(k) ? fileBuffer(k) !== undefined : !others.has(k),
-    ) ?? "diff";
-  ws.quitTo(win, next);
+  const next = (ws.prev[win] ?? []).find((k) =>
+    isFileKey(k) ? fileBuffer(k) !== undefined : !others.has(k),
+  );
+  if (next == null && windowOrder(ws.layout).length > 1) ws.remove(win);
+  else ws.quitTo(win, next ?? "diff");
   ws.setTreeFocused(false);
   useUIStore.getState().requestFocus();
 }
@@ -131,26 +139,6 @@ export function cycleFileBuffers(step: 1 | -1): void {
     "<left>": () => cycleFileBuffers(-1),
     "<right>": () => cycleFileBuffers(1),
   });
-}
-
-/** `M-x project`: the file tree, shown if it was hidden, with the keyboard. */
-export function focusTree(): void {
-  const ps = useProjectStore.getState();
-  if (ps.treeHidden) ps.setTreeHidden(false);
-  useWindowStore.getState().setTreeFocused(true);
-  useUIStore.getState().requestFocus();
-}
-
-/** `C-x o`: between the file tree and the window (the tree comes back if hidden). */
-export function otherWindow(): void {
-  const ws = useWindowStore.getState();
-  const ps = useProjectStore.getState();
-  if (ps.treeHidden) {
-    focusTree();
-    return;
-  }
-  ws.setTreeFocused(!ws.treeFocused);
-  useUIStore.getState().requestFocus();
 }
 
 const baseName = (path: string) => path.slice(path.lastIndexOf("/") + 1);

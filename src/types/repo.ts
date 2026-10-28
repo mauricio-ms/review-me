@@ -187,6 +187,16 @@ export interface DirectoryListing {
   entries: { name: string; path: string; isSymlink: boolean }[];
 }
 
+/** A test's code, or a file's tests (`C-x 4 t`). Mirrors `counterpart::Counterpart`. */
+export interface Counterpart {
+  /** The file asked about is a test, so `paths` is the code it tests (else its tests). */
+  fromTest: boolean;
+  /** Candidates, best first. */
+  paths: string[];
+  /** The first is strictly the best: open it without asking. */
+  decisive: boolean;
+}
+
 export interface FileMatch {
   path: string;
   score: number;

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
+import type { ShowOptions } from "../lib/buffers";
 import { dispatchKey, type KeyHandler } from "../lib/key-dispatch";
 import { KEYMAP, type LogAction } from "../lib/keymap";
 import { loadMoreLog } from "../lib/log";
@@ -158,10 +159,10 @@ export default function LogBuffer() {
     }
   };
 
-  const enter = (commit: CommitInfo | undefined) => {
+  const enter = (commit: CommitInfo | undefined, options: ShowOptions = {}) => {
     if (!commit || entering) return;
     setCursorOid(commit.oid);
-    void opening(commit.shortOid, () => enterCommit(commit.oid));
+    void opening(commit.shortOid, () => enterCommit(commit.oid, options));
   };
 
   const rangeBase =
@@ -186,6 +187,8 @@ export default function LogBuffer() {
     first: () => moveTo(0),
     last: () => moveTo(commits.length - 1),
     open: () => enter(commits[cursor]),
+    // magit's way: the log stays, the commit opens beside it.
+    "open-other": () => enter(commits[cursor], { other: true }),
     range: enterRange,
   };
 

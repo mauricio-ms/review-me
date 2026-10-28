@@ -58,7 +58,32 @@ const GLOBAL_KEYS = [
     doc: "previous open file (then <left> <right> alone keep going)",
   },
   { keys: ["C-x <right>"], command: "next-buffer", doc: "next open file" },
-  { keys: ["C-x o"], command: "other-window", doc: "between the file tree and the window" },
+  { keys: ["C-x o"], command: "other-window", doc: "the next window (the file tree first)" },
+  { keys: ["C-w h"], command: "windmove-left", doc: "the window to the left (or the tree)" },
+  { keys: ["C-w j"], command: "windmove-down", doc: "the window below" },
+  { keys: ["C-w k"], command: "windmove-up", doc: "the window above" },
+  { keys: ["C-w l"], command: "windmove-right", doc: "the window to the right" },
+  { keys: ["C-x 3"], command: "split-window-right", doc: "split the window: a new one to the right" },
+  { keys: ["C-x 2"], command: "split-window-below", doc: "split the window: a new one below" },
+  { keys: ["C-x 0"], command: "delete-window", doc: "close this window" },
+  { keys: ["C-x 1"], command: "delete-other-windows", doc: "close every other window" },
+  {
+    keys: ["C-x 4 ."],
+    command: "definition-other-window",
+    doc: "go to definition in the other window, keeping this file in view",
+  },
+  {
+    keys: ["C-x 4 t"],
+    command: "test-or-code-other-window",
+    doc: "the code a test tests, or a file's test, in the other window",
+  },
+  {
+    keys: ["C-x 4 C-f", "C-x 4 f"],
+    command: "find-file-other-window",
+    doc: "find a file, into the other window",
+  },
+  { keys: ["C-x 4 b"], command: "switch-buffer-other-window", doc: "switch buffer in the other window" },
+  { keys: ["C-x p t"], command: "test-or-code", doc: "from a test to its code, or code to its test" },
   {
     keys: ["C-x {"],
     command: "shrink-tree",
@@ -109,6 +134,12 @@ const DIFF_KEYS = [
   { keys: ["[ s"], action: "prev-section", doc: "previous section" },
   { keys: ["TAB"], action: "toggle", doc: "fold or unfold" },
   { keys: ["RET"], action: "open", doc: "open the file, at this line, as a buffer" },
+  { keys: ["o"], action: "open-other", doc: "open the file, at this line, in the other window" },
+  {
+    keys: ["C-o"],
+    action: "display-other",
+    doc: "show the file in the other window, staying here",
+  },
   { keys: ["v", "V"], action: "visual", doc: "select lines" },
   { keys: ["ESC", "C-g"], action: "escape", doc: "end the selection" },
   { keys: ["r"], action: "review", doc: "mark reviewed" },
@@ -130,6 +161,7 @@ const LOG_KEYS = [
   { keys: ["g g"], action: "first", doc: "first commit" },
   { keys: ["G"], action: "last", doc: "last commit" },
   { keys: ["RET"], action: "open", doc: "review this commit" },
+  { keys: ["o"], action: "open-other", doc: "review this commit in the other window" },
   { keys: ["b"], action: "range", doc: "review the whole listed range as one diff" },
 ] as const satisfies readonly KeyBinding[];
 
@@ -140,6 +172,7 @@ const TREE_KEYS = [
   { keys: ["G"], action: "last", doc: "last row" },
   { keys: ["TAB"], action: "toggle", doc: "fold or unfold the folder" },
   { keys: ["RET", "l", "<right>"], action: "open", doc: "open the file or the folder" },
+  { keys: ["o"], action: "open-other", doc: "open the file in the other window" },
   { keys: ["h", "<left>"], action: "close", doc: "close the folder, or go to its parent" },
   {
     keys: ["c"],

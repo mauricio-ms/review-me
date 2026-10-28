@@ -50,6 +50,7 @@ symbol index in a global `Mutex`.
 - `revision.rs` `ProjectSource` (worktree | commit) and tree-backed content/listing/file-list reads.
 - `tags.rs` review/flag persistence + **anchoring** (see below). `tree.rs` ignore-aware dir listing that **compacts single-folder chains**: a folder holding only one folder is one entry (`name` `java/com/acme`, `path` the deepest folder, which is what expanding it lists) — the changed-files view (`buildChanged`) does the same, and parent navigation climbs to the nearest listed ancestor. `fuzzy.rs` nucleo-matcher file ranking.
 - `coverage.rs` review progress over a computed diff (`summarize`, `commit_reviews` for the log's rows) and the covers/overlaps helpers `review_commit.rs` stages by — the Rust twin of `src/lib/coverage.ts`; keep the two in step.
+- `counterpart.rs` test ↔ code by naming convention (`FooTest.java` ↔ `Foo.java`, `foo.test.ts`, `test_foo.py`, `foo_test.go`, `__tests__/`) for `C-x 4 t`: `rank` is pure (closeness = same folder with role folders like `test`/`main` set aside, then shared tail, then shared head) and says whether its best is `decisive`.
 - `notes.rs` the Markdown export of review notes (see "Notes" below). `review_dir.rs` owns `.review-me/`: every write goes through `ensure`, which also adds it to `.git/info/exclude`.
 - `queries.rs` + `xref.rs` tree-sitter symbol index and find-definition/references.
 - `window.rs` builds the main window in `setup` (`tauri.conf.json` has it `"create": false`) so decorations can follow the desktop: off on tiling compositors, on elsewhere, `REVIEW_ME_DECORATIONS` overrides.
@@ -65,9 +66,27 @@ derived, never stored. `DiffBuffer` and `LogBuffer` are rendered **once**, as po
 persistent host elements that `Window`'s `BufferSlot` moves into whichever window shows
 them — so their cursor, folds and scroll survive any move — and the slot carries scroll
 offsets and focus across the detach/re-attach (StrictMode re-runs it in dev). Each holds
-one cursor, so each shows in one window at most. Help renders in its window; a file
-renders as a `FileView` (CodeMirror) per window. Every switch goes through `lib/buffers.ts`
-(`showBuffer`, `openHelp`, `quitWindow`, `killCurrentBuffer`, `cycleFileBuffers`).
+one cursor, so each shows in one window at most — showing one that another window has
+selects that window instead (`lib/windows.ts`'s `display`, Emacs's reuse-window). Help
+renders in its window; a file renders as a `FileView` (CodeMirror) per window, so one file
+can be in two windows with two cursors. Every switch goes through `lib/buffers.ts`
+(`showBuffer`, `openHelp`, `quitWindow`, `killCurrentBuffer`, `cycleFileBuffers`), every
+window operation through `lib/windows.ts`.
+
+**Windows** split as Emacs's do: `useWindowStore.layout` is a tree of `split`s (`row` side
+by side, `column` stacked, a draggable `ratio`) over window ids, and `WindowArea` places
+each window absolutely by its tile rather than nesting it, so a split or a close never
+remounts the others. `C-x 3` / `C-x 2` split (a file shows in both halves, at the same
+place; a single-cursor buffer can't, so the new half gets the most recent buffer not on
+screen), `C-x 0` / `C-x 1` close, `C-x o` cycles (tree first), `C-w h/j/k/l` moves by
+screen position (`windmove`, the tree counts as the leftmost). **"The other window"**
+(`otherWindowFor`, every `C-x 4` command, `o` in the diff/log/tree, `C-o` in the diff
+which shows without selecting) is one already showing the buffer, else the next window,
+else a new one split off to the right — so `C-x 4 .` from a test opens the code beside
+it, and `C-x 4 t` back from the code just returns to the test's window. `q` in a window
+with nothing to go back to (one split off to show something) closes it. The selected
+window wears an amber top edge when there are several; a click or focus anywhere in a
+window selects it, and a Ctrl+click selects its window before resolving.
 The frame's last line is **`Minibuffer.tsx`**: the echo area (`useUIStore.flash`, and
 `keyEcho` for a half-typed `C-x-`) while idle, the minibuffer while something is read
 (`state/minibuffer.ts`: `command` for `M-x`, `buffer` for `C-x b`, `text` for a prompt).
@@ -462,8 +481,9 @@ revision changes.
 ## Testing
 
 Logic is unit-tested in Rust against `tempfile` git fixtures (`diff`, `tags`, `commits`,
-`coverage`, `notes`, `review_dir`, `fuzzy`, `tree`, `xref`, `repo_library`). UI/interaction
-has no automated or written test plan.
+`coverage`, `notes`, `review_dir`, `fuzzy`, `tree`, `xref`, `repo_library`), and
+`counterpart`'s ranking over plain path lists. UI/interaction has no automated or written
+test plan.
 
 `xref`'s two- and three-file fixtures are too small to catch resolution bugs that only
 appear across packages, so `xref_validate.rs` runs the resolver over a realistic

@@ -156,7 +156,20 @@ function Prompt({ request }: { request: MinibufferRequest }) {
         };
       });
     }
+    if (request.kind === "choice") {
+      return request.choices.map((choice) => ({
+        ...choice,
+        aliases: [],
+        key: null,
+        enabled: true,
+        run: () => {
+          close({ restoreFocus: false });
+          request.onAccept(choice.id);
+        },
+      }));
+    }
     if (request.kind === "buffer") {
+      const other = request.other ?? false;
       const label = {
         diff: "the changes under review",
         log: `commits on ${reviewBranch?.display ?? "HEAD"}`,
@@ -184,9 +197,9 @@ function Prompt({ request }: { request: MinibufferRequest }) {
           enabled: true,
           run: () => {
             close({ restoreFocus: false });
-            if (key === "log") showLog();
-            else if (key === "help") openHelp(scope, false);
-            else showBuffer(key);
+            if (key === "log") showLog({ other });
+            else if (key === "help") openHelp(scope, false, { other });
+            else showBuffer(key, { other });
           },
         };
       });
@@ -197,7 +210,7 @@ function Prompt({ request }: { request: MinibufferRequest }) {
     commands,
     fileBuffers,
     recent,
-    request.kind,
+    request,
     reviewBranch,
     scope,
     shownBuffer,
@@ -207,8 +220,9 @@ function Prompt({ request }: { request: MinibufferRequest }) {
   const [query, setQuery] = useState(request.kind === "text" ? (request.initial ?? "") : "");
   // -1 is "nothing selected": a bare `M-x` lists every command but RET runs none of
   // them until a row is picked or the list is narrowed by typing. `C-x b` preselects
-  // the buffer you came from.
-  const [selected, setSelected] = useState(request.kind === "buffer" ? 0 : -1);
+  // the buffer you came from, and a choice its first candidate.
+  const picksDefault = request.kind === "buffer" || request.kind === "choice";
+  const [selected, setSelected] = useState(picksDefault ? 0 : -1);
   const needle = query.trim().toLowerCase();
 
   const rows = useMemo(() => {
@@ -278,7 +292,9 @@ function Prompt({ request }: { request: MinibufferRequest }) {
     request.kind === "command"
       ? "M-x"
       : request.kind === "buffer"
-        ? `Switch to buffer${candidates?.[0] ? ` (default ${candidates[0].name})` : ""}:`
+        ? `Switch to buffer${request.other ? " in other window" : ""}${
+            candidates?.[0] ? ` (default ${candidates[0].name})` : ""
+          }:`
         : request.prompt;
 
   return (
@@ -313,19 +329,19 @@ function Prompt({ request }: { request: MinibufferRequest }) {
             if (request.kind === "text") request.onChange?.(value);
             // Typing narrows to the best match; clearing back to nothing picks
             // nothing again (except `C-x b`, whose default stays picked).
-            else setSelected(value.trim() || request.kind === "buffer" ? 0 : -1);
+            else setSelected(value.trim() || picksDefault ? 0 : -1);
           }}
         />
       </div>
       {rows && (
         <div
-          className={`mb-list${request.kind === "buffer" ? " is-buffers" : ""}`}
+          className={`mb-list${picksDefault ? " is-names" : ""}`}
           role="listbox"
           aria-label="Candidates"
-          // Buffer names are file names, which are never cut: the column fits the
-          // longest one (within reason).
+          // Buffer and choice names are file names, which are never cut: the column
+          // fits the longest one (within reason).
           style={
-            request.kind === "buffer"
+            picksDefault
               ? ({ "--mb-name-width": `${nameWidth(candidates)}ch` } as CSSProperties)
               : undefined
           }

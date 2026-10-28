@@ -36,7 +36,7 @@ import ProjectTree from "./ProjectTree";
 import RecentReposHost from "./RecentReposHost";
 import StartupDashboard from "./StartupDashboard";
 import { type CommandClose, type CommandId, useCommands } from "./useCommands";
-import Window, { bufferHost } from "./Window";
+import { bufferHost, WindowArea } from "./Window";
 import XrefHost from "./XrefHost";
 
 /** Where typed characters are text: a field, or a CodeMirror editor in insert mode. */
@@ -129,13 +129,10 @@ function GlobalKeys() {
 /** The windows, with the file tree beside them unless it's hidden. */
 function Frame() {
   const treeHidden = useProjectStore((s) => s.treeHidden);
-  const layout = useWindowStore((s) => s.layout);
   return (
     <div className="frame">
       {!treeHidden && <ProjectTree />}
-      <div className="windows">
-        <Window id={layout.id} />
-      </div>
+      <WindowArea />
     </div>
   );
 }

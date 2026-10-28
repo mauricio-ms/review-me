@@ -16,6 +16,7 @@ import {
   sectionForHunk,
   type ReviewSection,
 } from "../lib/coverage";
+import type { ShowOptions } from "../lib/buffers";
 import { setDiffTargetSource } from "../lib/diff-view";
 import { dispatchKey, type KeyHandler } from "../lib/key-dispatch";
 import { KEYMAP, type DiffAction } from "../lib/keymap";
@@ -827,13 +828,15 @@ export default function DiffBuffer() {
   // that line, hunk → its start, file → first change). The scope's side also picks the
   // revision: old-side content (a deletion) only exists in the base, so opening it
   // must not fall back to the working tree.
-  const openAtCursor = () => {
+  // `o` opens it in the other window, `C-o` only shows it there (the diff keeps the
+  // keyboard, so you can go on down the hunks with the file beside them).
+  const openAtCursor = (options: ShowOptions = {}) => {
     const row = rows[cursor];
     if (!row || row.kind === "section") return;
     const scope = cursorScope();
     const line = scope ? scope.lo : 1;
     const side = scope?.side === "old" ? "old" : "new";
-    openFileFromDiff(row.file.path, side, line);
+    openFileFromDiff(row.file.path, side, line, options);
   };
 
   const jumpTo = (predicate: (r: Row) => boolean, dir: 1 | -1) => {
@@ -924,7 +927,9 @@ export default function DiffBuffer() {
     "next-section": () => jumpTo((r) => r.kind === "section", 1),
     "prev-section": () => jumpTo((r) => r.kind === "section", -1),
     toggle: toggleAtCursor,
-    open: openAtCursor,
+    open: () => openAtCursor(),
+    "open-other": () => openAtCursor({ other: true }),
+    "display-other": () => openAtCursor({ other: true, select: false }),
     visual: () => setVisualAnchor((a) => (a == null ? cursor : null)),
     // Nothing selected: let the key go on (C-g has already said "Quit").
     escape: () => {

@@ -79,8 +79,8 @@ files → hunks → lines, with Emacs keys: `M-x` and a minibuffer at the bottom
 
 ### Buffers, and the file tree beside them
 
-As in Emacs, the window shows one buffer at a time, and every buffer keeps its cursor and
-scroll while you're elsewhere.
+As in Emacs, a window shows one buffer at a time — and the screen can be split into several
+windows — and every buffer keeps its cursor and scroll while you're elsewhere.
 
 | Buffer | What it is | Tagging |
 | --- | --- | --- |
@@ -88,8 +88,25 @@ scroll while you're elsewhere.
 | **Commits** | The review branch's history, magit-style; `Enter` opens a commit in the diff buffer. | — |
 | **Files** | Each file you open is a buffer of its own: read-only, syntax-highlighted, at the compared revision. | Flag only |
 
-The **file tree** sits beside the window, whatever it shows: the whole revision, or only the
-files the comparison changed.
+The **file tree** sits beside the windows, whatever they show: the whole revision, or only
+the files the comparison changed.
+
+### Windows
+
+Split the screen as in Emacs — `C-x 3` side by side, `C-x 2` stacked — to read two things
+at once: a test and the code it tests, the diff and the whole file, the commits and one
+commit. Each window shows any buffer (a file can be in two windows, each with its own
+cursor); `C-x o` cycles through them, `C-w h`/`j`/`k`/`l` moves left/down/up/right (left of
+the first window is the file tree), and the window with the keyboard wears an amber edge.
+Drag a boundary to resize.
+
+The `C-x 4` keys open something **in the other window**, keeping the one you're in on
+screen: `C-x 4 .` goes to a definition there, `C-x 4 t` to the code a test tests (or a
+file's test), `C-x 4 C-f` finds a file there, `C-x 4 b` switches it to another buffer.
+"The other window" is the one already showing that file, else the next window, else a new
+one split off to the right — so from `OrderServiceTest.java`, `C-x 4 .` on `OrderService`
+puts the class beside the test, and `C-x 4 t` from the class brings you back to the test.
+`q` in a window that was split off to show something closes it again.
 
 Opening a repository lands on the diff buffer when the working tree has uncommitted
 changes, and on the commits buffer when it's clean (there would be nothing to diff).
@@ -298,7 +315,15 @@ just the current buffer's keys; `C-h k` tells you what a key does.
 | `C-x b` | `switch-buffer` | Switch buffer (diff, log, help, every open file); `RET` alone goes back to the last one |
 | `C-x k` | `kill-buffer` | Close the file in the window |
 | `C-x ←` / `C-x →` | `previous-buffer` / `next-buffer` | Previous / next open file (then `←` `→` alone keep going) |
-| `C-x o` | `other-window` | Between the file tree and the window |
+| `C-x o` | `other-window` | The next window (the file tree first) |
+| `C-w h` / `j` / `k` / `l` | `windmove-left` / `-down` / `-up` / `-right` | The window to the left / below / above / to the right |
+| `C-x 3` / `C-x 2` | `split-window-right` / `-below` | Split the window side by side / stacked |
+| `C-x 0` / `C-x 1` | `delete-window` / `delete-other-windows` | Close this window / every other window |
+| `C-x 4 .` | `definition-other-window` | Go to definition in the other window, keeping this file in view |
+| `C-x 4 t` | `test-or-code-other-window` | From a test to the code it tests, or code to its test, in the other window |
+| `C-x p t` | `test-or-code` | The same, in this window |
+| `C-x 4 C-f` | `find-file-other-window` | Find a file, into the other window |
+| `C-x 4 b` | `switch-buffer-other-window` | Switch the other window to another buffer |
 | `C-x g` | `log` | The commits buffer: the commits the review branch introduced |
 | `C-x p p` | `recent` | Open a recent repository |
 | `C-x p k` | `close` | Close the repository |
@@ -341,6 +366,8 @@ just the current buffer's keys; `C-h k` tells you what a key does.
 | `]s` / `[s` | Next / previous **section** |
 | `Tab` | Fold / unfold the section, file, or hunk under the cursor |
 | `Enter` | Open the file under the cursor, at that line, as a buffer |
+| `o` | The same, in the other window |
+| `C-o` | Show it in the other window, staying in the diff |
 | `v` / `V` | Start/clear a visual line selection (extend with `j`/`k`) |
 | `r` | Mark the file / hunk / selection **reviewed** (`✓`) |
 | `u` | Un-review |
@@ -394,6 +421,7 @@ upstream or nothing unpushed, its whole history under **Recent commits**.
 | `j` / `k` | Move down / up |
 | `gg` / `G` | Jump to the newest / oldest loaded commit |
 | `Enter` | Review that commit against its first parent, in the diff buffer |
+| `o` | The same, in the other window (the log stays beside it) |
 | `b` | Review the whole listed range as one diff (`base...branch`) |
 
 `q` in the diff buffer brings you back, on the same row. Each row shows its review:
@@ -451,10 +479,11 @@ shows in the window, as a buffer of its own.
 | `j` / `k` | Move down / up |
 | `gg` / `G` | Jump to top / bottom |
 | `l` / `RET` | Expand a directory (lazy-loads) or open a file |
+| `o` | Open the file in the other window |
 | `h` | Collapse the directory, or jump to its parent |
 | `TAB` | Toggle the folder under the cursor |
 | `c` | Only the changed files ↔ all files |
-| `C-x o` | To the window |
+| `C-x o` | To the first window |
 | `C-x {` / `C-x }` | Narrower / wider tree (then `{` `}` alone keep adjusting) |
 | `q` | Back to the window |
 
@@ -473,12 +502,13 @@ only the changed files (`c`), the removed lines are always shown in place; `M-x 
 | --- | --- |
 | `j`/`k`, `gg`/`G`, `w`/`b`, `/search` | Standard vim motions |
 | `M-.` / `M-?` | Go to definition / find references |
+| `C-x 4 .` | Go to definition in the other window |
 | `M-,` | Back to where you jumped from |
 | `M-g g` | Go to line |
 | `Ctrl`/`Cmd` + click | Jump to definition of the symbol clicked |
 | `v` + `j`, then `M-x flag` | Flag the selected lines |
-| `C-x o` | To the tree |
-| `q` | Back to what the window showed before (the diff, usually) |
+| `C-x o` | To the next window |
+| `q` | Back to what the window showed before (the diff, usually); a split-off window closes |
 
 ### Cross-references
 

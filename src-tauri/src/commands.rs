@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use crate::branches::{self, BranchInfo};
 use crate::commits::{self, CommitInfo, CommitLog};
+use crate::counterpart::{self, Counterpart};
 use crate::coverage::{self, CommitReview};
 use crate::diff::{self, DiffSpec, DiffSummary};
 use crate::error::AppResult;
@@ -237,6 +238,17 @@ pub fn fuzzy_files(
 ) -> AppResult<Vec<FileMatch>> {
     let repository = repo::open(&PathBuf::from(repo))?;
     fuzzy::fuzzy_files(&repository, &source, &query, limit as usize, only)
+}
+
+/// The code a test exercises, or a file's tests, among `source`'s files (`C-x 4 t`).
+#[tauri::command]
+pub fn find_counterpart(
+    repo: String,
+    source: ProjectSource,
+    path: String,
+) -> AppResult<Counterpart> {
+    let repository = repo::open(&PathBuf::from(repo))?;
+    counterpart::find(&repository, &source, &path)
 }
 
 /// List the children of a repo-relative directory for project-mode navigation.

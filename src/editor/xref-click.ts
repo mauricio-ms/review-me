@@ -1,5 +1,6 @@
 import { EditorView } from "@codemirror/view";
 
+import { selectWindow } from "../lib/windows";
 import { gotoDefinitionAt } from "../lib/xref";
 
 /** True when the platform go-to-definition modifier (Ctrl, or Cmd on macOS) is held. */
@@ -19,6 +20,10 @@ export const xrefClick = EditorView.domEventHandlers({
     const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
     if (pos == null) return false;
     event.preventDefault();
+    // The click doesn't focus (it's prevented), so select its window by hand: the
+    // definition is resolved from the file in the selected window.
+    const win = view.dom.closest<HTMLElement>("[data-window]")?.dataset.window;
+    if (win) selectWindow(Number(win));
     const line = view.state.doc.lineAt(pos);
     void gotoDefinitionAt(line.number, pos - line.from);
     return true;

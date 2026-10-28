@@ -1,6 +1,6 @@
 import { useLogStore } from "../state/log";
 import { useRepoStore } from "../state/repo";
-import { showBuffer } from "./buffers";
+import { showBuffer, type ShowOptions } from "./buffers";
 import { commitReviews, listCommits } from "./tauri";
 
 /**
@@ -83,7 +83,7 @@ export async function refreshCommitReviews(oids: string[]): Promise<void> {
  * moved since (an agent committing in the background) — and the buffer keeps its
  * cursor on the same commit across the reload.
  */
-export function showLog(): void {
-  showBuffer("log");
+export function showLog(options: ShowOptions = {}): void {
+  showBuffer("log", options);
   void loadLog();
 }

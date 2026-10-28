@@ -1,6 +1,7 @@
 mod branches;
 mod commands;
 mod commits;
+mod counterpart;
 mod coverage;
 mod diff;
 mod error;
@@ -49,6 +50,7 @@ pub fn run() {
             commands::abort_reviewed_commit,
             commands::commit_reviewed_changes,
             commands::fuzzy_files,
+            commands::find_counterpart,
             commands::list_repo_dir,
             commands::build_symbol_index,
             commands::symbol_at,

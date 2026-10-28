@@ -6,6 +6,7 @@ import type {
   CommitInfo,
   CommitLog,
   CommitReview,
+  Counterpart,
   DirectoryListing,
   FileMatch,
   FileSystemListing,
@@ -257,6 +258,15 @@ export function fuzzyFiles(
   only: string[] | null,
 ): Promise<FileMatch[]> {
   return invoke<FileMatch[]>("fuzzy_files", { repo, source, query, limit, only });
+}
+
+/** The code a test exercises, or a file's tests, by naming convention. */
+export function findCounterpart(
+  repo: string,
+  source: ProjectSource,
+  path: string,
+): Promise<Counterpart> {
+  return invoke<Counterpart>("find_counterpart", { repo, source, path });
 }
 
 export function listRepoDir(

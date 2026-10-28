@@ -3,13 +3,12 @@ import { useCallback } from "react";
 import {
   currentFile,
   cycleFileBuffers,
-  focusTree,
   killCurrentBuffer,
   openHelp,
-  otherWindow,
   showBuffer,
   useCurrentFile,
 } from "../lib/buffers";
+import { visitCounterpart } from "../lib/counterpart";
 import { contextScope, startDescribeKey } from "../lib/key-dispatch";
 import { showLog } from "../lib/log";
 import { exportNotes, openNoteEditor } from "../lib/notes";
@@ -19,6 +18,15 @@ import { toggleChangesAtCursor } from "../lib/project-diff";
 import { projectSelectionRange } from "../lib/project-view";
 import { addFlag } from "../lib/review-actions";
 import { adjustTextScale } from "../lib/text-scale";
+import {
+  deleteOtherWindows,
+  deleteWindow,
+  focusTree,
+  otherWindow,
+  splitWindow,
+  windmove,
+  type Direction,
+} from "../lib/windows";
 import { findUsages, gotoDefinition, jumpBack } from "../lib/xref";
 import { useFilesStore } from "../state/files";
 import { useJumpStore } from "../state/jumps";
@@ -64,6 +72,19 @@ export type CommandId =
   | "previous-buffer"
   | "next-buffer"
   | "other-window"
+  | "windmove-left"
+  | "windmove-right"
+  | "windmove-up"
+  | "windmove-down"
+  | "split-window-right"
+  | "split-window-below"
+  | "delete-window"
+  | "delete-other-windows"
+  | "definition-other-window"
+  | "find-file-other-window"
+  | "switch-buffer-other-window"
+  | "test-or-code"
+  | "test-or-code-other-window"
   | "help"
   | "describe-mode"
   | "describe-key"
@@ -151,10 +172,13 @@ export function useCommands(close: CommandClose): {
     requestFocus();
   }, [close, closeRepo, requestFocus]);
 
-  const handleFind = useCallback(() => {
-    close({ restoreFocus: false });
-    openPicker("fuzzyFiles");
-  }, [close, openPicker]);
+  const handleFind = useCallback(
+    (other: boolean) => {
+      close({ restoreFocus: false });
+      openPicker("fuzzyFiles", other);
+    },
+    [close, openPicker],
+  );
 
   const handleClearTags = useCallback(() => {
     close({ restoreFocus: false });
@@ -239,10 +263,13 @@ export function useCommands(close: CommandClose): {
     void exportNotes();
   }, [close]);
 
-  const handleGotoDef = useCallback(() => {
-    close({ restoreFocus: false });
-    void gotoDefinition();
-  }, [close]);
+  const handleGotoDef = useCallback(
+    (other: boolean) => {
+      close({ restoreFocus: false });
+      void gotoDefinition(other);
+    },
+    [close],
+  );
 
   const handleFindRefs = useCallback(() => {
     close({ restoreFocus: false });
@@ -254,10 +281,23 @@ export function useCommands(close: CommandClose): {
     void jumpBack();
   }, [close]);
 
-  const handleSwitchBuffer = useCallback(() => {
-    close({ restoreFocus: false });
-    openMinibuffer({ kind: "buffer" });
-  }, [close, openMinibuffer]);
+  const handleSwitchBuffer = useCallback(
+    (other: boolean) => {
+      close({ restoreFocus: false });
+      openMinibuffer({ kind: "buffer", other });
+    },
+    [close, openMinibuffer],
+  );
+
+  // A window command: close the minibuffer, then act (the action requests focus).
+  const windowCommand = useCallback(
+    (action: () => void | Promise<void>) => () => {
+      close({ restoreFocus: false });
+      void action();
+    },
+    [close],
+  );
+  const move = (dir: Direction) => windowCommand(() => windmove(dir));
 
   const handleOtherWindow = useCallback(() => {
     close({ restoreFocus: false });
@@ -307,7 +347,7 @@ export function useCommands(close: CommandClose): {
       aliases: ["files", "ff"],
       label: "find file (fuzzy)",
       enabled: !!repo,
-      run: handleFind,
+      run: () => handleFind(false),
     },
     {
       id: "refresh",
@@ -364,7 +404,16 @@ export function useCommands(close: CommandClose): {
       label: "go to definition",
       buffer: "project",
       enabled: !!openPath,
-      run: handleGotoDef,
+      run: () => handleGotoDef(false),
+    },
+    {
+      id: "definition-other-window",
+      name: "definition-other-window",
+      aliases: ["def-other", "xref-find-definitions-other-window"],
+      label: "go to definition in the other window, keeping this file in view",
+      buffer: "project",
+      enabled: !!openPath,
+      run: () => handleGotoDef(true),
     },
     {
       id: "find-refs",
@@ -519,7 +568,103 @@ export function useCommands(close: CommandClose): {
       aliases: ["buffer", "buffers"],
       label: "switch to another buffer",
       enabled: !!repo,
-      run: handleSwitchBuffer,
+      run: () => handleSwitchBuffer(false),
+    },
+    {
+      id: "switch-buffer-other-window",
+      name: "switch-buffer-other-window",
+      aliases: ["buffer-other-window"],
+      label: "switch to another buffer in the other window",
+      enabled: !!repo,
+      run: () => handleSwitchBuffer(true),
+    },
+    {
+      id: "find-file-other-window",
+      name: "find-file-other-window",
+      aliases: ["find-other", "ff-other"],
+      label: "find a file, into the other window",
+      enabled: !!repo,
+      run: () => handleFind(true),
+    },
+    {
+      id: "test-or-code",
+      name: "test-or-code",
+      aliases: ["toggle-test", "find-test", "counterpart"],
+      label: "from a test to the code it tests, or from code to its test",
+      enabled: !!repo,
+      run: windowCommand(() => visitCounterpart()),
+    },
+    {
+      id: "test-or-code-other-window",
+      name: "test-or-code-other-window",
+      aliases: ["toggle-test-other-window", "counterpart-other-window"],
+      label: "the code a test tests, or a file's test, in the other window",
+      enabled: !!repo,
+      run: windowCommand(() => visitCounterpart({ other: true })),
+    },
+    {
+      id: "split-window-right",
+      name: "split-window-right",
+      aliases: ["vsplit", "split-right"],
+      label: "split the window: a new one to the right",
+      enabled: !!repo,
+      run: windowCommand(() => splitWindow("row")),
+    },
+    {
+      id: "split-window-below",
+      name: "split-window-below",
+      aliases: ["split", "split-below"],
+      label: "split the window: a new one below",
+      enabled: !!repo,
+      run: windowCommand(() => splitWindow("column")),
+    },
+    {
+      id: "delete-window",
+      name: "delete-window",
+      aliases: ["close-window"],
+      label: "close this window",
+      enabled: !!repo,
+      run: windowCommand(deleteWindow),
+    },
+    {
+      id: "delete-other-windows",
+      name: "delete-other-windows",
+      aliases: ["only", "one-window"],
+      label: "close every other window",
+      enabled: !!repo,
+      run: windowCommand(deleteOtherWindows),
+    },
+    {
+      id: "windmove-left",
+      name: "windmove-left",
+      aliases: [],
+      label: "the window to the left (or the file tree)",
+      enabled: !!repo,
+      run: move("left"),
+    },
+    {
+      id: "windmove-right",
+      name: "windmove-right",
+      aliases: [],
+      label: "the window to the right",
+      enabled: !!repo,
+      run: move("right"),
+    },
+    {
+      id: "windmove-up",
+      name: "windmove-up",
+      aliases: [],
+      label: "the window above",
+      enabled: !!repo,
+      run: move("up"),
+    },
+    {
+      id: "windmove-down",
+      name: "windmove-down",
+      aliases: [],
+      label: "the window below",
+      enabled: !!repo,
+      run: move("down"),
     },
     {
       id: "kill-buffer",
@@ -558,7 +703,7 @@ export function useCommands(close: CommandClose): {
       id: "other-window",
       name: "other-window",
       aliases: ["window", "pane"],
-      label: "between the file tree and the window",
+      label: "the next window (the file tree first)",
       enabled: !!repo,
       run: handleOtherWindow,
     },

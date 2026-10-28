@@ -7,7 +7,7 @@ import { useWindowStore } from "../state/windows";
 import { sameSpec, WORKTREE_SPEC, type DiffSpec } from "../types/diff";
 import { branchShorthand, rangeBaseRef, type ReviewBranch } from "../types/repo";
 import { scopeForSpec } from "../types/tags";
-import { showBuffer } from "./buffers";
+import { showBuffer, type ShowOptions } from "./buffers";
 import { loadLog, refreshCommitReviews, showLog } from "./log";
 import { ambientSource, reconcileFileBuffers, useProjectSource } from "./project";
 import { buildSymbolIndex, computeDiff, loadTags, openRepo } from "./tauri";
@@ -100,12 +100,13 @@ export async function openRepoByPath(path: string): Promise<void> {
 
 /**
  * Enter a commit from the commits buffer: review it against its first parent in the
- * diff buffer. Throws when the diff can't be computed, leaving the log where it was.
+ * diff buffer — here, or in the other window (`o`). Throws when the diff can't be
+ * computed, leaving the log where it was.
  */
-export async function enterCommit(oid: string): Promise<void> {
+export async function enterCommit(oid: string, options: ShowOptions = {}): Promise<void> {
   const branchRef = useRepoStore.getState().reviewBranch?.ref ?? null;
   await applyComparison({ kind: "commit", oid, branchRef });
-  showBuffer("diff");
+  showBuffer("diff", options);
 }
 
 /**

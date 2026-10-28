@@ -11,7 +11,9 @@ type XrefState = {
   results: XrefResult[];
   /** The revision the results were resolved in — where choosing one opens it. */
   choice: SourceChoice | null;
-  show: (title: string, results: XrefResult[], choice: SourceChoice) => void;
+  /** Choosing one opens it in the other window (`C-x 4 .`). */
+  other: boolean;
+  show: (title: string, results: XrefResult[], choice: SourceChoice, other?: boolean) => void;
   close: () => void;
 };
 
@@ -20,6 +22,8 @@ export const useXrefStore = create<XrefState>((set) => ({
   title: "",
   results: EMPTY_RESULTS,
   choice: null,
-  show: (title, results, choice) => set({ open: true, title, results, choice }),
+  other: false,
+  show: (title, results, choice, other = false) =>
+    set({ open: true, title, results, choice, other }),
   close: () => set({ open: false, results: EMPTY_RESULTS }),
 }));

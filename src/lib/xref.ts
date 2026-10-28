@@ -28,9 +28,9 @@ function ctx() {
  * position captured when the reviewer finally picks is still the origin — and
  * dismissing the panel without picking records nothing at all.
  */
-export function navigateTo(result: XrefResult, choice: SourceChoice): void {
+export function navigateTo(result: XrefResult, choice: SourceChoice, other = false): void {
   recordJump();
-  visitFile(result.file, choice, { line: result.line, col: result.col });
+  visitFile(result.file, choice, { line: result.line, col: result.col }, { other });
 }
 
 /** Return to the position before the last jump (`M-,`). Empty stack: no-op. */
@@ -41,11 +41,11 @@ export function jumpBack(): void {
 }
 
 /**
- * Resolve and jump to the definition of the symbol at an explicit viewer
- * position (1-based line, 0-based col). Shared by the `gd` vim action and the
- * Ctrl/Cmd+click handler.
+ * Resolve and jump to the definition of the symbol at an explicit viewer position
+ * (1-based line, 0-based col) — in this window, or the other one (`C-x 4 .`, where the
+ * file you came from stays in view). Shared by `M-.` and the Ctrl/Cmd+click handler.
  */
-export async function gotoDefinitionAt(line: number, col: number): Promise<void> {
+export async function gotoDefinitionAt(line: number, col: number, other = false): Promise<void> {
   const c = ctx();
   if (!c) return;
   const symbol = await symbolAt(c.repo, c.source, c.path, line, col);
@@ -54,19 +54,19 @@ export async function gotoDefinitionAt(line: number, col: number): Promise<void>
   if (defs.length === 0) {
     useXrefStore.getState().show(`no definition for ${symbol.name}`, [], c.choice);
   } else if (defs.length === 1) {
-    navigateTo(defs[0], c.choice);
+    navigateTo(defs[0], c.choice, other);
   } else {
     // The backend couldn't decide — otherwise it would have returned exactly one.
     useXrefStore
       .getState()
-      .show(`${defs.length} candidates for ${symbol.name}`, defs, c.choice);
+      .show(`${defs.length} candidates for ${symbol.name}`, defs, c.choice, other);
   }
 }
 
-/** Go to definition of the symbol under the viewer cursor. */
-export async function gotoDefinition(): Promise<void> {
+/** Go to definition of the symbol under the cursor — in the other window with `other`. */
+export async function gotoDefinition(other = false): Promise<void> {
   const cursor = projectCursor();
-  if (cursor) await gotoDefinitionAt(cursor.line, cursor.col);
+  if (cursor) await gotoDefinitionAt(cursor.line, cursor.col, other);
 }
 
 /** Find references to the symbol under the viewer cursor. */

@@ -103,15 +103,61 @@ kbd {
 .windows {
   flex: 1;
   min-width: 0;
-  display: flex;
+  position: relative;
 }
 
+/* Placed by its tile (Window.tsx), so a split never remounts a window. */
 .window {
-  flex: 1;
-  min-width: 0;
+  position: absolute;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+.window.has-left {
+  border-left: 1px solid var(--bg-3);
+}
+
+.window.has-top {
+  border-top: 1px solid var(--bg-3);
+}
+
+/* With more than one window, the selected one — where commands act and the tree opens
+   files — wears an amber edge along its top. */
+.window.is-selected::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--accent-amber);
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* A split's boundary: drag to move it. */
+.window-divider {
+  position: absolute;
+  z-index: 3;
+  touch-action: none;
+}
+
+.window-divider.is-row {
+  width: 5px;
+  margin-left: -2px;
+  cursor: col-resize;
+}
+
+.window-divider.is-column {
+  height: 5px;
+  margin-top: -2px;
+  cursor: row-resize;
+}
+
+.window-divider:hover,
+.window-divider:active {
+  background: rgba(var(--accent-teal-rgb), 0.35);
 }
 
 .window > * {
@@ -1980,12 +2026,13 @@ kbd {
   cursor: pointer;
 }
 
-/* `C-x b`: no keys to show, and a name column as wide as the longest file name. */
-.mb-list.is-buffers .mb-row {
+/* `C-x b` and file choices: no keys to show, and a name column as wide as the longest
+   file name. */
+.mb-list.is-names .mb-row {
   grid-template-columns: var(--mb-name-width, 16ch) minmax(0, 1fr);
 }
 
-.mb-list.is-buffers .mb-key {
+.mb-list.is-names .mb-key {
   display: none;
 }
 

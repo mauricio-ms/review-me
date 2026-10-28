@@ -32,6 +32,8 @@ function highlight(text: string, offset: number, hit: Set<number>) {
 
 export default function FuzzyFinderHost() {
   const open = useUIStore((s) => s.picker === "fuzzyFiles");
+  // `C-x 4 C-f`: the file opens in the other window.
+  const other = useUIStore((s) => s.pickerOther);
   const closePicker = useUIStore((s) => s.closePicker);
   const requestFocus = useUIStore((s) => s.requestFocus);
   const repoPath = useRepoStore((s) => s.repoPath);
@@ -80,15 +82,17 @@ export default function FuzzyFinderHost() {
   const openSelected = useCallback(
     (row: FileMatch) => {
       const change = only ? changedByPath.get(row.path) : undefined;
+      closePicker();
       // A changed file opens where the tree would open it: a deletion on the old side.
       if (change) {
-        void openFileFromDiff(change.path, change.status === "deleted" ? "old" : "new");
+        openFileFromDiff(change.path, change.status === "deleted" ? "old" : "new", undefined, {
+          other,
+        });
       } else {
-        void openFileInProject(row.path);
+        openFileInProject(row.path, { other });
       }
-      closePicker();
     },
-    [changedByPath, closePicker, only],
+    [changedByPath, closePicker, only, other],
   );
 
   if (!open) return null;
@@ -96,7 +100,7 @@ export default function FuzzyFinderHost() {
   return (
     <NeoPicker<FileMatch>
       open={open}
-      title={only ? "Find changed file" : "Find file"}
+      title={`${only ? "Find changed file" : "Find file"}${other ? " in other window" : ""}`}
       className="fuzzy-finder"
       query={query}
       onQueryChange={setQuery}

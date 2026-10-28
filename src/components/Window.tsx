@@ -1,6 +1,12 @@
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, type CSSProperties } from "react";
 
-import { isFileKey, useWindowStore, type WindowId } from "../state/windows";
+import {
+  isFileKey,
+  useWindowStore,
+  type Layout,
+  type SplitPath,
+  type WindowId,
+} from "../state/windows";
 import FileView from "./FileView";
 import HelpBuffer from "./HelpBuffer";
 
@@ -65,7 +71,15 @@ function BufferSlot({ name }: { name: "diff" | "log" }) {
  * One Emacs window: a view onto a buffer. Focus landing anywhere in it — a click, or
  * a buffer taking the keyboard — makes it the selected one, and the tree lets go.
  */
-export default function Window({ id }: { id: WindowId }) {
+function Window({
+  id,
+  className,
+  style,
+}: {
+  id: WindowId;
+  className: string;
+  style: CSSProperties;
+}) {
   const key = useWindowStore((s) => s.shown[id]);
   const rootRef = useRef<HTMLDivElement | null>(null);
 
@@ -74,16 +88,13 @@ export default function Window({ id }: { id: WindowId }) {
   useEffect(() => {
     const root = rootRef.current;
     if (!root) return;
-    const onFocusIn = () => {
-      const ws = useWindowStore.getState();
-      if (ws.treeFocused) ws.setTreeFocused(false);
-    };
+    const onFocusIn = () => useWindowStore.getState().select(id);
     root.addEventListener("focusin", onFocusIn);
     return () => root.removeEventListener("focusin", onFocusIn);
-  }, []);
+  }, [id]);
 
   return (
-    <div ref={rootRef} className="window" data-window={id}>
+    <div ref={rootRef} className={className} style={style} data-window={id}>
       {key === "diff" || key === "log" ? (
         <BufferSlot name={key} />
       ) : key === "help" ? (
@@ -91,6 +102,110 @@ export default function Window({ id }: { id: WindowId }) {
       ) : key && isFileKey(key) ? (
         <FileView key={key} win={id} bufferId={key} />
       ) : null}
+    </div>
+  );
+}
+
+/** Where a window sits in the frame, in fractions of the windows' area. */
+type Tile = { id: WindowId; x: number; y: number; w: number; h: number };
+/** A split's boundary, which dragging moves: its split, and the split's own area. */
+type Divider = { path: SplitPath; dir: "row" | "column"; at: number } & Omit<Tile, "id">;
+
+function tileLayout(
+  layout: Layout,
+  area: Omit<Tile, "id">,
+  path: SplitPath,
+  tiles: Tile[],
+  dividers: Divider[],
+): void {
+  if (layout.kind === "window") {
+    tiles.push({ id: layout.id, ...area });
+    return;
+  }
+  const { x, y, w, h } = area;
+  if (layout.dir === "row") {
+    const cut = w * layout.ratio;
+    tileLayout(layout.first, { x, y, w: cut, h }, [...path, 0], tiles, dividers);
+    tileLayout(layout.second, { x: x + cut, y, w: w - cut, h }, [...path, 1], tiles, dividers);
+    dividers.push({ path, dir: "row", at: x + cut, ...area });
+  } else {
+    const cut = h * layout.ratio;
+    tileLayout(layout.first, { x, y, w, h: cut }, [...path, 0], tiles, dividers);
+    tileLayout(layout.second, { x, y: y + cut, w, h: h - cut }, [...path, 1], tiles, dividers);
+    dividers.push({ path, dir: "column", at: y + cut, ...area });
+  }
+}
+
+const pct = (n: number) => `${n * 100}%`;
+
+/**
+ * The windows, as the layout splits them. Each window is placed by its tile rather than
+ * nested in its split, so splitting or closing one never remounts the others (nor their
+ * editors). Dragging a boundary moves it; with more than one window, the selected one
+ * is marked.
+ */
+export function WindowArea() {
+  const layout = useWindowStore((s) => s.layout);
+  const selected = useWindowStore((s) => s.selected);
+  const setRatio = useWindowStore((s) => s.setRatio);
+  const areaRef = useRef<HTMLDivElement | null>(null);
+  const { tiles, dividers } = useMemo(() => {
+    const tiles: Tile[] = [];
+    const dividers: Divider[] = [];
+    tileLayout(layout, { x: 0, y: 0, w: 1, h: 1 }, [], tiles, dividers);
+    return { tiles, dividers };
+  }, [layout]);
+  const split = tiles.length > 1;
+
+  const startDrag = (divider: Divider) => (e: React.PointerEvent<HTMLDivElement>) => {
+    const area = areaRef.current?.getBoundingClientRect();
+    if (!area) return;
+    e.preventDefault();
+    const handle = e.currentTarget;
+    handle.setPointerCapture(e.pointerId);
+    const move = (ev: PointerEvent) => {
+      const ratio =
+        divider.dir === "row"
+          ? (ev.clientX - area.left - divider.x * area.width) / (divider.w * area.width)
+          : (ev.clientY - area.top - divider.y * area.height) / (divider.h * area.height);
+      setRatio(divider.path, ratio);
+    };
+    const up = () => {
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", up);
+      handle.removeEventListener("pointercancel", up);
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", up);
+    handle.addEventListener("pointercancel", up);
+  };
+
+  return (
+    <div ref={areaRef} className={`windows${split ? " is-split" : ""}`}>
+      {tiles.map((t) => (
+        <Window
+          key={t.id}
+          id={t.id}
+          className={`window${split && t.id === selected ? " is-selected" : ""}${
+            t.x > 0 ? " has-left" : ""
+          }${t.y > 0 ? " has-top" : ""}`}
+          style={{ left: pct(t.x), top: pct(t.y), width: pct(t.w), height: pct(t.h) }}
+        />
+      ))}
+      {dividers.map((d) => (
+        <div
+          key={`split-${d.path.join("")}`}
+          className={`window-divider is-${d.dir}`}
+          role="separator"
+          aria-orientation={d.dir === "row" ? "vertical" : "horizontal"}
+          style={
+            d.dir === "row"
+              ? { left: pct(d.at), top: pct(d.y), height: pct(d.h) }
+              : { top: pct(d.at), left: pct(d.x), width: pct(d.w) }
+          }
+          onPointerDown={startDrag(d)}
+        />
+      ))}
     </div>
   );
 }

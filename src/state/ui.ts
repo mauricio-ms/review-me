@@ -33,6 +33,8 @@ type UIState = {
   help: HelpView;
   vimMode: VimMode;
   picker: PickerKind;
+  /** The open picker's choice goes to the other window (`C-x 4 C-f`). */
+  pickerOther: boolean;
   focusRequest: number;
   modalDepth: number;
   diffHighlight: DiffHighlightMode;
@@ -44,7 +46,7 @@ type UIState = {
 
   setHelp: (help: HelpView) => void;
   setVimMode: (m: VimMode) => void;
-  openPicker: (p: Exclude<PickerKind, null>) => void;
+  openPicker: (p: Exclude<PickerKind, null>, other?: boolean) => void;
   closePicker: () => void;
   requestFocus: () => void;
   beginModal: () => void;
@@ -64,6 +66,7 @@ export const useUIStore = create<UIState>((set) => ({
   help: { from: "global", only: false },
   vimMode: "normal",
   picker: null,
+  pickerOther: false,
   focusRequest: 0,
   modalDepth: 0,
   diffHighlight: "word",
@@ -73,8 +76,8 @@ export const useUIStore = create<UIState>((set) => ({
 
   setHelp: (help) => set({ help }),
   setVimMode: (m) => set({ vimMode: m }),
-  openPicker: (p) => set({ picker: p }),
-  closePicker: () => set({ picker: null }),
+  openPicker: (p, other = false) => set({ picker: p, pickerOther: other }),
+  closePicker: () => set({ picker: null, pickerOther: false }),
   requestFocus: () => set((s) => ({ focusRequest: s.focusRequest + 1 })),
   beginModal: () => set((s) => ({ modalDepth: s.modalDepth + 1 })),
   endModal: () => set((s) => ({ modalDepth: Math.max(0, s.modalDepth - 1) })),

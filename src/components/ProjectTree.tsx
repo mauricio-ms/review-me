@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { fileReviewState } from "../lib/coverage";
-import { useCurrentFile } from "../lib/buffers";
+import { useCurrentFile, type ShowOptions } from "../lib/buffers";
 import { fileIcon } from "../lib/file-icons";
 import { dispatchKey, type KeyHandler } from "../lib/key-dispatch";
 import { KEYMAP, type TreeAction } from "../lib/keymap";
@@ -236,16 +236,21 @@ export default function ProjectTree() {
     if (focused) treeRef.current?.focus({ preventScroll: true });
   }, [focused, focusRequest]);
 
-  const activate = (node: Node | undefined) => {
+  const activate = (node: Node | undefined, options: ShowOptions = {}) => {
     if (!node) return;
     if (node.entry.isDir) {
       toggleFolder(node.entry.path);
     } else if (node.change) {
       // At the revision that changed it — the old side for a deletion, the only one
       // that still has it.
-      openFileFromDiff(node.change.path, node.change.status === "deleted" ? "old" : "new");
+      openFileFromDiff(
+        node.change.path,
+        node.change.status === "deleted" ? "old" : "new",
+        undefined,
+        options,
+      );
     } else {
-      openFileInProject(node.entry.path);
+      openFileInProject(node.entry.path, options);
     }
   };
 
@@ -279,6 +284,7 @@ export default function ProjectTree() {
       if (node?.entry.isDir) toggleFolder(node.entry.path);
     },
     open: () => activate(nodes[cursor]),
+    "open-other": () => activate(nodes[cursor], { other: true }),
     close: () => collapseOrParent(nodes[cursor]),
     // The whole revision ↔ only what the comparison on screen changed.
     filter: toggleFilter,

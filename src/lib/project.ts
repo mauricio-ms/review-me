@@ -6,10 +6,11 @@ import { useUIStore } from "../state/ui";
 import { useWindowStore, type FileBufferId } from "../state/windows";
 import { shortOid, type Comparison } from "../types/diff";
 import { sameSource, WORKTREE_SOURCE, type ProjectSource } from "../types/repo";
-import { findFileBuffer, focusTree, killFileBuffers, showBuffer } from "./buffers";
+import { findFileBuffer, killFileBuffers, type ShowOptions } from "./buffers";
 import { recordJump } from "./jumps";
 import { armRepeat } from "./key-dispatch";
 import { placeCursor } from "./project-view";
+import { display, focusTree, otherWindowFor } from "./windows";
 import { listRepoDir, readFile } from "./tauri";
 
 /** The repo + revision every project read below goes through. */
@@ -177,25 +178,28 @@ function bufferFor(path: string, choice: SourceChoice): FileBufferId {
 }
 
 /**
- * Emacs's find-file: show `path` at a revision in the selected window — in the buffer
- * already open for it, else a new one — with the keyboard there. The cursor goes to
- * `at`, or back to where this window left the file.
+ * Emacs's find-file: show `path` at a revision in the selected window — or the other
+ * one — in the buffer already open for it, else a new one, with the keyboard there. The
+ * cursor goes to `at`, or back to where that window left the file.
  */
 export function visitFile(
   path: string,
   choice: SourceChoice,
   at?: { line: number; col?: number },
+  options: ShowOptions = {},
 ): void {
   if (!useRepoStore.getState().repoPath) return;
   const id = bufferFor(path, choice);
-  if (at) placeCursor(useWindowStore.getState().selected, id, at.line, at.col ?? 0);
-  showBuffer(id);
+  const { selected } = useWindowStore.getState();
+  const win = options.other ? otherWindowFor(id, selected) : selected;
+  if (at) placeCursor(win, id, at.line, at.col ?? 0);
+  display(id, win, options.select ?? true);
 }
 
 /** Open a file from the tree or the finder, at the revision they list (a jump `M-,` undoes). */
-export function openFileInProject(path: string): void {
-  recordJump();
-  visitFile(path, projectChoice());
+export function openFileInProject(path: string, options: ShowOptions = {}): void {
+  if (options.select ?? true) recordJump();
+  visitFile(path, projectChoice(), undefined, options);
 }
 
 /**
@@ -203,13 +207,19 @@ export function openFileInProject(path: string): void {
  * revision that actually contains it: the comparison's new side normally, the old side
  * (merge base, first parent) for content only it has, like a deletion.
  */
-export function openFileFromDiff(path: string, side: "new" | "old", line?: number): void {
+export function openFileFromDiff(
+  path: string,
+  side: "new" | "old",
+  line?: number,
+  options: ShowOptions = {},
+): void {
   const comparison = useRepoStore.getState().diff?.comparison;
-  recordJump();
+  if (options.select ?? true) recordJump();
   visitFile(
     path,
     side === "old" ? baseSource(comparison) : ambientSource(comparison),
     line != null ? { line } : undefined,
+    options,
   );
 }
 
