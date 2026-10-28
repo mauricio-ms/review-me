@@ -1,13 +1,15 @@
 :root {
   color-scheme: dark;
   font-family: var(--mono);
-  font-size: 14px;
+  font-size: var(--fs-ui);
 
-  /* Code surfaces (diff list, project tree, project viewer) match the user's
-     emacs default face: JetBrains Mono at :height 190 (≈ 19px). */
-  --code-font-size: 19px;
-
-  --status-bar-h: 26px;
+  /* Three sizes, all from one base that C-x C-= / C-x C-- / C-x C-0 scale (lib/
+     text-scale.ts sets --fs): the buffers and the minibuffer read at the base; the
+     chrome around them (tree, mode line, headers, gutters, annotations) a step down;
+     section labels and key hints a step further. Nothing is bigger than the code. */
+  --fs: 16px;
+  --fs-ui: calc(var(--fs) * 0.875);
+  --fs-sm: calc(var(--fs) * 0.75);
   /* Gruber Darker, matching the upstream Emacs theme palette. */
   --bg-0: #181818;
   --bg-1: #282828;
@@ -21,6 +23,11 @@
   --fg-1: #f4f4ff;
   --fg-2: #95a99f;
   --fg-3: #52494e;
+  /* Dim text that still reads: --fg-3 is 2:1 on --bg-0, fine for a rule, not for a
+     line number. Faint is ≥4.5:1 on --bg-0/--bg-deep; dim also on --bg-1 (the tree,
+     headers, pickers), and is what a path's directories wear. */
+  --fg-faint: #84808c;
+  --fg-dim: #9997a6;
   --accent-teal: #96a6c8;
   --accent-blue: #95a99f;
   --accent-violet: #9e95c7;
@@ -63,7 +70,7 @@ kbd {
   color: var(--accent-teal);
   padding: 1px 6px;
   border-radius: 3px;
-  font-size: 11px;
+  font-size: var(--fs-sm);
   border: 1px solid rgba(var(--accent-teal-rgb), 0.28);
 }
 
@@ -107,13 +114,13 @@ kbd {
 }
 
 .empty-title {
-  font-size: 16px;
+  font-size: var(--fs);
   color: var(--fg-1);
   margin-bottom: 10px;
 }
 
 .empty-hint {
-  font-size: 13px;
+  font-size: var(--fs-ui);
   line-height: 1.8;
 }
 
@@ -237,7 +244,7 @@ kbd {
   width: min(880px, calc(100% - 32px));
   align-items: stretch;
   gap: 36px;
-  font-size: var(--fs, 16px);
+  font-size: var(--fs);
   line-height: 1.5;
 }
 
@@ -260,13 +267,13 @@ kbd {
   padding: 0 12px 6px;
   margin-bottom: 4px;
   border-bottom: 1px solid var(--bg-3);
-  font-size: var(--fs-sm, 12px);
+  font-size: var(--fs-sm);
   color: var(--fg-2);
 }
 
 .startup-section-head h2 {
   margin: 0;
-  font-size: var(--fs-sm, 12px);
+  font-size: var(--fs-sm);
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -290,7 +297,7 @@ kbd {
 
 .startup-repo-n,
 .startup-repo-when {
-  font-size: var(--fs-ui, 14px);
+  font-size: var(--fs-ui);
   color: var(--fg-2);
   white-space: nowrap;
 }
@@ -310,7 +317,7 @@ kbd {
 
 .startup-repo-path {
   min-width: 0;
-  font-size: var(--fs-ui, 14px);
+  font-size: var(--fs-ui);
   color: var(--fg-2);
   overflow-wrap: anywhere;
 }
@@ -318,7 +325,7 @@ kbd {
 .startup-empty,
 .startup-error {
   padding: 5px 12px;
-  font-size: var(--fs-ui, 14px);
+  font-size: var(--fs-ui);
   color: var(--fg-2);
 }
 
@@ -333,7 +340,7 @@ kbd {
   row-gap: 8px;
   align-items: baseline;
   padding: 0 12px;
-  font-size: var(--fs-ui, 14px);
+  font-size: var(--fs-ui);
   color: var(--fg-0);
 }
 
@@ -349,14 +356,17 @@ kbd {
 /* ---------- status bar ---------- */
 
 .status-bar {
-  height: var(--status-bar-h);
+  flex: none;
   display: flex;
   align-items: center;
   gap: 16px;
-  padding: 0 12px;
+  padding: 3px 12px;
   background: var(--bg-deep);
   border-top: 1px solid var(--bg-3);
-  font-size: 11px;
+  font-size: var(--fs-ui);
+  line-height: 1.5;
+  white-space: nowrap;
+  overflow: hidden;
   color: var(--fg-1);
   font-family: var(--mono);
   user-select: none;
@@ -431,7 +441,7 @@ kbd {
   gap: 14px;
   padding: 8px 14px;
   border-bottom: 1px solid var(--bg-3);
-  font-size: 12px;
+  font-size: var(--fs-ui);
   background: var(--bg-1);
 }
 
@@ -441,7 +451,7 @@ kbd {
 }
 
 .diff-header-sha {
-  color: var(--fg-3);
+  color: var(--fg-dim);
 }
 
 .diff-header-count {
@@ -470,7 +480,7 @@ kbd {
   min-height: 0;
   overflow-y: auto;
   padding: 6px 0 40px;
-  font-size: var(--code-font-size);
+  font-size: var(--fs);
   line-height: 1.55;
   /* DiffBuffer corrects scrollTop itself when off-screen rows are measured; native
      anchoring (where the engine has it) would apply the same correction twice. */
@@ -520,7 +530,7 @@ kbd {
   border-top: 1px solid var(--bg-3);
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  font-size: 11px;
+  font-size: var(--fs-sm);
   font-weight: 700;
   color: var(--fg-2);
 }
@@ -548,7 +558,7 @@ kbd {
 }
 
 .diff-section-count {
-  color: var(--fg-3);
+  color: var(--fg-faint);
   font-weight: 600;
 }
 
@@ -601,7 +611,7 @@ kbd {
 
 .diff-caret {
   width: 12px;
-  color: var(--fg-3);
+  color: var(--fg-faint);
 }
 
 .diff-status-glyph {
@@ -639,8 +649,8 @@ kbd {
 }
 
 .diff-file-stat {
-  color: var(--fg-3);
-  font-size: 0.78em;
+  color: var(--fg-faint);
+  font-size: var(--fs-ui);
   font-weight: 400;
 }
 
@@ -658,7 +668,7 @@ kbd {
 }
 
 .diff-hunk-row .diff-caret {
-  color: var(--fg-3);
+  color: var(--fg-faint);
 }
 
 /* Hunk headers carry a function-context suffix that can run long; wrap it rather than
@@ -667,6 +677,7 @@ kbd {
   color: var(--accent-blue);
   opacity: 0.8;
   min-width: 0;
+  font-size: var(--fs-ui);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -682,10 +693,10 @@ kbd {
 }
 
 .diff-gutter {
-  color: var(--fg-3);
+  color: var(--fg-faint);
   text-align: right;
   padding-right: 10px;
-  font-size: 0.8em;
+  font-size: var(--fs-ui);
   user-select: none;
 }
 
@@ -748,7 +759,7 @@ kbd {
   margin: 2px 0;
   background: rgba(var(--accent-violet-rgb), 0.08);
   box-shadow: inset 2px 0 0 var(--accent-violet);
-  font-size: 0.85em;
+  font-size: var(--fs-ui);
 }
 
 .diff-note-row.is-file-note {
@@ -778,7 +789,7 @@ kbd {
 
 .diff-file-notes {
   color: var(--accent-violet);
-  font-size: 0.78em;
+  font-size: var(--fs-ui);
   font-weight: 400;
 }
 
@@ -796,7 +807,7 @@ kbd {
   min-height: 0;
   overflow-y: auto;
   padding: 6px 0 40px;
-  font-size: var(--code-font-size);
+  font-size: var(--fs);
   line-height: 1.55;
 }
 
@@ -826,8 +837,8 @@ kbd {
 }
 
 .log-status-hint {
-  color: var(--fg-3);
-  font-size: 0.75em;
+  color: var(--fg-faint);
+  font-size: var(--fs-sm);
 }
 
 .log-section-header {
@@ -840,7 +851,7 @@ kbd {
 
 .log-oid {
   flex: 0 0 auto;
-  color: var(--fg-3);
+  color: var(--fg-faint);
   font-variant-numeric: tabular-nums;
 }
 
@@ -879,7 +890,7 @@ kbd {
   flex: 0 0 auto;
   display: inline-flex;
   gap: 10px;
-  font-size: 0.8em;
+  font-size: var(--fs-ui);
 }
 
 .log-progress {
@@ -894,13 +905,13 @@ kbd {
   flex: 0 0 auto;
   display: inline-flex;
   gap: 10px;
-  color: var(--fg-3);
-  font-size: 0.72em;
+  color: var(--fg-faint);
+  font-size: var(--fs-ui);
 }
 
 .log-empty {
   padding: 6px 14px;
-  color: var(--fg-3);
+  color: var(--fg-faint);
 }
 
 /* ---------- project buffer ---------- */
@@ -917,7 +928,8 @@ kbd {
   /* No top padding: the sticky mode line sits flush at the top. */
   padding: 0 0 6px;
   font-family: var(--mono);
-  font-size: var(--code-font-size);
+  font-size: var(--fs-ui);
+  line-height: 1.5;
   outline: none;
   background: var(--bg-1);
 }
@@ -928,7 +940,7 @@ kbd {
 
 .project-tree-empty {
   padding: 12px;
-  color: var(--fg-3);
+  color: var(--fg-dim);
 }
 
 /* Which files the tree lists; stays put while the tree scrolls. */
@@ -948,7 +960,7 @@ kbd {
 }
 
 .project-tree-mode-hint {
-  color: var(--fg-3);
+  color: var(--fg-dim);
 }
 
 /* A changed file's review mark and status letter, at the right edge. */
@@ -960,7 +972,7 @@ kbd {
 }
 
 .tree-row.status-deleted .tree-name {
-  color: var(--fg-3);
+  color: var(--fg-dim);
   text-decoration: line-through;
 }
 
@@ -987,7 +999,7 @@ kbd {
   flex: 0 0 auto;
   width: 1.3em;
   text-align: center;
-  color: var(--fg-3);
+  color: var(--fg-dim);
 }
 
 .tree-name {
@@ -1011,7 +1023,7 @@ kbd {
   background: var(--bg-1);
   color: var(--fg-2);
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--fs-ui);
 }
 
 .project-viewer-file {
@@ -1044,7 +1056,7 @@ kbd {
 .project-viewer .cm-editor {
   height: 100%;
   font-family: var(--mono);
-  font-size: var(--code-font-size);
+  font-size: var(--fs);
 }
 
 .project-viewer > div:last-child {
@@ -1195,7 +1207,7 @@ kbd {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 14px;
+  font-size: var(--fs-ui);
   color: var(--fg-2);
 }
 
@@ -1272,7 +1284,7 @@ kbd {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 14px;
+  font-size: var(--fs-ui);
   color: var(--fg-2);
 }
 
@@ -1304,7 +1316,7 @@ kbd {
   flex: 1;
   min-width: 0;
   color: var(--fg-1);
-  font-size: 18px;
+  font-size: var(--fs);
   border-left: 1px solid rgba(var(--accent-teal-rgb), 0.18);
   padding-left: 12px;
   overflow: hidden;
@@ -1316,7 +1328,7 @@ kbd {
    resolver couldn't prove every hit, so a clean result set looks exactly as before. */
 .xref-group {
   padding: 10px 12px 4px;
-  font-size: 11px;
+  font-size: var(--fs-sm);
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--accent-green);
@@ -1332,7 +1344,7 @@ kbd {
   gap: 2px;
   padding: 6px 12px;
   cursor: pointer;
-  font-size: 14px;
+  font-size: var(--fs-ui);
 }
 
 /* Dimmed, not struck through: these are name matches the resolver couldn't decide,
@@ -1354,7 +1366,7 @@ kbd {
 }
 
 .xref-kind {
-  font-size: 11px;
+  font-size: var(--fs-sm);
   padding: 0 5px;
   border-radius: 3px;
   text-transform: uppercase;
@@ -1391,15 +1403,15 @@ kbd {
    the narrow dialog would otherwise shrink-wrap it and overlap the body. */
 .confirm-dialog .neo-title {
   white-space: nowrap;
-  font-size: 20px;
+  font-size: var(--fs);
 }
 
 .confirm-body {
   flex: 1;
   padding: 28px 24px 22px;
   color: var(--fg-1);
-  font-size: 19px;
-  line-height: 30px;
+  font-size: var(--fs);
+  line-height: 1.6;
 }
 
 /* ---------- neo picker (asset picker base) ---------- */
@@ -1437,14 +1449,14 @@ kbd {
 
 .neo-title {
   position: absolute;
-  top: -22px;
+  top: calc(var(--fs) * -1);
   left: 50%;
   transform: translateX(-50%);
   padding: 0 18px;
   background: var(--bg-1);
   color: var(--accent-teal);
-  font-size: 22px;
-  line-height: 34px;
+  font-size: var(--fs);
+  line-height: 2;
   letter-spacing: 0.04em;
 }
 
@@ -1452,18 +1464,18 @@ kbd {
   position: absolute;
   top: 18px;
   right: 18px;
-  color: var(--fg-3);
-  font-size: 22px;
+  color: var(--fg-dim);
+  font-size: var(--fs-ui);
 }
 
 .neo-prompt {
   display: flex;
   align-items: center;
   gap: 12px;
-  height: 58px;
+  min-height: 2.4em;
   padding: 12px 20px 6px;
   color: var(--accent-teal);
-  font-size: 30px;
+  font-size: var(--fs);
 }
 
 .neo-prompt-field {
@@ -1483,7 +1495,7 @@ kbd {
   color: var(--fg-0);
   caret-color: var(--accent-amber);
   font: inherit;
-  font-size: 22px;
+  font-size: var(--fs);
   padding: 0 0 0 12px;
 }
 
@@ -1496,7 +1508,7 @@ kbd {
 
 .neo-path-base {
   white-space: nowrap;
-  font-size: 22px;
+  font-size: var(--fs);
 }
 
 .neo-path-anc {
@@ -1522,8 +1534,8 @@ kbd {
   overflow: hidden;
   border-left: 1px solid rgba(var(--accent-teal-rgb), 0.18);
   color: var(--fg-1);
-  font-size: 18px;
-  line-height: 28px;
+  font-size: var(--fs-ui);
+  line-height: 1.6;
   padding-left: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1547,8 +1559,8 @@ kbd {
 
 .neo-empty {
   padding: 12px;
-  color: var(--fg-3);
-  font-size: 20px;
+  color: var(--fg-dim);
+  font-size: var(--fs-ui);
 }
 
 .neo-row {
@@ -1566,7 +1578,7 @@ kbd {
   text-align: left;
   cursor: pointer;
   font: inherit;
-  font-size: 21px;
+  font-size: var(--fs);
 }
 
 .neo-row.is-selected {
@@ -1614,7 +1626,7 @@ kbd {
   border-top: 1px solid rgba(var(--accent-teal-rgb), 0.58);
   background: rgba(var(--bg-0-rgb), 0.72);
   color: var(--accent-teal);
-  font-size: 16px;
+  font-size: var(--fs-ui);
 }
 
 .neo-footer span {
@@ -1637,7 +1649,7 @@ kbd {
   overflow-y: auto;
   padding: 70px 28px 20px;
   color: var(--fg-1);
-  font-size: 18px;
+  font-size: var(--fs);
   line-height: 1.65;
 }
 
@@ -1647,7 +1659,7 @@ kbd {
   border: 1px solid rgba(var(--accent-teal-rgb), 0.28);
   background: rgba(var(--bg-0-rgb), 0.48);
   color: var(--fg-2);
-  font-size: 14px;
+  font-size: var(--fs-ui);
   line-height: 1.6;
   white-space: pre-wrap;
 }
@@ -1663,7 +1675,7 @@ kbd {
   border: 1px solid rgba(var(--accent-teal-rgb), 0.22);
   background: var(--bg-0);
   font-family: var(--mono);
-  font-size: 16px;
+  font-size: var(--fs);
 }
 
 .commit-editor-shell .cm-scroller {
@@ -1681,7 +1693,7 @@ kbd {
 .note-target {
   padding: 34px 20px 0;
   color: var(--fg-2);
-  font-size: 14px;
+  font-size: var(--fs-ui);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1713,7 +1725,7 @@ kbd {
   border: 1px solid rgba(var(--accent-red-rgb), 0.32);
   background: rgba(var(--accent-red-rgb), 0.08);
   color: var(--accent-red);
-  font-size: 14px;
+  font-size: var(--fs-ui);
 }
 
 .commit-reviewed-body .commit-error {
@@ -1755,7 +1767,7 @@ kbd {
   border-radius: 8px;
   box-shadow: 0 14px 44px rgba(0, 0, 0, 0.5);
   overflow: hidden;
-  font-size: 15px;
+  font-size: var(--fs-ui);
   line-height: 1.55;
 }
 
@@ -1763,8 +1775,8 @@ kbd {
   padding: 7px 14px;
   border-bottom: 1px solid var(--bg-3);
   background: rgba(var(--bg-1-rgb), 0.6);
-  color: var(--fg-3);
-  font-size: 12px;
+  color: var(--fg-dim);
+  font-size: var(--fs-sm);
   letter-spacing: 0.02em;
 }
 
@@ -1809,8 +1821,8 @@ kbd {
 .diff-clean-hints {
   display: flex;
   gap: 22px;
-  color: var(--fg-3);
-  font-size: 12px;
+  color: var(--fg-faint);
+  font-size: var(--fs-sm);
   animation: diffCleanFadeIn 0.4s both;
 }
 
@@ -1845,12 +1857,12 @@ kbd {
 /* The window's last line, Emacs-style: messages and half-typed keys while idle. */
 .echo-area {
   flex: none;
-  min-height: calc(var(--fs-ui, 14px) * 1.6 + 6px);
+  min-height: calc(var(--fs-ui) * 1.6 + 6px);
   padding: 3px 12px;
   background: var(--bg-0);
   color: var(--fg-2);
   font-family: var(--mono);
-  font-size: var(--fs-ui, 14px);
+  font-size: var(--fs-ui);
   line-height: 1.6;
   white-space: nowrap;
   overflow: hidden;
@@ -1863,7 +1875,7 @@ kbd {
   flex: none;
   background: var(--bg-0);
   font-family: var(--mono);
-  font-size: var(--fs, 16px);
+  font-size: var(--fs);
   line-height: 1.5;
   outline: none;
 }
@@ -1879,7 +1891,7 @@ kbd {
   flex: none;
   min-width: 5ch;
   color: var(--fg-2);
-  font-size: var(--fs-ui, 14px);
+  font-size: var(--fs-ui);
   font-variant-numeric: tabular-nums;
 }
 
@@ -1930,14 +1942,14 @@ kbd {
 
 .mb-key {
   color: var(--accent-amber);
-  font-size: var(--fs-ui, 14px);
+  font-size: var(--fs-ui);
   white-space: nowrap;
 }
 
 .mb-label {
   min-width: 0;
   color: var(--fg-2);
-  font-size: var(--fs-ui, 14px);
+  font-size: var(--fs-ui);
   overflow-wrap: anywhere;
 }
 
@@ -1977,7 +1989,7 @@ kbd {
   padding: 6px 14px;
   background: var(--bg-1);
   border-bottom: 1px solid var(--bg-3);
-  font-size: var(--fs-ui, 14px);
+  font-size: var(--fs-ui);
 }
 
 .help-title {
@@ -2003,7 +2015,7 @@ kbd {
   min-height: 0;
   overflow-y: auto;
   padding: 14px 16px 40px;
-  font-size: var(--fs-ui, 14px);
+  font-size: var(--fs-ui);
   line-height: 1.55;
 }
 
@@ -2026,7 +2038,7 @@ kbd {
 
 .help-section-title {
   margin: 0 0 4px;
-  font-size: var(--fs-sm, 12px);
+  font-size: var(--fs-sm);
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;

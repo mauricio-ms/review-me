@@ -297,6 +297,7 @@ just the current buffer's keys; `C-h k` tells you what a key does.
 | `C-x v =` | `worktree` | Return to the working-tree diff |
 | `C-x v v` | `commit` | Commit the reviewed working-tree changes |
 | `C-x x g` | `refresh` | Recompute the active comparison |
+| `C-x C-=` / `C-x C--` / `C-x C-0` | `text-scale-increase` / `-decrease` / `-reset` | Bigger / smaller / default text everywhere (then `=` `-` `0` alone keep adjusting); remembered |
 | `C-h b` | `help` | Every key binding and command |
 | `C-h m` | `describe-mode` | The current buffer's keys |
 | `C-h k` | `describe-key` | Press a key to see what it runs |

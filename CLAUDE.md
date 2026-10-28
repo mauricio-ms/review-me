@@ -82,6 +82,15 @@ buffer (`C-h b`, `C-h m`; `C-h k` describes a key in the echo area). Dispatch li
   conventions. Rare or destructive ones stay `M-x` only (`show`, `note`, `export`,
   `clear`, …).
 
+**Type and color** come from tokens in `styles.css`'s `:root`; never write a px font size
+or `--fg-3` for text. Three sizes derive from one base, `--fs` (16px), which
+`lib/text-scale.ts` scales (`C-x C-=` / `C-x C--` / `C-x C-0`, then `=` `-` `0` repeat via
+`key-dispatch.ts`'s `armRepeat`) and remembers in `localStorage`: `--fs` for what you read
+(diff, log, viewer, minibuffer), `--fs-ui` (0.875×) for the chrome around it (tree, mode
+line, headers, gutters, annotations), `--fs-sm` (0.75×) for section labels and key hints.
+Nothing is bigger than the code. Dim text is `--fg-faint` (≥4.5:1 on `--bg-0`/`--bg-deep`)
+or `--fg-dim` (also on `--bg-1`: the tree, headers, pickers); `--fg-3` is 2:1, for rules.
+
 Modal pickers (open-repo, recent, fuzzy, checkout-branch, branch-compare, commit-pick,
 xref) and the modal editors (commit message, note) are gated by `useUIStore.picker` or a
 dedicated store and use `useModalFocus`.

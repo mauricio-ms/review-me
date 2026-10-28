@@ -58,6 +58,13 @@ const GLOBAL_KEYS = [
   { keys: ["C-x v ="], command: "worktree", doc: "the working-tree diff" },
   { keys: ["C-x v v"], command: "commit-reviewed", doc: "commit the reviewed changes" },
   { keys: ["C-x x g"], command: "refresh", doc: "refresh" },
+  {
+    keys: ["C-x C-=", "C-x C-+"],
+    command: "text-scale-increase",
+    doc: "bigger text (then = + - 0 alone keep adjusting)",
+  },
+  { keys: ["C-x C--"], command: "text-scale-decrease", doc: "smaller text" },
+  { keys: ["C-x C-0"], command: "text-scale-reset", doc: "back to the default text size" },
   { keys: ["C-h b"], command: "help", doc: "every key binding and command" },
   { keys: ["C-h m"], command: "describe-mode", doc: "the current buffer's keys" },
   { keys: ["C-h k"], command: "describe-key", doc: "press a key to see what it runs" },

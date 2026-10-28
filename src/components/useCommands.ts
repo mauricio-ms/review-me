@@ -7,6 +7,7 @@ import { applyComparison, refreshDiff } from "../lib/open-repo";
 import { toggleChangesAtCursor } from "../lib/project-diff";
 import { projectSelectionRange } from "../lib/project-view";
 import { addFlag } from "../lib/review-actions";
+import { adjustTextScale } from "../lib/text-scale";
 import { findUsages, gotoDefinition, jumpBack } from "../lib/xref";
 import { useJumpStore } from "../state/jumps";
 import { useLogStore } from "../state/log";
@@ -49,7 +50,10 @@ export type CommandId =
   | "other-window"
   | "help"
   | "describe-mode"
-  | "describe-key";
+  | "describe-key"
+  | "text-scale-increase"
+  | "text-scale-decrease"
+  | "text-scale-reset";
 
 export type AppCommand = {
   /** Stable identity, e.g. "open"; what key bindings (`lib/keymap.ts`) refer to. */
@@ -532,6 +536,39 @@ export function useCommands(close: CommandClose): {
       label: "press a key to see what it runs",
       enabled: true,
       run: handleDescribeKey,
+    },
+    {
+      id: "text-scale-increase",
+      name: "text-scale-increase",
+      aliases: ["bigger", "zoom-in", "font-bigger"],
+      label: "bigger text, everywhere",
+      enabled: true,
+      run: () => {
+        close();
+        adjustTextScale(1);
+      },
+    },
+    {
+      id: "text-scale-decrease",
+      name: "text-scale-decrease",
+      aliases: ["smaller", "zoom-out", "font-smaller"],
+      label: "smaller text, everywhere",
+      enabled: true,
+      run: () => {
+        close();
+        adjustTextScale(-1);
+      },
+    },
+    {
+      id: "text-scale-reset",
+      name: "text-scale-reset",
+      aliases: ["reset-text", "zoom-reset"],
+      label: "back to the default text size",
+      enabled: true,
+      run: () => {
+        close();
+        adjustTextScale(0);
+      },
     },
   ];
 

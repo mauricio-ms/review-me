@@ -200,6 +200,33 @@ export function contextScope(): KeyScope {
   return activeBuffer;
 }
 
+// ---------- repeat maps ----------
+
+let repeat: Record<string, () => void> | null = null;
+
+/**
+ * After a command like `C-x C-=`, let single keys repeat it (Emacs's repeat maps):
+ * `map`'s chords keep running until any other key, which then goes on as usual.
+ */
+export function armRepeat(map: Record<string, () => void>): void {
+  repeat = map;
+}
+
+/** Feed a key to the armed repeat map; true when it ran (and consumed) the key. */
+export function feedRepeat(e: KeyboardEvent): boolean {
+  if (!repeat) return false;
+  const chord = chordOf(e);
+  if (!chord) return false;
+  const run = repeat[chord];
+  if (!run) {
+    repeat = null;
+    return false;
+  }
+  consume(e);
+  run();
+  return true;
+}
+
 // ---------- C-h k ----------
 
 let describing = false;

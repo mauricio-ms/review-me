@@ -7,6 +7,7 @@ import {
   contextScope,
   describeNextKey,
   feedKey,
+  feedRepeat,
   isDescribingKey,
   settle,
   type KeyHandler,
@@ -97,6 +98,7 @@ function GlobalKeys() {
     const onKey = (e: KeyboardEvent) => {
       if (useUIStore.getState().modalDepth > 0) return;
       if (isTypingTarget(e.target)) return;
+      if (feedRepeat(e)) return;
       if (isDescribingKey()) {
         const scope = contextScope();
         describeNextKey(e, scope, [...KEYMAP.global, ...KEYMAP[scope]], commandName);
