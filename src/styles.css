@@ -954,12 +954,13 @@ kbd {
 /* ---------- project buffer ---------- */
 
 .project-buffer {
-  display: grid;
-  grid-template-columns: minmax(220px, 320px) 1fr;
+  display: flex;
   background: var(--bg-0);
 }
 
 .project-tree {
+  flex: none;
+  min-width: 0;
   border-right: 1px solid var(--bg-3);
   overflow-y: auto;
   /* No top padding: the sticky mode line sits flush at the top. */
@@ -1040,11 +1041,33 @@ kbd {
 }
 
 .tree-name {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
+/* The tree's edge: drag to resize (C-x { / C-x } do it by key). */
+.project-split {
+  flex: none;
+  width: 5px;
+  margin-left: -3px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.project-split:hover,
+.project-split:active {
+  background: rgba(var(--accent-teal-rgb), 0.35);
+}
+
+/* A compacted chain (`java/com/acme`) gives up its start, never its last folder. */
+.tree-name.is-chain {
+  direction: rtl;
+  text-align: left;
+}
+
 .project-viewer {
+  flex: 1;
   display: flex;
   flex-direction: column;
   min-width: 0;

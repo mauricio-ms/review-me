@@ -52,6 +52,12 @@ const GLOBAL_KEYS = [
   { keys: ["C-x C-f"], command: "find", doc: "find a file in the revision under review" },
   { keys: ["C-x b"], command: "switch-buffer", doc: "switch buffer" },
   { keys: ["C-x o"], command: "other-window", doc: "between the file tree and the viewer" },
+  {
+    keys: ["C-x {"],
+    command: "shrink-tree",
+    doc: "narrower file tree (then { } alone keep adjusting)",
+  },
+  { keys: ["C-x }"], command: "enlarge-tree", doc: "wider file tree" },
   { keys: ["C-x g"], command: "log", doc: "the commits buffer" },
   { keys: ["C-x p p"], command: "recent", doc: "recent repositories" },
   { keys: ["C-x p k"], command: "close", doc: "close the repository" },

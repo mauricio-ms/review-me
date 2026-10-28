@@ -46,7 +46,7 @@ symbol index in a global `Mutex`.
 - `commits.rs` `list(repo, ref, skip, limit)` → a newest-first page of `CommitInfo`s, each with its ref `Decoration`s (filled by `list` only), and `resolve(repo, rev)` → (oid, **first** parent oid, info, full message). Any revision resolves (full oid, abbreviation, `HEAD~2`), but only full oids may reach a `DiffSpec`/`ReviewScope`.
 - `diff.rs` `compute(repo, &DiffSpec)` → `DiffSummary { comparison, files }` (`ChangedFile`/`Hunk`/`DiffLine`). See "Comparisons" below.
 - `revision.rs` `ProjectSource` (worktree | commit) and tree-backed content/listing/file-list reads.
-- `tags.rs` review/flag persistence + **anchoring** (see below). `tree.rs` ignore-aware dir listing. `fuzzy.rs` nucleo-matcher file ranking.
+- `tags.rs` review/flag persistence + **anchoring** (see below). `tree.rs` ignore-aware dir listing that **compacts single-folder chains**: a folder holding only one folder is one entry (`name` `java/com/acme`, `path` the deepest folder, which is what expanding it lists) — the changed-files view (`buildChanged`) does the same, and parent navigation climbs to the nearest listed ancestor. `fuzzy.rs` nucleo-matcher file ranking.
 - `coverage.rs` review progress over a computed diff (`summarize`, `commit_reviews` for the log's rows) and the covers/overlaps helpers `review_commit.rs` stages by — the Rust twin of `src/lib/coverage.ts`; keep the two in step.
 - `notes.rs` the Markdown export of review notes (see "Notes" below). `review_dir.rs` owns `.review-me/`: every write goes through `ensure`, which also adds it to `.git/info/exclude`.
 - `queries.rs` + `xref.rs` tree-sitter symbol index and find-definition/references.
@@ -304,6 +304,10 @@ revision containing them. Changing the source drops cached listings and the open
 they belong to the old snapshot — and `ProjectBuffer`'s modeline names the revision
 whenever it isn't the worktree.
 
+The tree's width (`useProjectStore.treeWidth`: dragged on its edge or `C-x {` / `C-x }`,
+remembered, clamped so the viewer keeps 320px) and `treeHidden` (`M-x toggle-tree`; `C-x o`
+brings it back) are layout state, not per-revision.
+
 `useProjectStore.filter` (`all` | `changed`, `c` in the tree / `M-x changed`) narrows the
 tree and the fuzzy finder to **the applied comparison's files** (`useRepoStore.diff`): a
 commit's, a branch's, or the uncommitted ones. It is a standing preference — `setSource`
@@ -424,8 +428,8 @@ the stack whenever the source changes.
 ## Testing
 
 Logic is unit-tested in Rust against `tempfile` git fixtures (`diff`, `tags`, `commits`,
-`coverage`, `notes`, `review_dir`, `fuzzy`, `xref`, `repo_library`). UI/interaction has no
-automated or written test plan.
+`coverage`, `notes`, `review_dir`, `fuzzy`, `tree`, `xref`, `repo_library`). UI/interaction
+has no automated or written test plan.
 
 `xref`'s two- and three-file fixtures are too small to catch resolution bugs that only
 appear across packages, so `xref_validate.rs` runs the resolver over a realistic

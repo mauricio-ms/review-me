@@ -5,6 +5,7 @@ import { useUIStore } from "../state/ui";
 import { shortOid, type Comparison } from "../types/diff";
 import { sameSource, WORKTREE_SOURCE, type ProjectSource } from "../types/repo";
 import { recordJump } from "./jumps";
+import { armRepeat } from "./key-dispatch";
 import { listRepoDir, readFile } from "./tauri";
 
 /** The repo + revision every project read below goes through. */
@@ -72,6 +73,37 @@ export function useProjectSource(choice: SourceChoice): void {
   // nothing they point at survives a change of source.
   if (!sameSource(store.source, choice.source)) useJumpStore.getState().clear();
   store.setSource(choice.source, choice.label);
+}
+
+/** How far one `C-x {` / `C-x }` moves the tree's edge. */
+const TREE_STEP_PX = 40;
+/** The viewer keeps at least this much when the tree grows by key. */
+const VIEWER_MIN_PX = 320;
+
+/**
+ * `C-x {` / `C-x }`: narrow or widen the file tree (showing it if hidden), then `{`
+ * and `}` alone keep going — Emacs's shrink/enlarge-window-horizontally.
+ */
+export function resizeTree(step: 1 | -1): void {
+  const ps = useProjectStore.getState();
+  if (ps.treeHidden) ps.setTreeHidden(false);
+  const max = window.innerWidth - VIEWER_MIN_PX;
+  const width = Math.min(max, ps.treeWidth + step * TREE_STEP_PX);
+  ps.setTreeWidth(width, true);
+  useUIStore
+    .getState()
+    .showFlash(
+      `File tree ${useProjectStore.getState().treeWidth}px — use {, } for further adjustment`,
+    );
+  armRepeat({ "{": () => resizeTree(-1), "}": () => resizeTree(1) });
+}
+
+/** `M-x toggle-tree`: the viewer alone, or the tree back beside it. */
+export function toggleTree(): void {
+  const ps = useProjectStore.getState();
+  ps.setTreeHidden(!ps.treeHidden);
+  if (!useProjectStore.getState().treeHidden) ps.setPane("tree");
+  useUIStore.getState().requestFocus();
 }
 
 /** Load (or reload) a directory's children into the tree. */

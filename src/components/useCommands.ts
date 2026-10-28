@@ -4,6 +4,7 @@ import { contextScope, startDescribeKey } from "../lib/key-dispatch";
 import { showLog } from "../lib/log";
 import { exportNotes, openNoteEditor } from "../lib/notes";
 import { applyComparison, refreshDiff } from "../lib/open-repo";
+import { resizeTree, toggleTree } from "../lib/project";
 import { toggleChangesAtCursor } from "../lib/project-diff";
 import { projectSelectionRange } from "../lib/project-view";
 import { addFlag } from "../lib/review-actions";
@@ -51,6 +52,9 @@ export type CommandId =
   | "help"
   | "describe-mode"
   | "describe-key"
+  | "shrink-tree"
+  | "enlarge-tree"
+  | "toggle-tree"
   | "text-scale-increase"
   | "text-scale-decrease"
   | "text-scale-reset";
@@ -242,7 +246,14 @@ export function useCommands(close: CommandClose): {
 
   const handleOtherWindow = useCallback(() => {
     close({ restoreFocus: false });
-    useProjectStore.getState().togglePane();
+    const ps = useProjectStore.getState();
+    // A hidden tree comes back rather than leaving nowhere to go.
+    if (ps.treeHidden) {
+      ps.setTreeHidden(false);
+      ps.setPane("tree");
+    } else {
+      ps.togglePane();
+    }
     requestFocus();
   }, [close, requestFocus]);
 
@@ -491,7 +502,7 @@ export function useCommands(close: CommandClose): {
     {
       id: "project",
       name: "project",
-      aliases: ["tree"],
+      aliases: [],
       label: "project buffer",
       enabled: !!repo,
       run: () => switchTo("project"),
@@ -536,6 +547,42 @@ export function useCommands(close: CommandClose): {
       label: "press a key to see what it runs",
       enabled: true,
       run: handleDescribeKey,
+    },
+    {
+      id: "shrink-tree",
+      name: "shrink-window-horizontally",
+      aliases: ["shrink-tree", "narrower"],
+      label: "narrower file tree",
+      buffer: "project",
+      enabled: true,
+      run: () => {
+        close();
+        resizeTree(-1);
+      },
+    },
+    {
+      id: "enlarge-tree",
+      name: "enlarge-window-horizontally",
+      aliases: ["enlarge-tree", "wider"],
+      label: "wider file tree",
+      buffer: "project",
+      enabled: true,
+      run: () => {
+        close();
+        resizeTree(1);
+      },
+    },
+    {
+      id: "toggle-tree",
+      name: "toggle-tree",
+      aliases: ["hide-tree", "show-tree", "tree"],
+      label: "hide or show the file tree (the viewer alone)",
+      buffer: "project",
+      enabled: true,
+      run: () => {
+        close({ restoreFocus: false });
+        toggleTree();
+      },
     },
     {
       id: "text-scale-increase",

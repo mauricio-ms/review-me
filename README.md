@@ -430,6 +430,11 @@ following what's under review; the fuzzy finder (`C-x C-f`) follows it too. Chan
 carry their status letter and a `✓` (fully reviewed) or `⚑` (flagged), and a deletion
 opens from the old side, the only revision that still has it.
 
+A folder that holds nothing but one other folder shares its row with it, so a Java package
+reads `java/com/example/library` instead of four nested rows. Drag the tree's edge (or
+`C-x {` / `C-x }`) to resize it — the width is remembered — and `M-x toggle-tree` gives
+the viewer the whole window until `C-x o` brings the tree back.
+
 | Key | Action |
 | --- | --- |
 | `j` / `k` | Move down / up |
@@ -439,6 +444,7 @@ opens from the old side, the only revision that still has it.
 | `TAB` | Toggle the folder under the cursor |
 | `c` | Only the changed files ↔ all files |
 | `C-x o` | To the viewer |
+| `C-x {` / `C-x }` | Narrower / wider tree (then `{` `}` alone keep adjusting) |
 | `q` | Back to the diff |
 
 **Viewer (right)** — read-only CodeMirror with vim motions and per-file syntax highlighting.

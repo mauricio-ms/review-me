@@ -18,6 +18,28 @@ export type ProjectFilter = "all" | "changed";
 /** Which half of the project buffer has the keyboard: `C-x o` swaps them. */
 export type ProjectPane = "tree" | "viewer";
 
+/** The file tree's width: dragged on its edge or `C-x {` / `C-x }`, remembered. */
+const TREE_WIDTH_KEY = "review-me.tree-width";
+export const TREE_WIDTH_DEFAULT = 380;
+export const TREE_WIDTH_MIN = 180;
+
+function savedTreeWidth(): number {
+  try {
+    const saved = Number.parseInt(window.localStorage.getItem(TREE_WIDTH_KEY) ?? "", 10);
+    return Number.isFinite(saved) && saved >= TREE_WIDTH_MIN ? saved : TREE_WIDTH_DEFAULT;
+  } catch {
+    return TREE_WIDTH_DEFAULT;
+  }
+}
+
+function saveTreeWidth(width: number): void {
+  try {
+    window.localStorage.setItem(TREE_WIDTH_KEY, String(width));
+  } catch {
+    // Best effort: the width still applies for this session.
+  }
+}
+
 type ProjectState = {
   /** Lazily-loaded directory listings, keyed by repo-relative dir path ("" = root). */
   dirs: Record<string, TreeEntry[]>;
@@ -50,6 +72,10 @@ type ProjectState = {
    */
   inlineFlipped: Set<string>;
   pane: ProjectPane;
+  /** The file tree's width in px (the layout clamps it to what fits). */
+  treeWidth: number;
+  /** `M-x toggle-tree`: the viewer alone. */
+  treeHidden: boolean;
 
   setDir: (path: string, entries: TreeEntry[]) => void;
   setExpanded: (path: string, open: boolean) => void;
@@ -70,6 +96,9 @@ type ProjectState = {
   clearFlipped: () => void;
   setPane: (pane: ProjectPane) => void;
   togglePane: () => void;
+  /** Set the tree's width; `remember` once a drag or a key settles it. */
+  setTreeWidth: (width: number, remember?: boolean) => void;
+  setTreeHidden: (hidden: boolean) => void;
   reset: () => void;
 };
 
@@ -85,6 +114,8 @@ export const useProjectStore = create<ProjectState>((set) => ({
   inlineDiff: false,
   inlineFlipped: new Set(),
   pane: "tree",
+  treeWidth: savedTreeWidth(),
+  treeHidden: false,
 
   setDir: (path, entries) =>
     set((s) => ({ dirs: { ...s.dirs, [path]: entries } })),
@@ -131,6 +162,13 @@ export const useProjectStore = create<ProjectState>((set) => ({
     set((s) => (s.inlineFlipped.size === 0 ? {} : { inlineFlipped: new Set<string>() })),
   setPane: (pane) => set({ pane }),
   togglePane: () => set((s) => ({ pane: s.pane === "tree" ? "viewer" : "tree" })),
+  setTreeWidth: (width, remember = false) => {
+    const next = Math.max(TREE_WIDTH_MIN, Math.round(width));
+    if (remember) saveTreeWidth(next);
+    set({ treeWidth: next });
+  },
+  setTreeHidden: (hidden) =>
+    set((s) => ({ treeHidden: hidden, pane: hidden ? "viewer" : s.pane })),
   reset: () =>
     set({
       dirs: {},

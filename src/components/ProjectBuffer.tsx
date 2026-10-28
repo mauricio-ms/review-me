@@ -28,7 +28,7 @@ import {
 } from "../lib/project";
 import { changeBlocks, changeForOpenFile } from "../lib/project-diff";
 import { setProjectView } from "../lib/project-view";
-import { useProjectStore } from "../state/project";
+import { TREE_WIDTH_MIN, useProjectStore } from "../state/project";
 import { useRepoStore } from "../state/repo";
 import { useTagsStore } from "../state/tags";
 import { useUIStore, type VimMode } from "../state/ui";
@@ -40,6 +40,26 @@ import PathLabel from "./PathLabel";
 type Node = { entry: TreeEntry; depth: number; change?: ChangedFile };
 
 const EMPTY_FILES: ChangedFile[] = [];
+
+/** However wide the tree is set, the viewer keeps at least this much. */
+const VIEWER_MIN_WIDTH = 320;
+
+/**
+ * A tree row's name. A compacted chain (`java/com/acme`) dims its leading folders and,
+ * when it doesn't fit, gives up its start rather than its last folder.
+ */
+function TreeName({ name }: { name: string }) {
+  const cut = name.lastIndexOf("/") + 1;
+  if (cut === 0) return <span className="tree-name">{name}</span>;
+  return (
+    <span className="tree-name is-chain" title={name}>
+      <bdi>
+        <span className="path-dir">{name.slice(0, cut)}</span>
+        {name.slice(cut)}
+      </bdi>
+    </span>
+  );
+}
 
 const STATUS_GLYPH: Record<ChangedFile["status"], string> = {
   added: "A",
@@ -100,9 +120,19 @@ function buildChanged(files: ChangedFile[], collapsed: Set<string>): Node[] {
   const name = (path: string) => path.slice(path.lastIndexOf("/") + 1);
   const out: Node[] = [];
   const walk = (dir: Dir, prefix: string, depth: number) => {
-    for (const [dirName, child] of [...dir.dirs].sort(([a], [b]) => byName(a, b))) {
-      const path = prefix ? `${prefix}/${dirName}` : dirName;
-      out.push({ entry: { name: dirName, path, isDir: true }, depth });
+    for (const [dirName, first] of [...dir.dirs].sort(([a], [b]) => byName(a, b))) {
+      // A folder holding just one folder is one row (`java/com/acme`), as the full
+      // listing compacts it (`tree::list_dir`).
+      let child = first;
+      let label = dirName;
+      let path = prefix ? `${prefix}/${dirName}` : dirName;
+      while (child.files.length === 0 && child.dirs.size === 1) {
+        const [[innerName, inner]] = [...child.dirs];
+        label = `${label}/${innerName}`;
+        path = `${path}/${innerName}`;
+        child = inner;
+      }
+      out.push({ entry: { name: label, path, isDir: true }, depth });
       if (!collapsed.has(path)) walk(child, path, depth + 1);
     }
     for (const file of [...dir.files].sort((a, b) => byName(name(a.path), name(b.path)))) {
@@ -135,6 +165,9 @@ export default function ProjectBuffer() {
   // Which half has the keyboard; `C-x o` swaps them.
   const focusPane = useProjectStore((s) => s.pane);
   const setFocusPane = useProjectStore((s) => s.setPane);
+  const storedTreeWidth = useProjectStore((s) => s.treeWidth);
+  const setTreeWidth = useProjectStore((s) => s.setTreeWidth);
+  const treeHidden = useProjectStore((s) => s.treeHidden);
   const comparisonEpoch = useRepoStore((s) => s.comparisonEpoch);
   const reviewed = useTagsStore((s) => s.reviewed);
   const flags = useTagsStore((s) => s.flags);
@@ -144,6 +177,45 @@ export default function ProjectBuffer() {
   const setVimMode = useUIStore((s) => s.setVimMode);
 
   const treeRef = useRef<HTMLDivElement | null>(null);
+  const bufferRef = useRef<HTMLDivElement | null>(null);
+  // Never wider than leaves the viewer a usable width: a width set on a wide window
+  // shrinks with a narrow one, without forgetting what was chosen.
+  const [bufferWidth, setBufferWidth] = useState(0);
+  useEffect(() => {
+    const el = bufferRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver(() => setBufferWidth(el.clientWidth));
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  const treeWidth =
+    bufferWidth > 0
+      ? Math.max(TREE_WIDTH_MIN, Math.min(storedTreeWidth, bufferWidth - VIEWER_MIN_WIDTH))
+      : storedTreeWidth;
+
+  // Drag the tree's edge; the width is remembered once the drag ends.
+  const startResize = (e: React.PointerEvent<HTMLDivElement>) => {
+    const tree = treeRef.current;
+    if (!tree) return;
+    e.preventDefault();
+    const handle = e.currentTarget;
+    handle.setPointerCapture(e.pointerId);
+    const left = tree.getBoundingClientRect().left;
+    let width = treeWidth;
+    const move = (ev: PointerEvent) => {
+      width = ev.clientX - left;
+      setTreeWidth(width);
+    };
+    const up = () => {
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", up);
+      handle.removeEventListener("pointercancel", up);
+      setTreeWidth(width, true);
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", up);
+    handle.addEventListener("pointercancel", up);
+  };
   const viewRef = useRef<EditorView | null>(null);
   const [cursor, setCursor] = useState(0);
   const [langExt, setLangExt] = useState<Extension | null>(null);
@@ -315,9 +387,17 @@ export default function ProjectBuffer() {
       toggleFolder(node.entry.path);
       return;
     }
-    const parent = node.entry.path.split("/").slice(0, -1).join("/");
-    const idx = nodes.findIndex((n) => n.entry.path === parent);
-    if (idx >= 0) setCursor(idx);
+    // The parent row may be a compacted chain (`java/com/acme`): climb until a row
+    // names one of this path's ancestors.
+    let parent = node.entry.path;
+    while (parent.includes("/")) {
+      parent = parent.slice(0, parent.lastIndexOf("/"));
+      const idx = nodes.findIndex((n) => n.entry.path === parent);
+      if (idx >= 0) {
+        setCursor(idx);
+        return;
+      }
+    }
   };
 
   const treeHandlers: Record<TreeAction, KeyHandler> = {
@@ -342,10 +422,11 @@ export default function ProjectBuffer() {
   };
 
   return (
-    <div className="buffer project-buffer">
+    <div className="buffer project-buffer" ref={bufferRef}>
       <div
         ref={treeRef}
         className={`project-tree ${focusPane === "tree" ? "is-focused" : ""}`}
+        style={{ width: treeWidth, display: treeHidden ? "none" : undefined }}
         tabIndex={0}
         onKeyDown={onTreeKeyDown}
         onFocus={() => setFocusPane("tree")}
@@ -381,7 +462,7 @@ export default function ProjectBuffer() {
                 className={`tree-row ${idx === cursor ? "is-selected" : ""} ${
                   node.entry.path === openPath ? "is-open" : ""
                 }${change ? ` status-${change.status}` : ""}`}
-                style={{ paddingLeft: 8 + node.depth * 14 }}
+                style={{ paddingLeft: `calc(8px + ${node.depth} * 1.2ch)` }}
                 title={change?.oldPath ? `renamed from ${change.oldPath}` : undefined}
                 onClick={() => {
                   setCursor(idx);
@@ -391,7 +472,7 @@ export default function ProjectBuffer() {
                 <span className="tree-icon" style={{ color: icon.color }}>
                   {icon.glyph}
                 </span>
-                <span className="tree-name">{node.entry.name}</span>
+                <TreeName name={node.entry.name} />
                 {change && (
                   <span className="tree-change">
                     {review === "flagged" && <span className="mark-flagged">⚑</span>}
@@ -404,6 +485,17 @@ export default function ProjectBuffer() {
           })
         )}
       </div>
+
+      {!treeHidden && (
+        <div
+          className="project-split"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize the file tree"
+          aria-valuenow={treeWidth}
+          onPointerDown={startResize}
+        />
+      )}
 
       <div className="project-viewer" onFocus={() => setFocusPane("viewer")}>
         {content == null ? (
