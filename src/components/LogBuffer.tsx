@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
+import { dispatchKey, type KeyHandler } from "../lib/key-dispatch";
+import { KEYMAP, type LogAction } from "../lib/keymap";
 import { loadMoreLog } from "../lib/log";
 import { enterCommit, enterLogRange } from "../lib/open-repo";
 import { timeAgo } from "../lib/time";
@@ -106,7 +108,6 @@ export default function LogBuffer() {
 
   const rootRef = useRef<HTMLDivElement | null>(null);
   const rowRefs = useRef(new Map<string, HTMLDivElement>());
-  const pending = useRef<string | null>(null);
   // Tracked by oid, not index, so a reload (the branch moved, a page arrived) keeps
   // the cursor on the same commit.
   const [cursorOid, setCursorOid] = useState<string | null>(null);
@@ -174,45 +175,17 @@ export default function LogBuffer() {
     void opening(`${rangeBase.name}...${branchName}`, enterLogRange);
   };
 
+  const handlers: Record<LogAction, KeyHandler> = {
+    down: () => moveTo(cursor + 1),
+    up: () => moveTo(cursor - 1),
+    first: () => moveTo(0),
+    last: () => moveTo(commits.length - 1),
+    open: () => enter(commits[cursor]),
+    range: enterRange,
+  };
+
   const onKeyDown = (e: React.KeyboardEvent) => {
-    if (e.ctrlKey || e.metaKey || e.altKey) return;
-    const key = e.key;
-    if (pending.current === "g") {
-      pending.current = null;
-      if (key === "g") {
-        e.preventDefault();
-        moveTo(0);
-      }
-      return;
-    }
-    switch (key) {
-      case "j":
-      case "ArrowDown":
-        e.preventDefault();
-        moveTo(cursor + 1);
-        break;
-      case "k":
-      case "ArrowUp":
-        e.preventDefault();
-        moveTo(cursor - 1);
-        break;
-      case "G":
-        e.preventDefault();
-        moveTo(commits.length - 1);
-        break;
-      case "g":
-        e.preventDefault();
-        pending.current = key;
-        break;
-      case "Enter":
-        e.preventDefault();
-        enter(commits[cursor]);
-        break;
-      case "b":
-        e.preventDefault();
-        enterRange();
-        break;
-    }
+    dispatchKey("log", e, KEYMAP.log, handlers);
   };
 
   const onScroll = (e: React.UIEvent<HTMLDivElement>) => {
@@ -286,7 +259,7 @@ export default function LogBuffer() {
               <span className="log-status-text">
                 {uncommitted} uncommitted file{uncommitted === 1 ? "" : "s"}
               </span>
-              <span className="log-status-hint">Space b d</span>
+              <span className="log-status-hint">C-x b diff</span>
             </div>
           )}
         </div>

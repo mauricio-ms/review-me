@@ -1,11 +1,12 @@
-import { Prec } from "@codemirror/state";
-import { EditorView, keymap } from "@codemirror/view";
+import { EditorView } from "@codemirror/view";
 import { vim } from "@replit/codemirror-vim";
 import CodeMirror from "@uiw/react-codemirror";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { claimModalEditor, defineModalEditorVim } from "../editor/vim-modal";
 import { gruberDarkerTheme } from "../editor/gruber-darker";
+import { dispatchKey, type KeyHandler } from "../lib/key-dispatch";
+import { KEYMAP, type EditorAction } from "../lib/keymap";
 import {
   cancelReviewedCommit,
   finishReviewedCommit,
@@ -117,14 +118,14 @@ export default function CommitReviewedHost() {
     setPrepared(null);
     setMessage("");
     setError(null);
-    // The `:commit` command is disabled while reviewing committed history, but
+    // The `M-x commit` command is disabled while reviewing committed history, but
     // staging is destructive enough to be worth refusing here too rather than
     // trusting the caller.
     if (comparingHistory) {
       setError(
         "Committing reviewed changes applies to the working-tree diff. " +
           "This comparison is committed history already — " +
-          "switch back with :worktree (Space g w) first.",
+          "switch back with M-x worktree (C-x v =) first.",
       );
       setPhase("error");
       return;
@@ -194,24 +195,13 @@ export default function CommitReviewedHost() {
     });
   }, [abortEditor, open, phase, submit]);
 
-  const extensions = useMemo(
-    () => [
-      vim(),
-      Prec.highest(
-        keymap.of([
-          {
-            key: "Ctrl-Enter",
-            run: () => {
-              void submit();
-              return true;
-            },
-          },
-        ]),
-      ),
-      EditorView.lineWrapping,
-    ],
-    [submit],
-  );
+  const extensions = useMemo(() => [vim(), EditorView.lineWrapping], []);
+
+  // `C-c C-c` commits, `C-c C-k` aborts (and unstages) — magit's commit buffer.
+  const editorKeys: Record<EditorAction, KeyHandler> = {
+    finish: () => void submit(),
+    cancel: () => void abortEditor(),
+  };
 
   if (!open) return null;
 
@@ -226,10 +216,10 @@ export default function CommitReviewedHost() {
     phase === "editor"
       ? busy
         ? "working..."
-        : ":wq commit · :q abort · Ctrl+Enter commit"
+        : "C-c C-c commit · C-c C-k abort · :wq / :q from vim"
       : phase === "confirm"
-        ? "y / Enter unstage and continue · n / Esc cancel"
-        : "Enter / Esc close";
+        ? "y / Enter unstage and continue · n / C-g cancel"
+        : "Enter / C-g close";
 
   return (
     <div className="asset-picker-backdrop">
@@ -240,9 +230,14 @@ export default function CommitReviewedHost() {
         aria-modal="true"
         aria-label="Commit reviewed changes"
         tabIndex={-1}
+        // Capture: `C-c` must reach us before vim takes it as <Esc>.
+        onKeyDownCapture={(e) => {
+          if (phase === "editor") dispatchKey("editor", e, KEYMAP.editor, editorKeys);
+        }}
         onKeyDown={(e) => {
+          const quit = e.key === "Escape" || (e.ctrlKey && e.key === "g");
           if (phase === "confirm") {
-            if (e.key === "Escape" || e.key === "n") {
+            if (quit || e.key === "n") {
               e.preventDefault();
               close();
             } else if (e.key === "y" || e.key === "Enter") {
@@ -250,7 +245,7 @@ export default function CommitReviewedHost() {
               void prepare(true);
             }
           } else if (phase === "empty" || phase === "error") {
-            if (e.key === "Escape" || e.key === "Enter") {
+            if (quit || e.key === "Enter") {
               e.preventDefault();
               close();
             }

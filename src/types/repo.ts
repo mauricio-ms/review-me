@@ -9,7 +9,7 @@ export interface RepoInfo {
   reviewBranchRef: string | null;
   /**
    * The repo's default branch — the base the review branch's commits are listed
-   * against until `:compare` picks another. Null when there is no such branch.
+   * against until `M-x compare` picks another. Null when there is no such branch.
    */
   defaultBranchRef: string | null;
   isDirty: boolean;

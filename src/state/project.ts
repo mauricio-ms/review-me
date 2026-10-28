@@ -15,6 +15,9 @@ const EMPTY_ENTRIES: TreeEntry[] = [];
  */
 export type ProjectFilter = "all" | "changed";
 
+/** Which half of the project buffer has the keyboard: `C-x o` swaps them. */
+export type ProjectPane = "tree" | "viewer";
+
 type ProjectState = {
   /** Lazily-loaded directory listings, keyed by repo-relative dir path ("" = root). */
   dirs: Record<string, TreeEntry[]>;
@@ -37,15 +40,16 @@ type ProjectState = {
    */
   filter: ProjectFilter;
   /**
-   * Show every change's removed lines inline, in every file (`:hunks`). Like `filter`,
+   * Show every change's removed lines inline, in every file (`M-x hunks`). Like `filter`,
    * a standing preference.
    */
   inlineDiff: boolean;
   /**
-   * Change blocks (`lib/project-diff.ts`'s ids) `:hunk` flipped away from
+   * Change blocks (`lib/project-diff.ts`'s ids) `M-x hunk` flipped away from
    * `inlineDiff`: a block's diff shows when `inlineDiff !== inlineFlipped.has(id)`.
    */
   inlineFlipped: Set<string>;
+  pane: ProjectPane;
 
   setDir: (path: string, entries: TreeEntry[]) => void;
   setExpanded: (path: string, open: boolean) => void;
@@ -64,6 +68,8 @@ type ProjectState = {
   flipChanges: (ids: string[]) => void;
   /** Forget per-change exceptions (they name the changes of one comparison). */
   clearFlipped: () => void;
+  setPane: (pane: ProjectPane) => void;
+  togglePane: () => void;
   reset: () => void;
 };
 
@@ -78,6 +84,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
   filter: "all",
   inlineDiff: false,
   inlineFlipped: new Set(),
+  pane: "tree",
 
   setDir: (path, entries) =>
     set((s) => ({ dirs: { ...s.dirs, [path]: entries } })),
@@ -122,6 +129,8 @@ export const useProjectStore = create<ProjectState>((set) => ({
     }),
   clearFlipped: () =>
     set((s) => (s.inlineFlipped.size === 0 ? {} : { inlineFlipped: new Set<string>() })),
+  setPane: (pane) => set({ pane }),
+  togglePane: () => set((s) => ({ pane: s.pane === "tree" ? "viewer" : "tree" })),
   reset: () =>
     set({
       dirs: {},

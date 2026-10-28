@@ -22,7 +22,7 @@ export function hasNote(flag: FlagTag): boolean {
 
 /**
  * The flag a note at `target` belongs to: one on exactly those lines, else the first
- * that touches them — so `:note` on any line of a flagged hunk edits that flag.
+ * that touches them — so `M-x note` on any line of a flagged hunk edits that flag.
  */
 export function flagAt(flags: FlagTag[], target: DiffTarget): FlagTag | null {
   const candidates = flags.filter(
@@ -63,7 +63,7 @@ export function openNoteFor(flag: FlagTag): void {
 }
 
 /**
- * Open the note editor for the cursor's lines (`:note`): on the flag already there,
+ * Open the note editor for the cursor's lines (`M-x note`): on the flag already there,
  * else on the lines themselves — the first save flags them.
  */
 export function openNoteEditor(): boolean {
@@ -80,7 +80,7 @@ export function openNoteEditor(): boolean {
 }
 
 /**
- * `:export`: write every note on the commits the log lists into one Markdown file
+ * `M-x export`: write every note on the commits the log lists into one Markdown file
  * (each commit's own file is kept current as notes change) and say where it went.
  */
 export async function exportNotes(): Promise<void> {

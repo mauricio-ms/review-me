@@ -59,9 +59,9 @@ Reviewing agent-generated code has a different shape than reviewing a human PR:
   enter a commit to review its change (`git show` semantics), `q` to come back to the
   list, where each row shows how far its review got. Marks are keyed to the commit's
   oid, so they can never drift and never mix with the branch-wide review.
-- **Notes for later** — `:note` leaves a Markdown note on the lines of a commit: a fix to
+- **Notes for later** — `M-x note` leaves a Markdown note on the lines of a commit: a fix to
   make later, typically by an LLM. Every commit's notes are kept as structured Markdown
-  under `.review-me/notes/`, and `:export` bundles a whole branch's into one file.
+  under `.review-me/notes/`, and `M-x export` bundles a whole branch's into one file.
 - **Fuzzy file finder** — jump to any (non-ignored) file in the repo.
 - **Project mode** — a read-only, IDE-like browser over the *entire* repo, or (`c`) just
   the files the comparison on screen changed — a commit's, a branch's, the uncommitted
@@ -71,7 +71,7 @@ Reviewing agent-generated code has a different shape than reviewing a human PR:
   can trace a changed symbol through the project.
 
 The interface is the point: **vim motions everywhere** and a **magit-like** model of
-files → hunks → lines, with a `Space` transient palette and a `:` command line.
+files → hunks → lines, with Emacs keys: `M-x` and a minibuffer at the bottom of the window.
 
 ---
 
@@ -94,7 +94,7 @@ changes, and on the commits buffer when it's clean (there would be nothing to di
 
 The app keeps its own "checkout": the **branch under review**, shown in the status bar as
 `review: <branch>`. It starts as whatever the working tree is on (or the repo's default branch
-if HEAD is detached), and `Space g s` / `:checkout` switches it — to a local branch or a
+if HEAD is detached), and `M-x checkout` switches it — to a local branch or a
 remote-tracking one.
 
 This is app-level only. Switching **never** fetches, checks out, stages, or writes
@@ -104,9 +104,9 @@ amber — a reminder that the working-tree diff still belongs to the real checko
 
 Both committed-history views derive from it, so you name a branch once:
 
-- `:compare` asks only for a **base** and shows `base...reviewBranch`.
-- `:log` (the commits buffer) lists the commits the **review branch introduced** over
-  its base — `:compare`'s pick, the repo's default branch until you make one.
+- `M-x compare` asks only for a **base** and shows `base...reviewBranch`.
+- `M-x log` (the commits buffer) lists the commits the **review branch introduced** over
+  its base — `M-x compare`'s pick, the repo's default branch until you make one.
 
 Switching while comparing branches re-targets the comparison, so you can walk several
 branches against the same base. (If the new branch *is* that base, there's nothing to
@@ -119,9 +119,9 @@ status bar:
 
 | Comparison | What it shows | Switch with |
 | --- | --- | --- |
-| **Working tree** (default) | Everything uncommitted vs `HEAD`, staged or not, including untracked files. | `Space g w` / `:worktree` |
-| **Branches** | `git diff base...reviewBranch` — the review branch's work since it forked from the base. | `Space g b` / `:compare`, or `b` in the commits buffer |
-| **Commit** | `git show <commit>` — one commit of the review branch against its first parent. | `Enter` in the commits buffer (`Space g l` / `:log`) |
+| **Working tree** (default) | Everything uncommitted vs `HEAD`, staged or not, including untracked files. | `C-x v =` |
+| **Branches** | `git diff base...reviewBranch` — the review branch's work since it forked from the base. | `M-x compare`, or `b` in the commits buffer |
+| **Commit** | `git show <commit>` — one commit of the review branch against its first parent. | `RET` in the commits buffer (`C-x g`) |
 
 Both committed-history modes are strictly read-only: they never fetch, check out, stage,
 or write to the working tree. Only refs and objects your clone already has are offered,
@@ -132,7 +132,7 @@ Merges are reviewed against their **first parent** (never as a combined diff), a
 commit — having no parent — reads as all additions.
 
 Opening a repository always starts on the working-tree diff (shown in the commits buffer
-instead when there is none); `:refresh` recomputes whichever comparison is active (picking
+instead when there is none); `C-x x g` recomputes whichever comparison is active (picking
 up new commits on either branch; a commit comparison is immutable, so only its marks are
 re-read) and reloads the commits buffer.
 
@@ -142,7 +142,7 @@ re-read) and reloads the commits buffer.
   line-level coverage is *derived*, not stored. Diff buffer only.
 - **Flag (`⚑`)** — "Scrutinize this later." Works on the same scopes (file / hunk / line
   range), and is available in the diff and project buffers.
-- **Note (`✎`)** — a flag that says what to fix, written with `:note` while reviewing a
+- **Note (`✎`)** — a flag that says what to fix, written with `M-x note` while reviewing a
   commit (see [Notes](#notes)).
 
 Tags are stored in `<repo>/.review-me/tags.json` — a folder review-me adds to the repo's
@@ -158,7 +158,7 @@ Every tag also records the **comparison it was made in** (the working tree, a
 `base...target` branch pair identified by ref name, or a single commit identified by its
 oid). Marking a hunk reviewed in `master...feature` says nothing about the same lines in
 the working-tree diff, in another branch pair, or in the individual commit that
-introduced them — and `:clear` only wipes the comparison you're looking at. Branch and
+introduced them — and `M-x clear` only wipes the comparison you're looking at. Branch and
 commit marks hash the compared trees, so they're unaffected by a dirty checkout; branch
 marks follow their branch as it moves, while commit marks can't move at all and survive
 even the deletion of the branch you picked the commit from. Tags written before review
@@ -271,45 +271,53 @@ no-display error, meaning every library loaded and the app started.
 
 ## Usage
 
-Open the app, then open a git repository (`Space → o → p`, or `:open`). The diff buffer
+Open the app and pick a repository on the start screen (`j`/`k` and `RET`, or its
+number), `C-x p p` for every recent one, or `M-x open` to browse the disk. The diff buffer
 shows everything changed in the working tree. Expand a file, walk its hunks, and tag as
-you review. Switch to project mode (`Space → b → p`) to browse the rest of the repo or
-chase a definition.
+you review. `C-x b` switches to the project buffer to browse the rest of the repo or chase
+a definition.
 
-### Leader keys (work anywhere)
+The keys are Emacs's: `M-x` runs any command by name in a minibuffer at the bottom of the
+window, the commands you reach for often have a `C-x` key, and **`C-h b` lists every key
+and command** (generated from the keymap, so it is always the real list). `C-h m` shows
+just the current buffer's keys; `C-h k` tells you what a key does.
 
-| Key | Action |
-| --- | --- |
-| `Space` | Open the transient command palette (chord menu) |
-| `:` | Open the command line (lists every command; type to filter, `↑`/`↓` to pick) |
-| `Esc` | Dismiss any overlay / cancel a visual selection |
+### Keys everywhere
 
-### Palette / command-line commands
-
-| Palette chord | `:` command | Action |
+| Key | `M-x` command | Action |
 | --- | --- | --- |
-| `o p` | `:open` | Open a repository (directory browser) |
-| `o r` | `:recent` | Open a recent repository |
-| `f` | `:find` | Fuzzy file finder → opens in project mode |
-| `r` | `:refresh` | Recompute the active comparison |
-| `g s` | `:checkout` | Choose the branch under review (app-level; no real checkout) |
-| `g b` | `:compare` | Compare the review branch against a base (`base...review`) |
-| `g l` | `:log` | The commits buffer: the commits the review branch introduced |
-| — | `:show` | Review a commit by searching or typing its sha (commit picker) |
-| — | `:note` | (diff, commit review) Note on the lines at the cursor — a fix for later |
-| — | `:export` | Write the notes on the commits buffer's commits to one Markdown file |
-| `g w` | `:worktree` | Return to the working-tree diff |
-| `g c` | `:commit` | Commit the reviewed working-tree changes |
-| `c` | `:close` | Close the repository |
-| `b d` | `:diff` | Switch to the diff buffer |
-| `b p` | `:project` | Switch to the project buffer |
-| — | `:changed` | Project tree and finder: only the changed files ↔ all files |
-| — | `:hunk` | (project) Show/hide the diff of the change at the cursor or selection |
-| — | `:hunks` | (project) Show/hide the diff of every change, in every file |
-| `h` | `:diffmode` | (diff) Toggle word-diff ↔ whole-line highlighting |
-| `t f` | `:flag` | (project) Flag the current selection |
-| `g d` | `:definition` | (project) Go to definition |
-| `g r` | `:references` | (project) Find references |
+| `M-x` | — | Run any command by name: type to narrow, `↑`/`↓` or `C-n`/`C-p`, `TAB` completes, `RET` runs |
+| `C-g` | — | Cancel: a half-typed key, the minibuffer, a picker, a selection |
+| `C-x C-f` | `find` | Fuzzy file finder → opens in project mode |
+| `C-x b` | `switch-buffer` | Switch buffer (diff, log, project, help); `RET` alone goes back to the last one |
+| `C-x o` | `other-window` | (project) Between the file tree and the viewer |
+| `C-x g` | `log` | The commits buffer: the commits the review branch introduced |
+| `C-x p p` | `recent` | Open a recent repository |
+| `C-x p k` | `close` | Close the repository |
+| `C-x v =` | `worktree` | Return to the working-tree diff |
+| `C-x v v` | `commit` | Commit the reviewed working-tree changes |
+| `C-x x g` | `refresh` | Recompute the active comparison |
+| `C-h b` | `help` | Every key binding and command |
+| `C-h m` | `describe-mode` | The current buffer's keys |
+| `C-h k` | `describe-key` | Press a key to see what it runs |
+
+### `M-x` only
+
+| Command | Action |
+| --- | --- |
+| `open` | Open a repository (directory browser) |
+| `checkout` | Choose the branch under review (app-level; no real checkout) |
+| `compare` | Compare the review branch against a base (`base...review`) |
+| `show` | Review a commit by searching or typing its sha (commit picker) |
+| `note` | (diff, commit review) Note on the lines at the cursor — a fix for later |
+| `export` | Write the notes on the commits buffer's commits to one Markdown file |
+| `clear` | Clear this comparison's review, flag and ignore marks |
+| `diffmode` | (diff) Toggle word-diff ↔ whole-line highlighting |
+| `changed` | Project tree and finder: only the changed files ↔ all files (`c` in the tree) |
+| `hunk` | (project) Show/hide the diff of the change at the cursor or selection |
+| `hunks` | (project) Show/hide the diff of every change, in every file |
+| `flag` | (project) Flag the current selection |
+| `diff`, `project` | Switch to that buffer |
 
 ### Diff buffer
 
@@ -327,8 +335,9 @@ chase a definition.
 | `u` | Un-review |
 | `f` | Toggle **flag** (`⚑`) on the file / hunk / selection |
 | `i` | **Ignore** (`⊘`) the file / hunk / selection |
+| `C-e` / `C-r` | Scroll one line down / up |
 | `q` | Leave a commit or branch comparison for the commits buffer |
-| `Esc` | Cancel a visual selection |
+| `Esc` / `C-g` | Cancel a visual selection |
 
 Glyphs: `A`/`M`/`D`/`R` file status, `+adds −dels` counts, a green `●` for staged changes
 (working-tree diff only — committed history has no staging state), `✓` reviewed, `⚑`
@@ -341,12 +350,12 @@ working tree.
 
 ### Branch pickers
 
-`Space g s` (**Branch to review**) lists every local and remote-tracking branch — rows
+`M-x checkout` (**Branch to review**) lists every local and remote-tracking branch — rows
 badged `reviewing`, `default`, `checkout`, `local`/`remote`, plus the short oid — and
 selection starts on the branch already under review. `origin/HEAD` is never listed (it's
 an alias for a branch that is).
 
-`Space g b` (**Compare against**) collects just the base, defaulting to the current one —
+`M-x compare` (**Compare against**) collects just the base, defaulting to the current one —
 the repo's default branch (from `refs/remotes/*/HEAD`, else `master`, else `main`) until
 you pick another. The pick stays the base for the session, so the commits buffer lists
 what the branch introduced over that same base. The branch under review is dimmed and
@@ -357,7 +366,7 @@ Neither picker fetches, so remote-tracking branches are as fresh as your last `g
 
 ### Commits buffer
 
-`Space g l` / `:log` shows the commits the review branch introduced — `git log
+`C-x g` (`M-x log`) shows the commits the review branch introduced — `git log
 base..branch` — the way magit's status does: a `Head:` line (plus `Review:` when the
 branch under review isn't the checkout, `Base:` naming what it is held against, and
 `Changes:` when the working tree is dirty), then **Unmerged into master** (or whatever
@@ -379,20 +388,21 @@ upstream or nothing unpushed, its whole history under **Recent commits**.
 `q` in the diff buffer brings you back, on the same row. Each row shows its review:
 `✓` when every change is reviewed (or ignored), `done/total` while partial, `⚑ n` flags and
 `✎ n` notes. History pages in as you approach the end, and reloads whenever the buffer is
-shown, on `:refresh`, and when the review branch or its base changes.
+shown, on `C-x x g`, and when the review branch or its base changes.
 
-`:show` keeps the old commit picker for what the list can't do: filter by subject or
+`M-x show` keeps the old commit picker for what the list can't do: filter by subject or
 author over the branch's **whole** history, and resolve a typed sha against the whole
 object database — a commit on another
 branch entirely, reviewed with no branch context.
 
 ### Notes
 
-While reviewing a commit, `:note` opens a small Markdown editor (vim keys) for the lines
+While reviewing a commit, `M-x note` opens a small Markdown editor (vim keys) for the lines
 under the cursor — or the visual selection, or the note row you're on. A note is a fix
 left for later, so it rides on a flag: on lines already flagged it edits that flag's
-note; otherwise saving flags the lines with it. `:w` saves, `:wq` / `:x` / `Ctrl+Enter`
-save and close, `:q` refuses to drop unsaved changes, `:q!` discards. An empty note clears
+note; otherwise saving flags the lines with it. `C-c C-c` (or `C-RET`, or vim's `:wq` /
+`:x`) saves and closes, `C-c C-k` (or `:q!`) discards the edit, `:w` saves and keeps
+editing, and `:q` refuses to drop unsaved changes. An empty note clears
 it (the flag stays; `u` removes both). Notes show as rows under their hunk.
 
 Every commit's notes are written, as you make them, to
@@ -405,49 +415,52 @@ Every commit's notes are written, as you make them, to
   own diff over those lines — so a reader working at a later HEAD can find the code even
   after it moved.
 
-`:export` writes every note on the commits the commits buffer lists, oldest commit first, to
+`M-x export` writes every note on the commits the commits buffer lists, oldest commit first, to
 `.review-me/notes/branches/<branch>.md` — one file to hand to an LLM. The files are
 generated from the tag store and never read back: edit notes in the app.
 
 ### Project buffer
 
-**Tree (left)** lists the whole revision, or — `c` / `:changed` — **only the files the
+**Tree (left)** lists the whole revision, or — `c` / `M-x changed` — **only the files the
 comparison on screen changed**: the commit's files while reviewing a commit, every file the
 branch touched in a branch comparison (`b` in the commits buffer), the uncommitted ones in
 the working-tree diff. The choice sticks as you move between comparisons, so it keeps
-following what's under review; the fuzzy finder (`Space f`) follows it too. Changed files
+following what's under review; the fuzzy finder (`C-x C-f`) follows it too. Changed files
 carry their status letter and a `✓` (fully reviewed) or `⚑` (flagged), and a deletion
 opens from the old side, the only revision that still has it.
 
 | Key | Action |
 | --- | --- |
 | `j` / `k` | Move down / up |
-| `l` / `Enter` | Expand a directory (lazy-loads) or open a file |
+| `gg` / `G` | Jump to top / bottom |
+| `l` / `RET` | Expand a directory (lazy-loads) or open a file |
 | `h` | Collapse the directory, or jump to its parent |
-| `Tab` | Toggle the folder under the cursor |
+| `TAB` | Toggle the folder under the cursor |
 | `c` | Only the changed files ↔ all files |
-| `G` | Jump to bottom |
-| `Ctrl-h` | Toggle focus between tree and viewer |
+| `C-x o` | To the viewer |
+| `q` | Back to the diff |
 
 **Viewer (right)** — read-only CodeMirror with vim motions and per-file syntax highlighting.
 When the open file is part of the comparison on screen, its changes are marked the way an
 editor's git signs are: a green bar beside added lines, a blue one beside modified lines,
 and a red notch between the lines where something was removed (the modeline adds the
-file's `+adds −dels`). `:hunk` opens the diff of the change under the cursor or the
+file's `+adds −dels`). `M-x hunk` opens the diff of the change under the cursor or the
 visual selection right there — the removed lines appear in red above what replaced them,
-changed words highlighted — and `:hunk` again closes it; `:hunks` does the same for every
-change in every file, and `:hunk` then hides just the one you're on. While the tree lists
-only the changed files (`c`), the removed lines are always shown in place; `:hunk` and
-`:hunks` then add the word highlighting.
+changed words highlighted — and `M-x hunk` again closes it; `M-x hunks` does the same for every
+change in every file, and `M-x hunk` then hides just the one you're on. While the tree lists
+only the changed files (`c`), the removed lines are always shown in place; `M-x hunk` and
+`M-x hunks` then add the word highlighting.
 
 | Key | Action |
 | --- | --- |
 | `j`/`k`, `gg`/`G`, `w`/`b`, `/search` | Standard vim motions |
 | `M-.` / `M-?` | Go to definition / find references |
 | `M-,` | Back to where you jumped from |
+| `M-g g` | Go to line |
 | `Ctrl`/`Cmd` + click | Jump to definition of the symbol clicked |
-| `v` + `j`, then `Space t f` | Flag the selected lines |
-| `Ctrl-h` | Return focus to the tree |
+| `v` + `j`, then `M-x flag` | Flag the selected lines |
+| `C-x o` | To the tree |
+| `q` | Back to the diff |
 
 ### Cross-references
 
@@ -490,7 +503,8 @@ React component → src/lib/*.ts action → invoke() in src/lib/tauri.ts
   exclusion), `tree` (ignore-aware listing), `fuzzy` (nucleo matcher), `queries` + `xref`
   (tree-sitter symbol index).
 - **Frontend (`src/`)** — `AppShell` keeps all three buffers mounted; a single command registry
-  (`components/useCommands.ts`) feeds both the palette and the command line; state is
+  (`components/useCommands.ts`) feeds `M-x`, and one keymap table (`lib/keymap.ts`) drives
+  every key, `M-x`'s key column, and the `C-h b` help buffer; state is
   Zustand (`src/state/`). The diff buffer is a custom keyboard-navigable list (not
   CodeMirror); only the project viewer uses CodeMirror.
 

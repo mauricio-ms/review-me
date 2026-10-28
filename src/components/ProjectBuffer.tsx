@@ -7,16 +7,18 @@ import { EditorView } from "@codemirror/view";
 import { getCM, vim } from "@replit/codemirror-vim";
 import CodeMirror from "@uiw/react-codemirror";
 
-import { leaderKeymap, vimEscapeKeymap } from "../editor/cm-shared";
+import { swallowColonKeymap, vimEscapeKeymap } from "../editor/cm-shared";
 import { diffMarks, setDiffMarks } from "../editor/diff-marks";
 import { flagDecorations, setFlagLines } from "../editor/flag-decorations";
 import { gruberDarkerTheme } from "../editor/gruber-darker";
 import { defineNavVim } from "../editor/vim-nav";
+import { viewerKeymap } from "../editor/viewer-keymap";
 import { xrefClick } from "../editor/xref-click";
-import { xrefKeymap } from "../editor/xref-keymap";
 import { fileReviewState } from "../lib/coverage";
 import { fileIcon } from "../lib/file-icons";
 import { recordJump } from "../lib/jumps";
+import { dispatchKey, type KeyHandler } from "../lib/key-dispatch";
+import { KEYMAP, type TreeAction } from "../lib/keymap";
 import {
   backToDiff,
   loadDir,
@@ -129,6 +131,9 @@ export default function ProjectBuffer() {
   const inlineDiff = useProjectStore((s) => s.inlineDiff);
   const inlineFlipped = useProjectStore((s) => s.inlineFlipped);
   const clearFlipped = useProjectStore((s) => s.clearFlipped);
+  // Which half has the keyboard; `C-x o` swaps them.
+  const focusPane = useProjectStore((s) => s.pane);
+  const setFocusPane = useProjectStore((s) => s.setPane);
   const comparisonEpoch = useRepoStore((s) => s.comparisonEpoch);
   const reviewed = useTagsStore((s) => s.reviewed);
   const flags = useTagsStore((s) => s.flags);
@@ -140,7 +145,6 @@ export default function ProjectBuffer() {
   const treeRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
   const [cursor, setCursor] = useState(0);
-  const [focusPane, setFocusPane] = useState<"tree" | "viewer">("tree");
   const [langExt, setLangExt] = useState<Extension | null>(null);
   // Folders folded in the changed-files view — open by default, so every changed file
   // shows at once. Folds belong to one comparison.
@@ -191,7 +195,7 @@ export default function ProjectBuffer() {
   }, [changedOnly]);
 
   // Register the project viewer's vim mappings once (q→diff). Code navigation is an
-  // Alt keymap instead — see editor/xref-keymap.ts.
+  // Alt keymap instead — see editor/viewer-keymap.ts.
   useEffect(() => {
     defineNavVim();
   }, []);
@@ -209,8 +213,10 @@ export default function ProjectBuffer() {
   useEffect(() => {
     if (activeBuffer !== "project") return;
     if (focusPane === "tree") treeRef.current?.focus({ preventScroll: true });
-    else viewRef.current?.focus();
-  }, [activeBuffer, focusRequest, focusPane]);
+    else if (viewRef.current) viewRef.current.focus();
+    // No file open: there is no viewer to hand the keyboard to.
+    else setFocusPane("tree");
+  }, [activeBuffer, focusRequest, focusPane, setFocusPane]);
 
   // Push flagged line ranges for the open file into the viewer.
   useEffect(() => {
@@ -257,9 +263,9 @@ export default function ProjectBuffer() {
   const extensions = useMemo(() => {
     const ext = [
       vim(),
-      leaderKeymap,
+      swallowColonKeymap,
       vimEscapeKeymap,
-      xrefKeymap,
+      viewerKeymap,
       xrefClick,
       diffMarks,
       flagDecorations,
@@ -313,51 +319,25 @@ export default function ProjectBuffer() {
     if (idx >= 0) setCursor(idx);
   };
 
+  const treeHandlers: Record<TreeAction, KeyHandler> = {
+    down: () => setCursor((c) => Math.min(nodes.length - 1, c + 1)),
+    up: () => setCursor((c) => Math.max(0, c - 1)),
+    first: () => setCursor(0),
+    last: () => setCursor(Math.max(0, nodes.length - 1)),
+    // Fold the folder under the cursor (no-op on files).
+    toggle: () => {
+      const node = nodes[cursor];
+      if (node?.entry.isDir) toggleFolder(node.entry.path);
+    },
+    open: () => activate(nodes[cursor]),
+    close: () => collapseOrParent(nodes[cursor]),
+    // The whole revision ↔ only what the comparison on screen changed.
+    filter: toggleFilter,
+    quit: backToDiff,
+  };
+
   const onTreeKeyDown = (e: React.KeyboardEvent) => {
-    if (e.ctrlKey || e.metaKey || e.altKey) return;
-    switch (e.key) {
-      case "j":
-      case "ArrowDown":
-        e.preventDefault();
-        setCursor((c) => Math.min(nodes.length - 1, c + 1));
-        break;
-      case "k":
-      case "ArrowUp":
-        e.preventDefault();
-        setCursor((c) => Math.max(0, c - 1));
-        break;
-      case "G":
-        e.preventDefault();
-        setCursor(Math.max(0, nodes.length - 1));
-        break;
-      case "Tab": {
-        // Toggle the folder under the cursor (no-op on files).
-        e.preventDefault();
-        const node = nodes[cursor];
-        if (node?.entry.isDir) toggleFolder(node.entry.path);
-        break;
-      }
-      case "c":
-        // The whole revision ↔ only what the comparison on screen changed.
-        e.preventDefault();
-        toggleFilter();
-        break;
-      case "Enter":
-      case "l":
-      case "ArrowRight":
-        e.preventDefault();
-        activate(nodes[cursor]);
-        break;
-      case "h":
-      case "ArrowLeft":
-        e.preventDefault();
-        collapseOrParent(nodes[cursor]);
-        break;
-      case "q":
-        e.preventDefault();
-        backToDiff();
-        break;
-    }
+    dispatchKey("tree", e, KEYMAP.tree, treeHandlers);
   };
 
   return (
@@ -424,26 +404,16 @@ export default function ProjectBuffer() {
         )}
       </div>
 
-      <div
-        className="project-viewer"
-        onKeyDownCapture={(e) => {
-          if (e.ctrlKey && e.key === "h") {
-            e.preventDefault();
-            e.stopPropagation();
-            setFocusPane("tree");
-          }
-        }}
-      >
+      <div className="project-viewer" onFocus={() => setFocusPane("viewer")}>
         {content == null ? (
           <div className="project-viewer-empty">
             <div className="empty-title">
               no file open{sourceLabel ? ` — ${sourceLabel}` : ""}
             </div>
             <div className="empty-hint">
-              Select a file in the tree, or press <kbd>Space</kbd> <kbd>f</kbd> to
-              fuzzy-find; <kbd>c</kbd> in the tree lists only the changed files.{" "}
-              <kbd>Ctrl</kbd>+<kbd>h</kbd> returns to the tree; <kbd>q</kbd> returns to
-              the diff.
+              Select a file in the tree, or <kbd>C-x C-f</kbd> to find one;{" "}
+              <kbd>c</kbd> in the tree lists only the changed files. <kbd>C-x o</kbd>{" "}
+              switches between the tree and the viewer; <kbd>q</kbd> returns to the diff.
             </div>
           </div>
         ) : (
@@ -453,7 +423,7 @@ export default function ProjectBuffer() {
               {openChange && (
                 <span
                   className="project-viewer-change"
-                  title="changed in the comparison on screen — :hunk shows the diff at the cursor, :hunks every one"
+                  title="changed in the comparison on screen — M-x hunk shows the diff at the cursor, M-x hunks every one"
                 >
                   <span className="stat-add">+{openChange.addedLines}</span>{" "}
                   <span className="stat-del">−{openChange.removedLines}</span>

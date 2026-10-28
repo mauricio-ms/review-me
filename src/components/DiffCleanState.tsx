@@ -193,13 +193,16 @@ export default function DiffCleanState() {
       {done && (
         <div className="diff-clean-hints">
           <span>
-            <kbd>r</kbd> refresh
+            <kbd>C-x x g</kbd> refresh
           </span>
           <span>
-            <kbd>b</kbd> <kbd>p</kbd> project
+            <kbd>C-x g</kbd> commits
           </span>
           <span>
-            <kbd>o</kbd> <kbd>p</kbd> open repo
+            <kbd>C-x b</kbd> switch buffer
+          </span>
+          <span>
+            <kbd>C-h b</kbd> keys
           </span>
         </div>
       )}

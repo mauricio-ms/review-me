@@ -1,5 +1,6 @@
-import { useCallback, useState } from "react";
+import { useCallback } from "react";
 
+import { contextScope, startDescribeKey } from "../lib/key-dispatch";
 import { showLog } from "../lib/log";
 import { exportNotes, openNoteEditor } from "../lib/notes";
 import { applyComparison, refreshDiff } from "../lib/open-repo";
@@ -9,46 +10,72 @@ import { addFlag } from "../lib/review-actions";
 import { findUsages, gotoDefinition, jumpBack } from "../lib/xref";
 import { useJumpStore } from "../state/jumps";
 import { useLogStore } from "../state/log";
+import { useMinibufferStore } from "../state/minibuffer";
 import { useProjectStore } from "../state/project";
 import { useRepoStore } from "../state/repo";
 import { useTagsStore } from "../state/tags";
 import { useUIStore, type BufferName } from "../state/ui";
 import { readsCommittedHistory, WORKTREE_SPEC } from "../types/diff";
 
-/** Closes the overlay that invoked a command. Provided by each consumer. */
+/** Closes the minibuffer that ran a command (a no-op when a key ran it). */
 export type CommandClose = (options?: { restoreFocus?: boolean }) => void;
 
+export type CommandId =
+  | "open"
+  | "recent"
+  | "find"
+  | "refresh"
+  | "diff-mode"
+  | "flag"
+  | "note"
+  | "export-notes"
+  | "goto-def"
+  | "find-refs"
+  | "jump-back"
+  | "changed"
+  | "hunk"
+  | "hunks"
+  | "close"
+  | "checkout"
+  | "compare"
+  | "log"
+  | "commit-diff"
+  | "worktree"
+  | "commit-reviewed"
+  | "clear"
+  | "diff"
+  | "project"
+  | "switch-buffer"
+  | "other-window"
+  | "help"
+  | "describe-mode"
+  | "describe-key";
+
 export type AppCommand = {
-  /** Stable identity, e.g. "open". */
-  id: string;
-  /** Token typed in the `:` command line, e.g. "open". */
+  /** Stable identity, e.g. "open"; what key bindings (`lib/keymap.ts`) refer to. */
+  id: CommandId;
+  /** Name typed in `M-x`, e.g. "open". */
   name: string;
-  /** Extra tokens that also match in the command line. */
+  /** Extra names that also match in `M-x`. */
   aliases: string[];
-  /** Human-readable description shown in both overlays. */
+  /** Human-readable description, shown beside the name. */
   label: string;
-  /** Palette group title. */
-  group: string;
-  /** Palette chord prefix ("o", "b") or null for top-level actions. */
-  prefix: string | null;
-  /** Palette chord key. */
-  key: string;
   /** If set, the command is only available while this buffer is active. */
   buffer?: BufferName;
-  /** `false` keeps it out of the `Space` palette: reachable from `:` only. */
-  palette?: boolean;
   enabled: boolean;
   run: () => void | Promise<void>;
 };
 
 /**
- * Single source of truth for the app's commands, shared by the `Space` palette
- * (`CommandTransient`) and the `:` command line (`CommandLine`). Each consumer
- * passes its own `rawClose`; the hook wraps it so closing also clears `busy`.
+ * Single source of truth for the app's commands: `M-x` lists them, key bindings
+ * (`lib/keymap.ts`) run them by id, and the help buffer documents them. Each consumer
+ * passes its own `close` — the minibuffer closes itself; a key has nothing to close.
  */
-export function useCommands(rawClose: CommandClose): {
+export function useCommands(close: CommandClose): {
+  /** The commands available in the active buffer. */
   commands: AppCommand[];
-  busy: string | null;
+  /** Every command, whatever the buffer — for the help buffer and key dispatch. */
+  all: AppCommand[];
 } {
   const activeBuffer = useUIStore((s) => s.activeBuffer);
   const setActiveBuffer = useUIStore((s) => s.setActiveBuffer);
@@ -70,16 +97,8 @@ export function useCommands(rawClose: CommandClose): {
   const jumpDepth = useJumpStore((s) => s.stack.length);
   const diffHighlight = useUIStore((s) => s.diffHighlight);
   const toggleDiffHighlight = useUIStore((s) => s.toggleDiffHighlight);
-
-  const [busy, setBusy] = useState<string | null>(null);
-
-  const close = useCallback<CommandClose>(
-    (options) => {
-      setBusy(null);
-      rawClose(options);
-    },
-    [rawClose],
-  );
+  const openHelp = useUIStore((s) => s.openHelp);
+  const openMinibuffer = useMinibufferStore((s) => s.open);
 
   const handleOpenRepo = useCallback(() => {
     close({ restoreFocus: false });
@@ -93,11 +112,9 @@ export function useCommands(rawClose: CommandClose): {
 
   const handleRefresh = useCallback(async () => {
     close({ restoreFocus: false });
-    setBusy("refreshing");
     try {
       await refreshDiff();
     } finally {
-      setBusy(null);
       requestFocus();
     }
   }, [close, requestFocus]);
@@ -148,12 +165,10 @@ export function useCommands(rawClose: CommandClose): {
 
   const handleWorktreeDiff = useCallback(async () => {
     close({ restoreFocus: false });
-    setBusy("switching");
     try {
       // applyComparison records the failure in the diff status.
       await applyComparison(WORKTREE_SPEC).catch(() => {});
     } finally {
-      setBusy(null);
       requestFocus();
     }
   }, [close, requestFocus]);
@@ -216,6 +231,32 @@ export function useCommands(rawClose: CommandClose): {
     void jumpBack();
   }, [close]);
 
+  const handleSwitchBuffer = useCallback(() => {
+    close({ restoreFocus: false });
+    openMinibuffer({ kind: "buffer" });
+  }, [close, openMinibuffer]);
+
+  const handleOtherWindow = useCallback(() => {
+    close({ restoreFocus: false });
+    useProjectStore.getState().togglePane();
+    requestFocus();
+  }, [close, requestFocus]);
+
+  // Read before closing: the keymap that was active is what help starts from.
+  const handleHelp = useCallback(
+    (only: boolean) => {
+      const from = contextScope();
+      close({ restoreFocus: false });
+      openHelp(from, only);
+    },
+    [close, openHelp],
+  );
+
+  const handleDescribeKey = useCallback(() => {
+    close();
+    startDescribeKey();
+  }, [close]);
+
   const switchTo = useCallback(
     (buffer: BufferName) => {
       close({ restoreFocus: false });
@@ -231,9 +272,6 @@ export function useCommands(rawClose: CommandClose): {
       name: "open",
       aliases: ["edit"],
       label: "open repository",
-      group: "open",
-      prefix: "o",
-      key: "p",
       enabled: true,
       run: handleOpenRepo,
     },
@@ -242,9 +280,6 @@ export function useCommands(rawClose: CommandClose): {
       name: "recent",
       aliases: ["repos"],
       label: "open recent repository",
-      group: "open",
-      prefix: "o",
-      key: "r",
       enabled: true,
       run: handleRecentRepos,
     },
@@ -253,9 +288,6 @@ export function useCommands(rawClose: CommandClose): {
       name: "find",
       aliases: ["files", "ff"],
       label: "find file (fuzzy)",
-      group: "find",
-      prefix: null,
-      key: "f",
       enabled: !!repo,
       run: handleFind,
     },
@@ -264,9 +296,6 @@ export function useCommands(rawClose: CommandClose): {
       name: "refresh",
       aliases: ["reload", "g"],
       label: "refresh diff",
-      group: "repo",
-      prefix: null,
-      key: "r",
       enabled: !!repo,
       run: handleRefresh,
     },
@@ -275,9 +304,6 @@ export function useCommands(rawClose: CommandClose): {
       name: "diffmode",
       aliases: ["highlight", "worddiff", "hl"],
       label: `diff highlight → ${diffHighlight === "word" ? "line" : "word"}`,
-      group: "diff",
-      prefix: null,
-      key: "h",
       buffer: "diff",
       enabled: !!repo,
       run: handleToggleDiffMode,
@@ -287,9 +313,6 @@ export function useCommands(rawClose: CommandClose): {
       name: "flag",
       aliases: ["mark"],
       label: openPath ? "flag selection" : "flag (open a file first)",
-      group: "tag",
-      prefix: "t",
-      key: "f",
       buffer: "project",
       enabled: !!openPath,
       run: handleProjectFlag,
@@ -302,12 +325,8 @@ export function useCommands(rawClose: CommandClose): {
         comparison.kind === "commit"
           ? "note on the lines at the cursor (a fix for later)"
           : "note (while reviewing a commit)",
-      group: "tag",
-      prefix: "t",
-      key: "",
       buffer: "diff",
-      // Notes are a `:note` away; no chord, in keeping with the commits buffer.
-      palette: false,
+      // `M-x note` only, no key — in keeping with `show` and `export`.
       // A note is exported per commit, so it only exists while reviewing one.
       enabled: !!repo && comparison.kind === "commit",
       run: handleNote,
@@ -317,10 +336,6 @@ export function useCommands(rawClose: CommandClose): {
       name: "export",
       aliases: ["notes", "export-notes"],
       label: `export notes on ${reviewBranch?.display ?? "HEAD"} to Markdown`,
-      group: "tag",
-      prefix: "t",
-      key: "",
-      palette: false,
       enabled: !!repo,
       run: handleExportNotes,
     },
@@ -328,10 +343,7 @@ export function useCommands(rawClose: CommandClose): {
       id: "goto-def",
       name: "definition",
       aliases: ["def", "gd"],
-      label: "go to definition (M-.)",
-      group: "xref",
-      prefix: "g",
-      key: "d",
+      label: "go to definition",
       buffer: "project",
       enabled: !!openPath,
       run: handleGotoDef,
@@ -340,10 +352,7 @@ export function useCommands(rawClose: CommandClose): {
       id: "find-refs",
       name: "references",
       aliases: ["refs", "gr", "usages"],
-      label: "find references (M-?)",
-      group: "xref",
-      prefix: "g",
-      key: "r",
+      label: "find references",
       buffer: "project",
       enabled: !!openPath,
       run: handleFindRefs,
@@ -352,11 +361,7 @@ export function useCommands(rawClose: CommandClose): {
       id: "jump-back",
       name: "back",
       aliases: ["pop", "jumpback"],
-      label: "back to where you jumped from (M-,)",
-      group: "xref",
-      // `g b` is the branch comparison; `o` reads as the *older* position.
-      prefix: "g",
-      key: "o",
+      label: "back to where you jumped from",
       buffer: "project",
       enabled: jumpDepth > 0,
       run: handleJumpBack,
@@ -369,11 +374,7 @@ export function useCommands(rawClose: CommandClose): {
         projectFilter === "changed"
           ? "project files → all files"
           : "project files → only what this comparison changed",
-      group: "project",
-      prefix: null,
-      key: "",
-      // `c` in the project tree does the same; no palette chord.
-      palette: false,
+      // `c` in the project tree does the same.
       enabled: !!repo,
       run: handleToggleProjectFilter,
     },
@@ -382,11 +383,7 @@ export function useCommands(rawClose: CommandClose): {
       name: "hunk",
       aliases: ["preview", "showdiff", "inline"],
       label: "show/hide the diff of the change at the cursor or selection",
-      group: "project",
-      prefix: null,
-      key: "",
       buffer: "project",
-      palette: false,
       enabled: !!openPath,
       run: handleToggleChangeAtCursor,
     },
@@ -397,11 +394,7 @@ export function useCommands(rawClose: CommandClose): {
       label: inlineDiff
         ? "hide the inline diff of every change, in every file"
         : "show the inline diff of every change, in every file",
-      group: "project",
-      prefix: null,
-      key: "",
       buffer: "project",
-      palette: false,
       enabled: !!repo,
       run: handleToggleAllChanges,
     },
@@ -410,9 +403,6 @@ export function useCommands(rawClose: CommandClose): {
       name: "close",
       aliases: ["bd"],
       label: "close repository",
-      group: "repo",
-      prefix: null,
-      key: "c",
       enabled: !!repo,
       run: handleCloseRepo,
     },
@@ -423,9 +413,6 @@ export function useCommands(rawClose: CommandClose): {
       label: reviewBranch
         ? `branch to review → ${reviewBranch.display}`
         : "branch to review",
-      group: "git",
-      prefix: "g",
-      key: "s",
       enabled: !!repo,
       run: handleCheckoutBranch,
     },
@@ -436,9 +423,6 @@ export function useCommands(rawClose: CommandClose): {
       label: reviewBranch
         ? `compare ${reviewBranch.display} against a base`
         : "compare branches (no branch to review)",
-      group: "git",
-      prefix: "g",
-      key: "b",
       // Both pickers review the branch the app is on; without one there is nothing
       // to compare or to list commits from.
       enabled: !!repo && !!reviewBranch,
@@ -449,9 +433,6 @@ export function useCommands(rawClose: CommandClose): {
       name: "log",
       aliases: ["commits", "history"],
       label: `commits on ${reviewBranch?.display ?? "HEAD"}`,
-      group: "git",
-      prefix: "g",
-      key: "l",
       enabled: !!repo,
       run: handleShowLog,
     },
@@ -460,12 +441,8 @@ export function useCommands(rawClose: CommandClose): {
       name: "show",
       aliases: ["revision", "sha"],
       label: "review a commit by sha or subject",
-      group: "git",
-      prefix: "g",
-      key: "",
       // The log is the way into a commit; this picker remains for searching and for
       // a sha outside the listed history.
-      palette: false,
       enabled: !!repo,
       run: handlePickCommit,
     },
@@ -474,9 +451,6 @@ export function useCommands(rawClose: CommandClose): {
       name: "worktree",
       aliases: ["wt", "working", "uncommitted"],
       label: "working-tree diff",
-      group: "git",
-      prefix: "g",
-      key: "w",
       // Already the working-tree diff — nothing to switch back to.
       enabled: !!repo && comparingHistory,
       run: handleWorktreeDiff,
@@ -488,9 +462,6 @@ export function useCommands(rawClose: CommandClose): {
       label: comparingHistory
         ? "commit reviewed changes (working-tree diff only)"
         : "commit reviewed changes",
-      group: "git",
-      prefix: "g",
-      key: "c",
       // Committed history has nothing to stage — neither side of a branch pair nor a
       // commit's own diff is something the reviewer could mean by committing here.
       enabled: !!repo && !comparingHistory,
@@ -501,10 +472,7 @@ export function useCommands(rawClose: CommandClose): {
       name: "clear",
       aliases: ["clear-tags", "reset-tags"],
       label: "clear this comparison's review, flag & ignore tags",
-      group: "tag",
-      // Command-line only — no Space chord for this destructive action.
-      prefix: null,
-      key: "x",
+      // `M-x` only — no key for a destructive action.
       enabled: !!repo,
       run: handleClearTags,
     },
@@ -513,10 +481,7 @@ export function useCommands(rawClose: CommandClose): {
       name: "diff",
       aliases: [],
       label: "diff buffer",
-      group: "switch buffer",
-      prefix: "b",
-      key: "d",
-      enabled: true,
+      enabled: !!repo,
       run: () => switchTo("diff"),
     },
     {
@@ -524,18 +489,56 @@ export function useCommands(rawClose: CommandClose): {
       name: "project",
       aliases: ["tree"],
       label: "project buffer",
-      group: "switch buffer",
-      prefix: "b",
-      key: "p",
-      enabled: true,
+      enabled: !!repo,
       run: () => switchTo("project"),
+    },
+    {
+      id: "switch-buffer",
+      name: "switch-buffer",
+      aliases: ["buffer", "buffers"],
+      label: "switch to another buffer",
+      enabled: !!repo,
+      run: handleSwitchBuffer,
+    },
+    {
+      id: "other-window",
+      name: "other-window",
+      aliases: ["window", "pane"],
+      label: "between the file tree and the viewer",
+      buffer: "project",
+      enabled: true,
+      run: handleOtherWindow,
+    },
+    {
+      id: "help",
+      name: "help",
+      aliases: ["describe-bindings", "keys", "bindings", "cheatsheet"],
+      label: "every key binding and command",
+      enabled: true,
+      run: () => handleHelp(false),
+    },
+    {
+      id: "describe-mode",
+      name: "describe-mode",
+      aliases: ["mode", "buffer-keys"],
+      label: "the current buffer's keys",
+      enabled: true,
+      run: () => handleHelp(true),
+    },
+    {
+      id: "describe-key",
+      name: "describe-key",
+      aliases: ["what-key"],
+      label: "press a key to see what it runs",
+      enabled: true,
+      run: handleDescribeKey,
     },
   ];
 
-  // Buffer-scoped commands appear in neither overlay outside their buffer.
+  // Buffer-scoped commands are only offered in their buffer.
   const visibleCommands = commands.filter(
     (c) => !c.buffer || c.buffer === activeBuffer,
   );
 
-  return { commands: visibleCommands, busy };
+  return { commands: visibleCommands, all: commands };
 }

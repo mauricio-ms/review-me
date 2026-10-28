@@ -1,6 +1,5 @@
 import { reviewProgress } from "../lib/coverage";
 import { timeAgo } from "../lib/time";
-import { useLogStore } from "../state/log";
 import { useRepoStore } from "../state/repo";
 import { useTagsStore } from "../state/tags";
 import { useUIStore } from "../state/ui";
@@ -49,9 +48,6 @@ export default function BufferStatusBar() {
   const ignored = useTagsStore((s) => s.ignored);
   const activeBuffer = useUIStore((s) => s.activeBuffer);
   const vimMode = useUIStore((s) => s.vimMode);
-  const flash = useUIStore((s) => s.flash);
-  // `b` in the log reviews the listed range as one diff, when it has a base.
-  const logHasBase = useLogStore((s) => s.range != null && s.range.kind !== "all");
 
   const files = diff?.files ?? [];
   const { done, total } = reviewProgress(files, reviewed);
@@ -105,32 +101,6 @@ export default function BufferStatusBar() {
           )}
         </>
       )}
-      {flash && <span className="status-segment status-flash">{flash}</span>}
-      <span className="status-spacer" />
-      <span className="status-segment status-hint">
-        {activeBuffer === "log" ? (
-          <>
-            <kbd>↵</kbd> open commit ·{" "}
-            {logHasBase && (
-              <>
-                <kbd>b</kbd> whole range ·{" "}
-              </>
-            )}
-            <kbd>Space</kbd> palette
-          </>
-        ) : (
-          <>
-            <kbd>r</kbd> review · <kbd>f</kbd> flag · <kbd>i</kbd> ignore ·{" "}
-            <kbd>u</kbd> unmark ·{" "}
-            {activeBuffer === "diff" && comparison && comparison.kind !== "worktree" && (
-              <>
-                <kbd>q</kbd> commits ·{" "}
-              </>
-            )}
-            <kbd>Space</kbd> palette
-          </>
-        )}
-      </span>
     </div>
   );
 }

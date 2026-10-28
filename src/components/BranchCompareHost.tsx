@@ -14,7 +14,7 @@ function errorMessage(error: unknown): string {
 
 /**
  * Base picker for a branch comparison. The branch under review is always the target —
- * choosing it is `:checkout`'s job — so all this collects is what to compare it
+ * choosing it is `M-x checkout`'s job — so all this collects is what to compare it
  * against, and applies `base...reviewBranch`. Nothing is fetched, checked out, or
  * staged; only refs git already knows about are offered.
  *

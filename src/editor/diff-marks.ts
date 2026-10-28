@@ -13,7 +13,7 @@ import type { WordSeg } from "../lib/word-diff";
 
 /**
  * A change block plus how much of its diff the viewer shows: `shown` is the full inline
- * diff (`:hunk`/`:hunks`), `showRemoved` just the removed lines — the changed-files view
+ * diff (`M-x hunk`/`M-x hunks`), `showRemoved` just the removed lines — the changed-files view
  * always has those.
  */
 export type ShownBlock = ChangeBlock & { shown: boolean; showRemoved: boolean };

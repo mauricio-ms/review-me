@@ -110,10 +110,14 @@ export async function openProjectFile(path: string): Promise<void> {
   }
 }
 
-/** Open a file and bring the project buffer to the front (used by the finder). */
+/**
+ * Open a file and bring the project buffer to the front with the viewer focused, as
+ * Emacs's find-file lands you in the file (used by the finder and the diff buffer).
+ */
 export async function openFileInProject(path: string): Promise<void> {
   recordJump();
   await openProjectFile(path);
+  useProjectStore.getState().setPane("viewer");
   const ui = useUIStore.getState();
   ui.setActiveBuffer("project");
   ui.requestFocus();

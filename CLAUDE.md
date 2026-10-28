@@ -54,15 +54,39 @@ symbol index in a global `Mutex`.
 
 **Frontend (`src/`)** — `AppShell.tsx` keeps all three buffers (`DiffBuffer`, `LogBuffer`,
 `ProjectBuffer`) mounted and toggles visibility with `display:none` (preserves
-cursor/scroll). A single **`components/useCommands.ts`** registry feeds both the `Space`
-transient palette (`CommandTransient`) and the `:` command line (`CommandLine`); commands
-carry a `buffer` scope and chord `prefix`/`key`, and `palette: false` keeps one out of the
-palette (`:show`, `:note`, `:export` are command-line only — the user wants no new
-chords for them). Modal pickers (open-repo, recent, fuzzy, checkout-branch,
-branch-compare, commit-pick, xref) and the modal editors (commit message, note) are gated
-by `useUIStore.picker` or a dedicated store and use `useModalFocus`.
+cursor/scroll); the help buffer (`HelpBuffer`, buffer `"help"`) renders only while shown.
+The window's last line is **`Minibuffer.tsx`**: the echo area (`useUIStore.flash`, and
+`keyEcho` for a half-typed `C-x-`) while idle, the minibuffer while something is read
+(`state/minibuffer.ts`: `command` for `M-x`, `buffer` for `C-x b`, `text` for a prompt).
+It sits under the mode line (`BufferStatusBar`) and grows upward.
 
-**State** is Zustand in `src/state/` (`ui`, `repo`, `tags`, `log`, `notes`, `project`, `xref`). Cross-cutting
+**Commands and keys are Emacs-style; there is no `:` command line and no Space palette**
+(the user removed both). A single **`components/useCommands.ts`** registry (typed
+`CommandId`s, a `buffer` scope) feeds `M-x`. **`lib/keymap.ts`** is the one table of key
+bindings, in Emacs notation (`C-x C-f`, `M-.`, `RET`, `g g`), per scope (`global`,
+`start`, `diff`, `log`, `tree`, `viewer`, `help`, `minibuffer`, `editor`), and it drives
+three things that therefore can't drift: dispatch, the key column in `M-x`, and the help
+buffer (`C-h b`, `C-h m`; `C-h k` describes a key in the echo area). Dispatch lives in
+`lib/key-dispatch.ts`: every dispatcher feeds one shared pending sequence (`feedKey`), so
+`C-g` quits it whoever started it and a dead end echoes `… is undefined`.
+- Global keys (`M-x`, `C-x …`, `C-h …`) are read on the window by `AppShell`'s
+  `GlobalKeys`, skipped while a modal or the minibuffer is up (`modalDepth`) or text is
+  being typed — a CodeMirror editor counts as typing only in vim insert mode.
+- Buffer keys go through each buffer's `onKeyDown` → `dispatchKey(scope, e, KEYMAP[scope],
+  handlers)` with a typed `Record<…Action, KeyHandler>`, so an action nothing handles
+  fails the build; a handler returning `false` lets the key go on.
+- The viewer's keys are a CodeMirror keymap built from the table
+  (`editor/viewer-keymap.ts`); the note and commit editors read `C-c C-c` / `C-c C-k` in a
+  capture handler on the dialog, before vim sees them (vim's own `:wq`/`:q` stay).
+- New command: give it an `M-x` name; give it a key only if it's used often, in Emacs
+  conventions. Rare or destructive ones stay `M-x` only (`show`, `note`, `export`,
+  `clear`, …).
+
+Modal pickers (open-repo, recent, fuzzy, checkout-branch, branch-compare, commit-pick,
+xref) and the modal editors (commit message, note) are gated by `useUIStore.picker` or a
+dedicated store and use `useModalFocus`.
+
+**State** is Zustand in `src/state/` (`ui`, `minibuffer`, `repo`, `tags`, `log`, `notes`, `project`, `xref`). Cross-cutting
 conventions that will bite if ignored:
 - **Wire format:** Rust structs are `#[serde(rename_all = "camelCase")]`; `AppError`
   serializes to a string. serde emits `null` for `Option::None`, so TS types use `| null`
@@ -73,11 +97,11 @@ conventions that will bite if ignored:
 ### The branch under review
 
 `useRepoStore.reviewBranch` (`ReviewBranch { ref, display }`) is the app's own notion of a
-checkout and the **single place a branch is chosen**: `:compare` collects only a base and
-targets it, the commits buffer (`:log`) lists the commits it introduced over that base.
+checkout and the **single place a branch is chosen**: `M-x compare` collects only a base and
+targets it, the commits buffer (`M-x log`) lists the commits it introduced over that base.
 It is seeded on open from `RepoInfo.reviewBranchRef` (HEAD's branch, else the repo's
-default branch, else `None` — a repo with no branches disables `:compare`, and the log
-lists `HEAD`) and changed by `:checkout` (`Space g s`, `CheckoutBranchHost`).
+default branch, else `None` — a repo with no branches disables `M-x compare`, and the log
+lists `HEAD`) and changed by `M-x checkout` (`CheckoutBranchHost`).
 
 It is **app-level only**: nothing fetches, checks out, stages, or writes to the working
 tree, so a branch that isn't checked out reviews like any other. Worktree mode still means
@@ -132,7 +156,7 @@ commit's row, re-apply the worktree comparison so the diff buffer and project mo
 the current changes again). Staying mounted is what puts you back on the same row; the
 cursor is tracked by **oid**, so reloads don't move it.
 
-What is listed is `commits::resolve_range(ref, base)` — shared with `:export`, so the
+What is listed is `commits::resolve_range(ref, base)` — shared with `M-x export`, so the
 export covers exactly the log's commits — which yields a `LogRange`:
 - `unmerged` — `base..ref`, also hiding the base's upstream (a stale local `master`
   mustn't leak `origin/master`'s commits in). An empty result is a real answer
@@ -141,8 +165,8 @@ export covers exactly the log's commits — which yields a `LogRange`:
 - `all` — no base, or its own base with no upstream or nothing ahead of it.
 
 The base is **`useRepoStore.reviewBase`**: seeded on open from
-`RepoInfo.defaultBranchRef`, replaced by whatever `:compare` picks (`chooseReviewBase`,
-which reloads the log) so the log and the branch diff always share one base. `:show`'s
+`RepoInfo.defaultBranchRef`, replaced by whatever `M-x compare` picks (`chooseReviewBase`,
+which reloads the log) so the log and the branch diff always share one base. `M-x show`'s
 picker passes no base — it is for the whole history.
 
 `useLogStore` holds the listed `ref` (`lib/log.ts`'s `logRef()`: the review branch, else
@@ -160,11 +184,11 @@ refresh never moves you, which is why the diff buffer's clean state still exists
 ### The diff buffer is NOT CodeMirror
 
 `DiffBuffer.tsx` is a custom keyboard-navigable HTML list (magit-status), driven by its
-own `onKeyDown` over a flattened `Row[]` (file/hunk/line) with a `pending` ref for chords
-(`gg`, `]h`, `]f`) and a `visualAnchor` for `v` selection. Line rows carry **intra-line
-word-diff** segments (`lib/word-diff.ts`: pairs each removed line with the added line that
-replaced it, LCS over tokens) — on by default; the `diff highlight` command (`Space h` /
-`:diffmode`) toggles `useUIStore.diffHighlight` between `word` and whole-`line`. Only the
+own `onKeyDown` over a flattened `Row[]` (file/hunk/line) — its keys, sequences like
+`g g` and `] h` included, are `keymap.ts`'s `diff` scope — and a `visualAnchor` for `v`
+selection. Line rows carry **intra-line word-diff** segments (`lib/word-diff.ts`: pairs
+each removed line with the added line that replaced it, LCS over tokens) — on by default;
+`M-x diffmode` toggles `useUIStore.diffHighlight` between `word` and whole-`line`. Only the
 **project viewer** (`ProjectBuffer.tsx`) uses CodeMirror (read-only + vim + per-file syntax
 highlighting lazy-loaded by extension via `@codemirror/language-data`).
 
@@ -212,7 +236,7 @@ precedence **flagged > ignored > reviewed > to-review** (`sectionForHunk`/
 `sectionForFile`); `r` reviews, `f` flags, `i` ignores, and `u` unmarks the current
 scope. `review_commit.rs` stages reviewed new-side + old-side hunks via `apply` and
 reviewed binary files via index add/remove; it loads **worktree-scoped tags only**, and
-`:commit` is disabled (with a defensive guard in `CommitReviewedHost`) whenever
+`M-x commit` is disabled (with a defensive guard in `CommitReviewedHost`) whenever
 `readsCommittedHistory` holds — a branch pair or a single commit — where both sides are
 already committed. NB: libgit2's `DiffFile::is_binary()` is
 unreliable before patches are generated, so binary detection uses
@@ -228,7 +252,7 @@ also skips untracked paths under it for repos marked before that existed.
 
 A **note** is a flag's `note`: a fix left for later, written while reviewing a commit.
 There is no separate store — notes ride on flags, so they get anchoring, the Flagged
-section and `u` for free. `:note` (`lib/notes.ts`) reads the diff buffer's cursor or
+section and `u` for free. `M-x note` (`lib/notes.ts`) reads the diff buffer's cursor or
 selection through `lib/diff-view.ts` (the diff-buffer twin of `project-view.ts`) and opens
 `NoteEditorHost` on the flag found there (`flagAt`: same range, else overlapping), or on
 bare lines that its first save flags (`review-actions.ts`'s `saveNote`). Existing notes
@@ -241,7 +265,7 @@ flag's lines.
 that can change a commit's flags (`add_flag_tag`, `set_flag_note`, `remove_tag`,
 `clear_tags`, `unmark_range`) calls `commands.rs`'s `sync_notes`, which rewrites
 `.review-me/notes/commits/<full-oid>.md` (or removes it) and `notes/README.md`; a failed
-export is logged, never fatal. `:export` writes `notes/branches/<branch>.md` — every note
+export is logged, never fatal. `M-x export` writes `notes/branches/<branch>.md` — every note
 reachable from the review branch, oldest first. Rendering must stay **deterministic**
 (dates from the commit, write only when content changes) so an unchanged review never
 churns; excerpts are the commit's own diff lines over the note's range, or tree lines for
@@ -261,7 +285,7 @@ revision containing them. Changing the source drops cached listings and the open
 they belong to the old snapshot — and `ProjectBuffer`'s modeline names the revision
 whenever it isn't the worktree.
 
-`useProjectStore.filter` (`all` | `changed`, `c` in the tree / `:changed`) narrows the
+`useProjectStore.filter` (`all` | `changed`, `c` in the tree / `M-x changed`) narrows the
 tree and the fuzzy finder to **the applied comparison's files** (`useRepoStore.diff`): a
 commit's, a branch's, or the uncommitted ones. It is a standing preference — `setSource`
 and `reset` leave it alone — so it keeps following whatever is under review. The changed
@@ -275,11 +299,11 @@ tints always, and inline diffs — removed lines as block widgets, changed words
 for the blocks shown. Blocks come from `lib/project-diff.ts`'s `changeBlocks` (one per
 maximal removed+added run of a hunk) and only while the viewer reads the comparison's
 new side (`changeForOpenFile`: the source must be `ambientSource`, so a file opened at
-the merge base shows no marks). What is shown is `useProjectStore.inlineDiff` (`:hunks`,
-all files) XOR `inlineFlipped` (`:hunk`, the blocks at the cursor/selection, cleared when
+the merge base shows no marks). What is shown is `useProjectStore.inlineDiff` (`M-x hunks`,
+all files) XOR `inlineFlipped` (`M-x hunk`, the blocks at the cursor/selection, cleared when
 the comparison changes). The changed-files view (`filter === "changed"`) always shows the
 removed lines (`ShownBlock.showRemoved`); the full diff — green new lines, word marks —
-still follows `:hunk`/`:hunks`. Block widgets must come from a `StateField`, never a view
+still follows `M-x hunk`/`M-x hunks`. Block widgets must come from a `StateField`, never a view
 plugin — CodeMirror rejects them there.
 
 ### Cross-references
@@ -328,11 +352,11 @@ can't be proved either way comes back with `confirmed: false` and is shown in a
 separate section. Nothing is silently omitted — a missed caller is a worse failure than
 a spurious one in a review tool. `rank` puts confirmed hits first, then same-file.
 
-The frontend binds emacs-xref keys in the viewer (`editor/xref-keymap.ts`, an Alt
+The frontend binds emacs-xref keys in the viewer (`editor/viewer-keymap.ts`, an Alt
 keymap rather than vim mappings — codemirror-vim's own `C-o`/`C-i` jump list anchors
 marks into a document the viewer replaces on every file open, so it can't follow a jump
 across files): **`M-.`** definition, **`M-,`** back, **`M-?`** references, plus
-`Space g d`/`g r`/`g o` palette commands. A Ctrl/Cmd+click (`editor/xref-click.ts`) also
+`M-x definition`/`references`/`back`. A Ctrl/Cmd+click (`editor/xref-click.ts`) also
 jumps to definition; it and `M-.` both route through `xref.ts`'s
 `gotoDefinitionAt(line, col)`. The index is warmed in the background on repo
 open/refresh (`applyComparison`).
@@ -366,9 +390,10 @@ the stack whenever the source changes.
 
 - The editor wrapper needs an explicit height chain or it collapses (see
   `.project-viewer .cm-editor { height: 100% }` in `styles.css`).
-- Leader keys (`Space`/`:`) inside the viewer must check vim insert mode and type a
-  literal char there — see `editor/cm-shared.ts` (`inVimInsertMode`). Don't rely on keymap
-  precedence; read the authoritative vim state from the view.
+- App keys inside the viewer must check vim insert mode and type a literal char there —
+  see `editor/cm-shared.ts` (`inVimInsertMode`; `AppShell`'s `isTypingTarget` uses it too).
+  Don't rely on keymap precedence; read the authoritative vim state from the view. `:` is
+  swallowed in the viewer (`swallowColonKeymap`) so it never opens vim's ex prompt.
 - codemirror-vim's ex commands are **global**: modal editors share `editor/vim-modal.ts`
   and take turns with `claimModalEditor` (its release only clears a still-current claim).
 - In a `@uiw/react-codemirror` modal editor (see `NoteEditorHost`): keep `basicSetup` and

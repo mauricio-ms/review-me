@@ -8,7 +8,7 @@ import { comparisonLabel } from "../types/diff";
 import { useModalFocus } from "./useModalFocus";
 
 /**
- * Confirmation for the `:clear` command. Wiping the active comparison's
+ * Confirmation for the `M-x clear` command. Wiping the active comparison's
  * reviewed/flag/ignore tags is destructive and irreversible, so it's gated behind
  * this keyboard-driven modal (`y` confirm · `n`/`Esc` cancel) rather than firing on
  * the bare command. Marks made against *other* comparisons are never touched.
@@ -64,7 +64,7 @@ export default function ConfirmClearHost() {
         aria-label="Clear this comparison's tags"
         tabIndex={-1}
         onKeyDown={(e) => {
-          if (e.key === "Escape" || e.key === "n") {
+          if (e.key === "Escape" || (e.ctrlKey && e.key === "g") || e.key === "n") {
             e.preventDefault();
             close();
           } else if (e.key === "y" || e.key === "Enter") {
@@ -76,7 +76,7 @@ export default function ConfirmClearHost() {
         <div className="neo-title">Clear tags for {scope}?</div>
         <div className="confirm-body">{body}</div>
         <div className="neo-footer">
-          <span>y confirm · n / Esc cancel</span>
+          <span>y confirm · n / C-g cancel</span>
         </div>
       </div>
     </div>

@@ -126,7 +126,7 @@ export default function NeoPicker<T>({
         tabIndex={-1}
         onKeyDown={(e) => {
           if (onExtraKeyDown?.(e, { query, selected })) return;
-          if (e.key === "Escape") {
+          if (e.key === "Escape" || (e.ctrlKey && e.key === "g")) {
             e.preventDefault();
             onClose();
           } else if (e.key === "ArrowDown" || (e.ctrlKey && e.key === "n")) {

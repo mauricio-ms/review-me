@@ -56,7 +56,7 @@ export default function XrefHost() {
         aria-modal="true"
         tabIndex={-1}
         onKeyDown={(e) => {
-          if (e.key === "Escape") {
+          if (e.key === "Escape" || (e.ctrlKey && e.key === "g")) {
             e.preventDefault();
             close();
           } else if (e.key === "ArrowDown" || e.key === "j" || (e.ctrlKey && e.key === "n")) {

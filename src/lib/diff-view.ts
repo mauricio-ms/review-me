@@ -9,7 +9,7 @@ export type DiffTarget = {
   side: AnchorSide;
 };
 
-// Module-level handle on the diff buffer's current target, so commands (`:note`) can
+// Module-level handle on the diff buffer's current target, so commands (`M-x note`) can
 // act on the cursor without prop-drilling — the diff-buffer twin of `project-view.ts`.
 let source: (() => DiffTarget | null) | null = null;
 

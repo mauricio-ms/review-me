@@ -21,7 +21,7 @@ type RepoState = {
   /**
    * What the review branch is held against: the base its commits are listed over in
    * the commits buffer. Starts as the repo's default branch; picking a base in
-   * `:compare` replaces it, so the log and the branch diff always share one base.
+   * `M-x compare` replaces it, so the log and the branch diff always share one base.
    */
   reviewBase: ReviewBranch | null;
   diff: DiffSummary | null;

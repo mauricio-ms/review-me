@@ -89,7 +89,7 @@ export interface TagStore {
   ignored: IgnoredTag[];
 }
 
-/** What `:export` wrote. Mirrors `notes::NotesExport`. */
+/** What `M-x export` wrote. Mirrors `notes::NotesExport`. */
 export interface NotesExport {
   /** Repo-relative path of the bundle; null when the branch has no notes. */
   path: string | null;

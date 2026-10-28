@@ -17,6 +17,8 @@ import {
   type ReviewSection,
 } from "../lib/coverage";
 import { setDiffTargetSource } from "../lib/diff-view";
+import { dispatchKey, type KeyHandler } from "../lib/key-dispatch";
+import { KEYMAP, type DiffAction } from "../lib/keymap";
 import { flagTarget, hasNote, openNoteFor } from "../lib/notes";
 import { leaveHistory } from "../lib/open-repo";
 import { openFileFromDiff } from "../lib/project";
@@ -356,7 +358,6 @@ export default function DiffBuffer() {
   const rowHeights = useRef(new Map<string, number>());
   const measurementFrame = useRef<number | null>(null);
   const viewportFrame = useRef<number | null>(null);
-  const pending = useRef<string | null>(null);
   // Set when we move the cursor to keep it on screen after a manual scroll, so the
   // cursor effect below doesn't re-center and fight the scroll (Ctrl-E / Ctrl-R).
   const skipScrollIntoView = useRef(false);
@@ -684,7 +685,7 @@ export default function DiffBuffer() {
       if (!t) return null;
       return { file: row.file, lo: t.lo, hi: t.hi, kind: "hunk", side: t.side };
     }
-    // A note row stands for its flag's lines: `u` there unmarks them, `:note` edits it.
+    // A note row stands for its flag's lines: `u` there unmarks them, `M-x note` edits it.
     if (row.kind === "note") {
       const { lo, hi, kind, side } = flagTarget(row.flag);
       return { file: row.file, lo, hi, kind, side };
@@ -718,7 +719,7 @@ export default function DiffBuffer() {
 
   const exitVisual = () => setVisualAnchor(null);
 
-  // `:note` reads the cursor's target through this handle; re-registered every render
+  // `M-x note` reads the cursor's target through this handle; re-registered every render
   // so it always sees the current cursor and selection.
   useEffect(() => {
     setDiffTargetSource(() => {
@@ -901,112 +902,42 @@ export default function DiffBuffer() {
     return callback;
   };
 
+  const handlers: Record<DiffAction, KeyHandler> = {
+    down: () => setCursor((c) => Math.min(rows.length - 1, c + 1)),
+    up: () => setCursor((c) => Math.max(0, c - 1)),
+    first: () => setCursor(0),
+    last: () => setCursor(Math.max(0, rows.length - 1)),
+    "next-hunk": () => jumpTo((r) => r.kind === "hunk", 1),
+    "prev-hunk": () => jumpTo((r) => r.kind === "hunk", -1),
+    "next-file": () => jumpTo((r) => r.kind === "file", 1),
+    "prev-file": () => jumpTo((r) => r.kind === "file", -1),
+    "next-section": () => jumpTo((r) => r.kind === "section", 1),
+    "prev-section": () => jumpTo((r) => r.kind === "section", -1),
+    toggle: toggleAtCursor,
+    open: openAtCursor,
+    visual: () => setVisualAnchor((a) => (a == null ? cursor : null)),
+    // Nothing selected: let the key go on (C-g has already said "Quit").
+    escape: () => {
+      if (visualAnchor == null) return false;
+      exitVisual();
+    },
+    review: doReview,
+    flag: doFlag,
+    ignore: doIgnore,
+    unmark: doUnmark,
+    "scroll-down": () => scrollByLine(1),
+    // C-r must be consumed: in tauri dev (Vite) it reloads the page.
+    "scroll-up": () => scrollByLine(-1),
+    // A commit or the branch's whole range is entered from the commits buffer; `q`
+    // goes back to it (magit's quit-window). Nothing to leave in the worktree.
+    quit: () => {
+      if (!comparison || comparison.kind === "worktree") return false;
+      leaveHistory();
+    },
+  };
+
   const onKeyDown = (e: React.KeyboardEvent) => {
-    if (e.ctrlKey && !e.metaKey && !e.altKey) {
-      if (e.key === "e") {
-        e.preventDefault();
-        scrollByLine(1);
-        return;
-      }
-      if (e.key === "r") {
-        // preventDefault is required: in tauri dev (Vite) Ctrl-R reloads the page.
-        e.preventDefault();
-        scrollByLine(-1);
-        return;
-      }
-    }
-    if (e.ctrlKey || e.metaKey || e.altKey) return;
-    const key = e.key;
-
-    if (pending.current === "g") {
-      pending.current = null;
-      if (key === "g") {
-        e.preventDefault();
-        setCursor(0);
-      }
-      return;
-    }
-    if (pending.current === "]" || pending.current === "[") {
-      const dir = pending.current === "]" ? 1 : -1;
-      pending.current = null;
-      if (key === "h") {
-        e.preventDefault();
-        jumpTo((r) => r.kind === "hunk", dir);
-      } else if (key === "f") {
-        e.preventDefault();
-        jumpTo((r) => r.kind === "file", dir);
-      } else if (key === "s") {
-        e.preventDefault();
-        jumpTo((r) => r.kind === "section", dir);
-      }
-      return;
-    }
-
-    switch (key) {
-      case "j":
-      case "ArrowDown":
-        e.preventDefault();
-        setCursor((c) => Math.min(rows.length - 1, c + 1));
-        break;
-      case "k":
-      case "ArrowUp":
-        e.preventDefault();
-        setCursor((c) => Math.max(0, c - 1));
-        break;
-      case "G":
-        e.preventDefault();
-        setCursor(Math.max(0, rows.length - 1));
-        break;
-      case "g":
-      case "]":
-      case "[":
-        e.preventDefault();
-        pending.current = key;
-        break;
-      case "Tab":
-        e.preventDefault();
-        toggleAtCursor();
-        break;
-      case "Enter":
-        e.preventDefault();
-        openAtCursor();
-        break;
-      case "v":
-      case "V":
-        e.preventDefault();
-        setVisualAnchor((a) => (a == null ? cursor : null));
-        break;
-      case "Escape":
-        if (visualAnchor != null) {
-          e.preventDefault();
-          exitVisual();
-        }
-        break;
-      case "r":
-        e.preventDefault();
-        doReview();
-        break;
-      case "u":
-        e.preventDefault();
-        doUnmark();
-        break;
-      case "f":
-        e.preventDefault();
-        doFlag();
-        break;
-      case "i":
-        e.preventDefault();
-        doIgnore();
-        break;
-      case "q":
-        // A commit or the branch's whole range is entered from the commits buffer;
-        // `q` goes back to it (magit's quit-window). Nothing to leave in the worktree.
-        if (comparison && comparison.kind !== "worktree") {
-          e.preventDefault();
-          leaveHistory();
-        }
-        break;
-    }
+    dispatchKey("diff", e, KEYMAP.diff, handlers);
   };
 
   const [selLo, selHi] = selectionRange();

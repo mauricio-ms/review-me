@@ -114,7 +114,7 @@ function blockSpan(block: ChangeBlock): [number, number] {
 }
 
 /**
- * `:hunk` — show or hide the diff of the change(s) at the viewer's cursor or visual
+ * `M-x hunk` — show or hide the diff of the change(s) at the viewer's cursor or visual
  * selection. Flashes why when there is nothing there to show.
  */
 export function toggleChangesAtCursor(): void {

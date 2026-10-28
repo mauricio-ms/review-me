@@ -1,6 +1,8 @@
 import { create } from "zustand";
 
-export type BufferName = "diff" | "project" | "log";
+import type { KeyScope } from "../lib/keymap";
+
+export type BufferName = "diff" | "project" | "log" | "help";
 export type VimMode = "normal" | "insert" | "visual" | "replace";
 /** How the diff view highlights changes: per-word (intra-line) or whole-line. */
 export type DiffHighlightMode = "word" | "line";
@@ -17,25 +19,31 @@ export type PickerKind =
   | "commitPick"
   | "checkoutBranch";
 
+/** What the help buffer shows: everything (`C-h b`) or one keymap (`C-h m`). */
+export type HelpView = {
+  /** The keymap that was active when help opened; listed first. */
+  from: KeyScope;
+  /** Only `from` (`C-h m`), not every keymap. */
+  only: boolean;
+};
+
 type UIState = {
   activeBuffer: BufferName;
-  transientOpen: boolean;
-  commandLineOpen: boolean;
+  /** Where `q` in the help buffer and `C-x b`'s default go back to. */
+  previousBuffer: BufferName;
+  help: HelpView;
   vimMode: VimMode;
   picker: PickerKind;
   focusRequest: number;
   modalDepth: number;
   diffHighlight: DiffHighlightMode;
-  /** A one-line message for the status bar (e.g. where `:export` wrote); fades. */
+  /** A one-line message for the echo area (e.g. where `export` wrote); fades. */
   flash: string | null;
+  /** A half-typed key sequence (`C-x-`) or `C-h k`'s prompt, for the echo area. */
+  keyEcho: string | null;
 
-  switchBuffer: (dir: "next" | "prev") => void;
   setActiveBuffer: (b: BufferName) => void;
-  openTransient: () => void;
-  closeTransient: () => void;
-  toggleTransient: () => void;
-  openCommandLine: () => void;
-  closeCommandLine: () => void;
+  openHelp: (from: KeyScope, only: boolean) => void;
   setVimMode: (m: VimMode) => void;
   openPicker: (p: Exclude<PickerKind, null>) => void;
   closePicker: () => void;
@@ -45,42 +53,39 @@ type UIState = {
   setDiffHighlight: (m: DiffHighlightMode) => void;
   toggleDiffHighlight: () => void;
   showFlash: (message: string) => void;
+  setKeyEcho: (echo: string | null) => void;
 };
 
-/** How long a status-bar message stays up. */
+/** How long an echo-area message stays up. */
 const FLASH_MS = 6000;
 let flashTimer: ReturnType<typeof setTimeout> | null = null;
 
-const BUFFERS: BufferName[] = ["diff", "log", "project"];
-
 export const useUIStore = create<UIState>((set) => ({
   activeBuffer: "diff",
-  transientOpen: false,
-  commandLineOpen: false,
+  previousBuffer: "diff",
+  help: { from: "global", only: false },
   vimMode: "normal",
   picker: null,
   focusRequest: 0,
   modalDepth: 0,
   diffHighlight: "word",
   flash: null,
+  keyEcho: null,
 
-  switchBuffer: (dir) =>
-    set((s) => {
-      const i = BUFFERS.indexOf(s.activeBuffer);
-      const next =
-        dir === "next"
-          ? BUFFERS[(i + 1) % BUFFERS.length]
-          : BUFFERS[(i - 1 + BUFFERS.length) % BUFFERS.length];
-      return { activeBuffer: next };
-    }),
-  setActiveBuffer: (b) => set({ activeBuffer: b }),
-  openTransient: () => set({ transientOpen: true, commandLineOpen: false }),
-  closeTransient: () => set({ transientOpen: false }),
-  toggleTransient: () => set((s) => ({ transientOpen: !s.transientOpen })),
-  openCommandLine: () => set({ commandLineOpen: true, transientOpen: false }),
-  closeCommandLine: () => set({ commandLineOpen: false }),
+  setActiveBuffer: (b) =>
+    set((s) =>
+      s.activeBuffer === b ? {} : { activeBuffer: b, previousBuffer: s.activeBuffer },
+    ),
+  openHelp: (from, only) =>
+    set((s) => ({
+      help: { from, only },
+      activeBuffer: "help",
+      // Reopening help from help keeps the way back out.
+      previousBuffer: s.activeBuffer === "help" ? s.previousBuffer : s.activeBuffer,
+      focusRequest: s.focusRequest + 1,
+    })),
   setVimMode: (m) => set({ vimMode: m }),
-  openPicker: (p) => set({ picker: p, transientOpen: false, commandLineOpen: false }),
+  openPicker: (p) => set({ picker: p }),
   closePicker: () => set({ picker: null }),
   requestFocus: () => set((s) => ({ focusRequest: s.focusRequest + 1 })),
   beginModal: () => set((s) => ({ modalDepth: s.modalDepth + 1 })),
@@ -96,4 +101,5 @@ export const useUIStore = create<UIState>((set) => ({
     }, FLASH_MS);
     set({ flash: message });
   },
+  setKeyEcho: (echo) => set({ keyEcho: echo }),
 }));

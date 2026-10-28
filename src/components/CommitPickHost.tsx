@@ -30,7 +30,7 @@ function errorMessage(error: unknown): string {
 
 /**
  * Picks one commit off the branch under review and diffs it against its first parent.
- * The branch comes from the app's review branch (`:checkout`), so this is a single
+ * The branch comes from the app's review branch (`M-x checkout`), so this is a single
  * choice; nothing is fetched, checked out, or staged.
  *
  * Errors (an unknown revision, a commit outside this repo) are shown inline without

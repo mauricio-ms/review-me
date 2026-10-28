@@ -70,7 +70,7 @@ export async function openRepoByPath(path: string): Promise<void> {
       ? { ref: info.reviewBranchRef, display: branchShorthand(info.reviewBranchRef) }
       : null,
   );
-  // ...and is held against the default branch until `:compare` picks another base.
+  // ...and is held against the default branch until `M-x compare` picks another base.
   repoStore.setReviewBase(
     info.defaultBranchRef
       ? { ref: info.defaultBranchRef, display: branchShorthand(info.defaultBranchRef) }
@@ -132,7 +132,7 @@ export function leaveHistory(): void {
   const ui = useUIStore.getState();
   ui.setActiveBuffer("log");
   ui.requestFocus();
-  // A comparison entered from `:show` or `:compare` may come before the log was ever
+  // A comparison entered from `M-x show` or `M-x compare` may come before the log was ever
   // loaded.
   const log = useLogStore.getState();
   if (log.ref === null) void loadLog();
@@ -142,7 +142,7 @@ export function leaveHistory(): void {
 }
 
 /**
- * Hold the review branch against `base` from now on — the base `:compare` picked — so
+ * Hold the review branch against `base` from now on — the base `M-x compare` picked — so
  * the commits buffer lists what the branch introduced over the same base the branch
  * diff uses. The log follows, once it has been opened.
  */

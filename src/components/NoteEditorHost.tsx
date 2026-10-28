@@ -1,7 +1,7 @@
 import { LanguageDescription, type LanguageSupport } from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
 import { Prec } from "@codemirror/state";
-import { EditorView, keymap } from "@codemirror/view";
+import { EditorView } from "@codemirror/view";
 import { getCM, Vim, vim } from "@replit/codemirror-vim";
 import CodeMirror from "@uiw/react-codemirror";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -9,12 +9,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { gruberDarkerTheme } from "../editor/gruber-darker";
 import { claimModalEditor, defineModalEditorVim } from "../editor/vim-modal";
 import type { DiffTarget } from "../lib/diff-view";
+import { dispatchKey, type KeyHandler } from "../lib/key-dispatch";
+import { KEYMAP, type EditorAction } from "../lib/keymap";
 import { saveNote } from "../lib/review-actions";
 import { useNotesStore, type NoteEdit } from "../state/notes";
 import { useUIStore } from "../state/ui";
 import { useModalFocus } from "./useModalFocus";
 
-const HINT = ":w save · :wq save & close · :q! discard · Ctrl+Enter save & close";
+const HINT = "C-c C-c save & close · C-c C-k discard · :w save · :wq / :q! from vim";
 
 // Module-level so its identity is stable: the wrapper reconfigures the whole editor
 // whenever `basicSetup` changes, and an inline object changes on every keystroke.
@@ -43,7 +45,7 @@ function targetLabel(target: DiffTarget): string {
 }
 
 /**
- * The review-note editor (`:note`): Markdown in a vim buffer, saved onto the flag at
+ * The review-note editor (`M-x note`): Markdown in a vim buffer, saved onto the flag at
  * the cursor — or, on unflagged lines, flagging them with the note on first save. The
  * note is a fix left for later; the commit's notes are exported for an LLM to act on.
  */
@@ -125,7 +127,7 @@ function NoteEditor({
   const quit = useCallback(
     (force: boolean) => {
       if (dirty && !force) {
-        setMessage("unsaved changes — :w to save, :q! to discard");
+        setMessage("unsaved changes — C-c C-c or :w to save, C-c C-k or :q! to discard");
         return;
       }
       close();
@@ -144,29 +146,23 @@ function NoteEditor({
   );
 
   // The editor's extensions must not change while typing — a reconfigure per keystroke
-  // races vim's own key handling — so the keymap reaches `save` through a ref.
-  const saveRef = useRef(save);
-  saveRef.current = save;
+  // races vim's own key handling — so they hold no callbacks: the Emacs keys that
+  // finish the edit are read on the dialog, before the editor sees them.
   const extensions = useMemo(
     () => [
       // Vim reads keys before any other keymap, as codemirror-vim asks.
       Prec.highest(vim()),
-      Prec.highest(
-        keymap.of([
-          {
-            key: "Ctrl-Enter",
-            run: () => {
-              void saveRef.current(true);
-              return true;
-            },
-          },
-        ]),
-      ),
       EditorView.lineWrapping,
       ...(markdown ? [markdown] : []),
     ],
     [markdown],
   );
+
+  const keyHandlers: Record<EditorAction, KeyHandler> = {
+    finish: () => void save(true),
+    // with-editor-cancel: the edit is dropped, the note stays as last saved.
+    cancel: () => quit(true),
+  };
 
   return (
     <div className="asset-picker-backdrop">
@@ -177,6 +173,8 @@ function NoteEditor({
         aria-modal="true"
         aria-label="Review note"
         tabIndex={-1}
+        // Capture: `C-c` must reach us before vim takes it as <Esc>.
+        onKeyDownCapture={(e) => dispatchKey("editor", e, KEYMAP.editor, keyHandlers)}
       >
         <div className="neo-title">Note</div>
         <div className="note-target">
