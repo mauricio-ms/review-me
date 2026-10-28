@@ -121,7 +121,7 @@ export default function BranchCompareHost() {
   ) : (
     <>
       <span className="branch-base">reviewing: {reviewBranch?.display}</span>
-      {" · ↵ compare · Esc cancel"}
+      {" · RET compare · C-g quit"}
     </>
   );
 

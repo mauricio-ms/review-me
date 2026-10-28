@@ -10,9 +10,13 @@ import NeoPicker from "./NeoPicker";
 /** git orange-red, matching the `.gitignore` icon in file-icons.ts. */
 const REPO_COLOR = "#f14e32";
 
+/** The last row, as Emacs's project switcher ends with "… (choose a dir)". */
+const ANOTHER: RememberedRepo = { path: "", name: "another directory…", lastOpenedAt: -1 };
+
 export default function RecentReposHost() {
   const open = useUIStore((s) => s.picker === "recentRepos");
   const closePicker = useUIStore((s) => s.closePicker);
+  const openPicker = useUIStore((s) => s.openPicker);
   const requestFocus = useUIStore((s) => s.requestFocus);
 
   const [repos, setRepos] = useState<RememberedRepo[]>([]);
@@ -58,7 +62,7 @@ export default function RecentReposHost() {
   );
 
   const forget = useCallback(async (repo: RememberedRepo | undefined) => {
-    if (!repo) return;
+    if (!repo || repo === ANOTHER) return;
     try {
       setRepos(await forgetRepo(repo.path));
     } catch (e) {
@@ -69,9 +73,12 @@ export default function RecentReposHost() {
   if (!open) return null;
 
   const needle = query.trim().toLowerCase();
-  const rows = needle
-    ? repos.filter((r) => `${r.name} ${r.path}`.toLowerCase().includes(needle))
-    : repos;
+  const rows = [
+    ...(needle
+      ? repos.filter((r) => `${r.name} ${r.path}`.toLowerCase().includes(needle))
+      : repos),
+    ANOTHER,
+  ];
 
   const footer = busy
     ? "opening…"
@@ -79,7 +86,7 @@ export default function RecentReposHost() {
       ? error
       : repos.length === 0
         ? "no recent repositories"
-        : "↵ open · C-d forget · Esc cancel";
+        : "RET open · C-d forget · C-g quit";
 
   // Repos are directories; show the folder glyph tinted git-color.
   const repoGlyph = fileIcon("", true).glyph;
@@ -92,8 +99,11 @@ export default function RecentReposHost() {
       onQueryChange={setQuery}
       placeholder="filter repositories…"
       rows={rows}
-      rowKey={(repo) => repo.path}
-      onActivate={(repo) => void openSelected(repo)}
+      rowKey={(repo) => repo.path || "another"}
+      onActivate={(repo) => {
+        if (repo === ANOTHER) openPicker("openRepo");
+        else void openSelected(repo);
+      }}
       onClose={close}
       footer={footer}
       emptyText="nothing here yet"
@@ -105,7 +115,14 @@ export default function RecentReposHost() {
         }
         return false;
       }}
-      renderRow={(repo) => (
+      renderRow={(repo) =>
+        repo === ANOTHER ? (
+          <>
+            <span className="neo-icon">…</span>
+            <span className="neo-name">{repo.name}</span>
+            <span className="neo-detail">M-x open</span>
+          </>
+        ) : (
         <>
           <span className="neo-icon" style={{ color: REPO_COLOR }}>
             {repoGlyph}
@@ -115,7 +132,8 @@ export default function RecentReposHost() {
             <bdi>{repo.path}</bdi>
           </span>
         </>
-      )}
+        )
+      }
     />
   );
 }

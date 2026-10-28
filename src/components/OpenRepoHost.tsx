@@ -123,7 +123,7 @@ export default function OpenRepoHost() {
 
   const footer = busy
     ? "opening…"
-    : (error ?? "↵ open · ⇥ enter dir · ⌫ up · Esc cancel");
+    : (error ?? "RET open · TAB enter dir · DEL up · C-g quit");
 
   return (
     <NeoPicker<PickRow>

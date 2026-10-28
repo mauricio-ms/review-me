@@ -10,9 +10,11 @@ a magit-style, vim-driven UI over a git diff — working-tree-vs-HEAD, a
 magit-style commits buffer — with reviewed/flag tagging, review notes exported as
 Markdown for an LLM to act on, a fuzzy file finder,
 an IDE-like project mode, and tree-sitter cross-references.
-The stack and UX deliberately mirror the sibling app at
-`/home/mms/development/projects/video-studio` (buffer model, command palette, neo-picker
-modals, Zustand) — consult it when a pattern here looks unfamiliar.
+The stack deliberately mirrors the sibling app at
+`/home/mms/development/projects/video-studio` (buffer model, `NeoPicker`, Zustand) —
+consult it when a pattern here looks unfamiliar. The UX has since gone its own way: its
+Space palette, `:` command line and centered pickers became an Emacs-style `M-x`
+minibuffer here (see "Commands and keys" below).
 
 ## Commands
 
@@ -101,9 +103,14 @@ need their own markup follow the same rule: the finder and xref put the name fir
 left-elide the folders. The mode line names the file under the cursor (`useUIStore
 .diffCursor`, or the viewer's open file), and its branch labels give way before it does.
 
-Modal pickers (open-repo, recent, fuzzy, checkout-branch, branch-compare, commit-pick,
-xref) and the modal editors (commit message, note) are gated by `useUIStore.picker` or a
-dedicated store and use `useModalFocus`.
+The pickers (open-repo, recent, fuzzy, checkout-branch, branch-compare, commit-pick) are
+`NeoPicker`s, which render **docked at the bottom as a minibuffer** — prompt line (count,
+`Title:`, input, a hint) over the candidates, in the layout so they push the buffers up —
+and xref's results use the same layout; the echo area steps aside while one is open
+(`Minibuffer`'s `DOCKED_PICKERS`). What needs a decision or an editor stays a centered
+modal (`asset-picker`): the clear confirmation, the commit dialog, the note editor. All
+are gated by `useUIStore.picker` or a dedicated store and use `useModalFocus` (which is
+what turns the global keys off while they're up).
 
 **State** is Zustand in `src/state/` (`ui`, `minibuffer`, `repo`, `tags`, `log`, `notes`, `project`, `xref`). Cross-cutting
 conventions that will bite if ignored:

@@ -143,7 +143,7 @@ export default function CommitPickHost() {
   ) : (
     <>
       <span className="branch-base">on {reviewBranch?.display ?? "no branch"}</span>
-      {" · ↵ review commit · Esc cancel"}
+      {" · RET review commit · C-g quit"}
     </>
   );
 

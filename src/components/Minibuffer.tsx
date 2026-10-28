@@ -5,7 +5,8 @@ import { commandKeys, KEYMAP, type MinibufferAction } from "../lib/keymap";
 import { showLog } from "../lib/log";
 import { useMinibufferStore, type MinibufferRequest } from "../state/minibuffer";
 import { useRepoStore } from "../state/repo";
-import { useUIStore, type BufferName } from "../state/ui";
+import { useUIStore, type BufferName, type PickerKind } from "../state/ui";
+import { useXrefStore } from "../state/xref";
 import { type CommandClose, useCommands } from "./useCommands";
 import { useModalFocus } from "./useModalFocus";
 
@@ -15,10 +16,24 @@ import { useModalFocus } from "./useModalFocus";
  * (`M-x`), a buffer (`C-x b`), or a line of text. It sits under the mode line and
  * grows upward with its candidates, pushing the buffers up rather than covering them.
  */
+/** Pickers that read in the minibuffer's place (the rest are centered dialogs). */
+const DOCKED_PICKERS = new Set<PickerKind>([
+  "openRepo",
+  "recentRepos",
+  "fuzzyFiles",
+  "branchCompare",
+  "commitPick",
+  "checkoutBranch",
+]);
+
 export default function Minibuffer() {
   const request = useMinibufferStore((s) => s.request);
   const session = useMinibufferStore((s) => s.session);
+  // A docked picker (NeoPicker, xref) is the minibuffer while it's open.
+  const pickerDocked = useUIStore((s) => DOCKED_PICKERS.has(s.picker));
+  const xrefOpen = useXrefStore((s) => s.open);
   if (request) return <Prompt key={session} request={request} />;
+  if (pickerDocked || xrefOpen) return null;
   return <EchoArea />;
 }
 

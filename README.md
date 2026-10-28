@@ -278,7 +278,8 @@ you review. `C-x b` switches to the project buffer to browse the rest of the rep
 a definition.
 
 The keys are Emacs's: `M-x` runs any command by name in a minibuffer at the bottom of the
-window, the commands you reach for often have a `C-x` key, and **`C-h b` lists every key
+window — where every picker reads too (find file, branches, commits, recent repositories,
+references) — the commands you reach for often have a `C-x` key, and **`C-h b` lists every key
 and command** (generated from the keymap, so it is always the real list). `C-h m` shows
 just the current buffer's keys; `C-h k` tells you what a key does.
 

@@ -105,7 +105,7 @@ export default function CheckoutBranchHost() {
   ) : (
     <>
       <span className="branch-base">reviewing: {reviewBranch?.display ?? "none"}</span>
-      {" · ↵ switch · Esc cancel"}
+      {" · RET switch · C-g quit"}
     </>
   );
 

@@ -6,19 +6,23 @@ import {
   useState,
 } from "react";
 
+import { dispatchKey, type KeyHandler } from "../lib/key-dispatch";
+import { KEYMAP, type MinibufferAction } from "../lib/keymap";
 import { useModalFocus } from "./useModalFocus";
 
 /**
- * Shared neo-picker shell for the file/project pickers (open-repo, recent repos,
- * fuzzy file finder). Owns the chrome, the search input, keyboard navigation,
- * selection, modal focus and scroll-into-view. Each host supplies its own data,
- * how the query filters that data (sync substring vs. async fuzzy), row
- * rendering and activation — only the *content filter* differs between pickers.
+ * Shared shell for the pickers (find file, recent and open repository, the branch and
+ * commit pickers): a minibuffer docked at the bottom of the window, Emacs-style — the
+ * prompt line (count, `Title:`, the input, a key hint) over its candidates, pushing
+ * the buffers up rather than covering them. Owns the input, keyboard navigation (the
+ * `minibuffer` keymap), selection, modal focus and scroll-into-view. Each host
+ * supplies its own data, how the query filters it (sync substring vs. async fuzzy),
+ * row rendering and activation — only the *content filter* differs between pickers.
  */
 export interface NeoPickerProps<T> {
   open: boolean;
   title: string;
-  /** Extra modifier class on the modal (e.g. "fuzzy-finder"). */
+  /** Extra modifier class on the picker (e.g. "fuzzy-finder"). */
   className?: string;
 
   /** Controlled search input — the host decides how `query` filters `rows`. */
@@ -44,8 +48,9 @@ export interface NeoPickerProps<T> {
   initialSelected?: number;
 
   onClose: () => void;
-  /** `.neo-count` content; defaults to the row total. */
+  /** The count before the prompt; defaults to the row total. */
   renderCount?: (selected: number, total: number) => ReactNode;
+  /** A short hint at the end of the prompt line: context, an error, the keys. */
   footer: ReactNode;
   emptyText?: string;
 
@@ -116,92 +121,91 @@ export default function NeoPicker<T>({
 
   if (!open) return null;
 
+  const handlers: Record<MinibufferAction, KeyHandler> = {
+    next: () => move(1),
+    prev: () => move(-1),
+    // Pickers complete by narrowing; TAB is the host's (open-repo descends with it).
+    complete: () => false,
+    accept: () => {
+      const row = rows[selected];
+      if (row && !isRowDisabled?.(row)) onActivate(row, selected);
+    },
+    quit: onClose,
+  };
+
   return (
-    <div className="asset-picker-backdrop">
-      <div
-        ref={rootRef}
-        className={`asset-picker neo-picker${className ? ` ${className}` : ""}`}
-        role="dialog"
-        aria-modal="true"
-        tabIndex={-1}
-        onKeyDown={(e) => {
-          if (onExtraKeyDown?.(e, { query, selected })) return;
-          if (e.key === "Escape" || (e.ctrlKey && e.key === "g")) {
-            e.preventDefault();
-            onClose();
-          } else if (e.key === "ArrowDown" || (e.ctrlKey && e.key === "n")) {
-            e.preventDefault();
-            move(1);
-          } else if (e.key === "ArrowUp" || (e.ctrlKey && e.key === "p")) {
-            e.preventDefault();
-            move(-1);
-          } else if (e.key === "Enter") {
-            e.preventDefault();
-            const row = rows[selected];
-            if (row && !isRowDisabled?.(row)) onActivate(row, selected);
-          }
-        }}
-      >
-        <div className="neo-title">{title}</div>
-        <div className="neo-count">
+    <div
+      ref={rootRef}
+      className={`minibuffer mb-picker${className ? ` ${className}` : ""}`}
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+      tabIndex={-1}
+      onKeyDown={(e) => {
+        if (onExtraKeyDown?.(e, { query, selected })) return;
+        dispatchKey("minibuffer", e, KEYMAP.minibuffer, handlers);
+      }}
+    >
+      <div className="mb-line">
+        <span className="mb-count">
           {renderCount ? renderCount(selected, rows.length) : rows.length}
+        </span>
+        <label className="mb-prompt" htmlFor="picker-input">
+          {title}:
+        </label>
+        <div className="neo-prompt-field">
+          {promptPrefix}
+          <input
+            id="picker-input"
+            ref={inputRef}
+            className="mb-input"
+            value={query}
+            spellCheck={false}
+            autoComplete="off"
+            placeholder={placeholder}
+            onChange={(e) => onQueryChange(e.target.value)}
+          />
         </div>
-        <div className="neo-prompt">
-          <span>›</span>
-          <div className="neo-prompt-field">
-            {promptPrefix}
-            <input
-              ref={inputRef}
-              value={query}
-              spellCheck={false}
-              autoComplete="off"
-              placeholder={placeholder}
-              onChange={(e) => onQueryChange(e.target.value)}
-              aria-label={title}
-            />
-          </div>
-        </div>
-        <div className="neo-separator" />
-        <div className="neo-list">
-          {rows.length === 0 ? (
-            <div className="neo-empty">{emptyText ?? "no matches"}</div>
-          ) : (
-            rows.map((row, idx) => {
-              const disabled = isRowDisabled?.(row) ?? false;
-              const extra = rowClassName?.(row) ?? "";
-              return (
-                <div
-                  key={rowKey(row, idx)}
-                  ref={(el) => {
-                    if (el && idx === selected) {
-                      window.requestAnimationFrame(() => {
-                        el.scrollIntoView({ block: "nearest" });
-                      });
-                    }
-                  }}
-                  className={`neo-row${extra ? ` ${extra}` : ""}${
-                    idx === selected ? " is-selected" : ""
-                  }${disabled ? " is-disabled" : ""}`}
-                  onPointerMove={(e) => {
-                    const next = { x: e.clientX, y: e.clientY };
-                    const prev = pointerRef.current;
-                    pointerRef.current = next;
-                    if (prev && prev.x === next.x && prev.y === next.y) return;
-                    if (!disabled) setSelected(idx);
-                  }}
-                  onClick={() => {
-                    if (!disabled) onActivate(row, idx);
-                  }}
-                >
-                  {renderRow(row, idx === selected)}
-                </div>
-              );
-            })
-          )}
-        </div>
-        <div className="neo-footer">
-          <span>{footer}</span>
-        </div>
+        <span className="mb-hint">{footer}</span>
+      </div>
+      <div className="mb-list neo-list" role="listbox" aria-label={title}>
+        {rows.length === 0 ? (
+          <div className="mb-empty">{emptyText ?? "[No match]"}</div>
+        ) : (
+          rows.map((row, idx) => {
+            const disabled = isRowDisabled?.(row) ?? false;
+            const extra = rowClassName?.(row) ?? "";
+            return (
+              <div
+                key={rowKey(row, idx)}
+                role="option"
+                aria-selected={idx === selected}
+                ref={(el) => {
+                  if (el && idx === selected) {
+                    window.requestAnimationFrame(() => {
+                      el.scrollIntoView({ block: "nearest" });
+                    });
+                  }
+                }}
+                className={`neo-row${extra ? ` ${extra}` : ""}${
+                  idx === selected ? " is-selected" : ""
+                }${disabled ? " is-disabled" : ""}`}
+                onPointerMove={(e) => {
+                  const next = { x: e.clientX, y: e.clientY };
+                  const prev = pointerRef.current;
+                  pointerRef.current = next;
+                  if (prev && prev.x === next.x && prev.y === next.y) return;
+                  if (!disabled) setSelected(idx);
+                }}
+                onClick={() => {
+                  if (!disabled) onActivate(row, idx);
+                }}
+              >
+                {renderRow(row, idx === selected)}
+              </div>
+            );
+          })
+        )}
       </div>
     </div>
   );

@@ -107,7 +107,7 @@ export default function FuzzyFinderHost() {
       onActivate={(row) => openSelected(row)}
       onClose={close}
       renderCount={(s, t) => (t === 0 ? "0" : `${s + 1}/${t}`)}
-      footer="↑↓ move · ↵ open · Esc cancel"
+      footer="RET open · C-g quit"
       emptyText={only && only.length === 0 ? "nothing changed here" : "no matching files"}
       renderRow={(row) => {
         // The file name first — it's what you're matching — then its folders, shortened

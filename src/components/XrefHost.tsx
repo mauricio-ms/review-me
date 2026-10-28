@@ -1,5 +1,7 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 
+import { dispatchKey, type KeyHandler } from "../lib/key-dispatch";
+import { KEYMAP, type MinibufferAction } from "../lib/keymap";
 import { navigateTo } from "../lib/xref";
 import { useUIStore } from "../state/ui";
 import { useXrefStore } from "../state/xref";
@@ -48,78 +50,77 @@ export default function XrefHost() {
   const firstUnproven = results.findIndex((r) => !r.confirmed);
   const hasUnproven = firstUnproven >= 0;
 
+  const handlers: Record<MinibufferAction, KeyHandler> = {
+    next: () => move(1),
+    prev: () => move(-1),
+    complete: () => false,
+    accept: () => choose(selected),
+    quit: close,
+  };
+
   return (
-    <div className="asset-picker-backdrop">
-      <div
-        ref={rootRef}
-        className="asset-picker neo-picker xref-panel"
-        role="dialog"
-        aria-modal="true"
-        tabIndex={-1}
-        onKeyDown={(e) => {
-          if (e.key === "Escape" || (e.ctrlKey && e.key === "g")) {
-            e.preventDefault();
-            close();
-          } else if (e.key === "ArrowDown" || e.key === "j" || (e.ctrlKey && e.key === "n")) {
-            e.preventDefault();
-            move(1);
-          } else if (e.key === "ArrowUp" || e.key === "k" || (e.ctrlKey && e.key === "p")) {
-            e.preventDefault();
-            move(-1);
-          } else if (e.key === "Enter") {
-            e.preventDefault();
-            choose(selected);
-          }
-        }}
-      >
-        <div className="neo-title">Cross-reference</div>
-        <div className="neo-count">{results.length}</div>
-        <div className="neo-prompt">
-          <span>›</span>
-          <span className="xref-title">{title}</span>
-        </div>
-        <div className="neo-separator" />
-        <div className="neo-list">
-          {results.length === 0 ? (
-            <div className="neo-empty">no results</div>
-          ) : (
-            results.map((r, idx) => (
-              <Fragment key={`${r.file}:${r.line}:${r.col}`}>
-                {hasUnproven && idx === 0 && r.confirmed && (
-                  <div className="xref-group">confirmed</div>
-                )}
-                {idx === firstUnproven && (
-                  <div className="xref-group is-unconfirmed">
-                    unconfirmed — same name, couldn't be proven
-                  </div>
-                )}
-                <div
-                  className={`xref-row ${idx === selected ? "is-selected" : ""} ${
-                    r.confirmed ? "" : "is-unconfirmed"
-                  }`}
-                  onMouseEnter={() => setSelected(idx)}
-                  onClick={() => choose(idx)}
-                >
-                  <span className="xref-loc">
-                    <span className={`xref-kind kind-${r.kind}`}>
-                      {r.kind === "definition" ? "def" : "ref"}
-                    </span>
-                    <span className="xref-name">
-                      {splitPath(r.file)[1]}:{r.line}
-                    </span>
-                    <span className="xref-dir" title={r.file}>
-                      <bdi>{splitPath(r.file)[0]}</bdi>
-                    </span>
-                  </span>
-                  <span className="xref-snippet">{r.snippet}</span>
+    <div
+      ref={rootRef}
+      className="minibuffer mb-picker xref-panel"
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+      tabIndex={-1}
+      onKeyDown={(e) => {
+        // No input to type into, so j / k move too.
+        if (!e.ctrlKey && !e.altKey && (e.key === "j" || e.key === "k")) {
+          e.preventDefault();
+          move(e.key === "j" ? 1 : -1);
+          return;
+        }
+        dispatchKey("minibuffer", e, KEYMAP.minibuffer, handlers);
+      }}
+    >
+      <div className="mb-line">
+        <span className="mb-count">{results.length}</span>
+        <span className="mb-prompt">{title}</span>
+        <span className="mb-hint">RET go · C-g quit</span>
+      </div>
+      <div className="mb-list" role="listbox" aria-label={title}>
+        {results.length === 0 ? (
+          <div className="mb-empty">no results</div>
+        ) : (
+          results.map((r, idx) => (
+            <Fragment key={`${r.file}:${r.line}:${r.col}`}>
+              {hasUnproven && idx === 0 && r.confirmed && (
+                <div className="xref-group">confirmed</div>
+              )}
+              {idx === firstUnproven && (
+                <div className="xref-group is-unconfirmed">
+                  unconfirmed — same name, couldn't be proven
                 </div>
-              </Fragment>
-            ))
-          )}
-        </div>
-        <div className="neo-footer">
-          <span>↑↓ move · ↵ go · Esc close</span>
-        </div>
+              )}
+              <div
+                role="option"
+                aria-selected={idx === selected}
+                ref={(el) => {
+                  if (el && idx === selected) el.scrollIntoView({ block: "nearest" });
+                }}
+                className={`xref-row ${idx === selected ? "is-selected" : ""} ${
+                  r.confirmed ? "" : "is-unconfirmed"
+                }`}
+                onMouseEnter={() => setSelected(idx)}
+                onClick={() => choose(idx)}
+              >
+                <span className={`xref-kind kind-${r.kind}`}>
+                  {r.kind === "definition" ? "def" : "ref"}
+                </span>
+                <span className="xref-name">
+                  {splitPath(r.file)[1]}:{r.line}
+                </span>
+                <span className="xref-dir" title={r.file}>
+                  <bdi>{splitPath(r.file)[0]}</bdi>
+                </span>
+                <span className="xref-snippet">{r.snippet.trim()}</span>
+              </div>
+            </Fragment>
+          ))
+        )}
       </div>
     </div>
   );
