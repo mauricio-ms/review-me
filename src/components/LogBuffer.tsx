@@ -60,7 +60,10 @@ function ReviewBadges({ review }: { review: CommitReview | undefined }) {
 /** A ref decoration; the branch under review is boxed, as magit boxes the current one. */
 function RefLabel({ decoration, current }: { decoration: Decoration; current: boolean }) {
   return (
-    <span className={`log-ref is-${decoration.kind}${current ? " is-current" : ""}`}>
+    <span
+      className={`log-ref is-${decoration.kind}${current ? " is-current" : ""}`}
+      title={decoration.name}
+    >
       {decoration.name}
     </span>
   );

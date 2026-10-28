@@ -385,6 +385,11 @@ kbd {
 
 .status-branch {
   color: var(--accent-teal);
+  flex: 0 10 auto;
+  /* …but stay recognizable. */
+  min-width: 10ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Branch comparison mode: a different colour so the reviewer can never mistake
@@ -398,12 +403,38 @@ kbd {
    comparison and the commit picker. */
 .status-review-branch {
   color: var(--fg-2);
+  /* Branch names give way long before the file name at the right edge does. */
+  flex: 0 20 auto;
+  /* …but stay recognizable. */
+  min-width: 10ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Reviewing a branch that isn't the one on disk: worth flagging, since the
    working-tree diff still belongs to the real checkout. */
 .status-review-branch.is-elsewhere {
   color: var(--accent-amber);
+}
+
+.status-repo {
+  color: var(--fg-0);
+  font-weight: 600;
+}
+
+/* The file under the cursor, right-aligned; its folders give way first. */
+.status-here {
+  margin-left: auto;
+  flex: 0 1 auto;
+  min-width: 0;
+  display: inline-flex;
+  overflow: hidden;
+  color: var(--fg-0);
+}
+
+.status-line {
+  flex: none;
+  color: var(--fg-faint);
 }
 
 .status-changes {
@@ -438,7 +469,9 @@ kbd {
 .diff-header {
   display: flex;
   align-items: center;
-  gap: 14px;
+  flex-wrap: wrap;
+  column-gap: 14px;
+  row-gap: 2px;
   padding: 8px 14px;
   border-bottom: 1px solid var(--bg-3);
   font-size: var(--fs-ui);
@@ -603,6 +636,8 @@ kbd {
 
 .diff-file-row {
   gap: 8px;
+  /* A long path wraps; the marks and the stat stay beside its first line. */
+  align-items: baseline;
   padding: 4px 14px;
   margin-top: 6px;
   color: var(--fg-0);
@@ -639,8 +674,6 @@ kbd {
 .diff-file-path {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .diff-staged-dot {
@@ -652,6 +685,7 @@ kbd {
   color: var(--fg-faint);
   font-size: var(--fs-ui);
   font-weight: 400;
+  white-space: nowrap;
 }
 
 .stat-add {
@@ -858,6 +892,9 @@ kbd {
 .log-ref {
   flex: 0 0 auto;
   padding: 0 4px;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
   border-radius: 2px;
 }
 
@@ -1017,7 +1054,9 @@ kbd {
 .project-viewer-path {
   display: flex;
   align-items: baseline;
-  gap: 8px;
+  flex-wrap: wrap;
+  column-gap: 12px;
+  row-gap: 2px;
   padding: 6px 12px;
   border-bottom: 1px solid var(--bg-3);
   background: var(--bg-1);
@@ -1027,9 +1066,12 @@ kbd {
 }
 
 .project-viewer-file {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  min-width: 0;
+}
+
+.project-viewer-file .path-base {
+  color: var(--fg-0);
+  font-weight: 600;
 }
 
 /* Shown only when the viewer is reading a commit — never let a branch review look
@@ -1170,13 +1212,25 @@ kbd {
 }
 
 .neo-row.fz-row {
-  grid-template-columns: 24px minmax(0, 1fr);
+  grid-template-columns: 24px minmax(0, 34ch) minmax(0, 1fr);
 }
 
-.fz-path {
+.fz-name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* The folders, after the name, cut from the left: `…/library/service/`. */
+.fz-dir {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+  color: var(--fg-dim);
+  font-size: var(--fs-ui);
 }
 
 .fz-hit {
@@ -1362,7 +1416,22 @@ kbd {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
   color: var(--accent-blue);
+}
+
+.xref-name {
+  flex: none;
+}
+
+.xref-dir {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+  color: var(--fg-dim);
 }
 
 .xref-kind {
@@ -1609,6 +1678,12 @@ kbd {
   white-space: nowrap;
 }
 
+/* A long path keeps its end — the folder that names it — and loses its start. */
+.neo-detail.is-path {
+  direction: rtl;
+  text-align: left;
+}
+
 .neo-detail.is-repo {
   color: var(--accent-amber);
 }
@@ -1694,9 +1769,11 @@ kbd {
   padding: 34px 20px 0;
   color: var(--fg-2);
   font-size: var(--fs-ui);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
+}
+
+.note-target .path-base {
+  color: var(--fg-0);
 }
 
 .note-editor .note-editor-shell {
@@ -2072,4 +2149,45 @@ kbd {
 
 .help-empty {
   color: var(--fg-2);
+}
+
+/* ---------- paths (components/PathLabel.tsx) ---------- */
+
+.path-dir {
+  color: var(--fg-dim);
+  font-weight: 400;
+}
+
+.path-arrow {
+  color: var(--accent-teal);
+}
+
+/* Where a path is read: it wraps, between folders first (each `/` has a <wbr>). */
+.path.is-wrap {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/* One line: the folders shrink from the left long before the name gives way. */
+.path.is-elide {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+
+.path.is-elide .path-dir {
+  flex: 0 1000 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: left;
+}
+
+/* The name never shrinks — even a fraction of a pixel would put an ellipsis in it. */
+.path.is-elide .path-base {
+  flex: none;
 }

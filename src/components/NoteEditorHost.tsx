@@ -14,6 +14,7 @@ import { KEYMAP, type EditorAction } from "../lib/keymap";
 import { saveNote } from "../lib/review-actions";
 import { useNotesStore, type NoteEdit } from "../state/notes";
 import { useUIStore } from "../state/ui";
+import PathLabel from "./PathLabel";
 import { useModalFocus } from "./useModalFocus";
 
 const HINT = "C-c C-c save & close · C-c C-k discard · :w save · :wq / :q! from vim";
@@ -36,12 +37,12 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** `src/Foo.java · lines 40–52`, naming the old side when the lines were removed. */
-function targetLabel(target: DiffTarget): string {
-  if (target.side === "file") return `${target.file} · whole file`;
+/** `lines 40–52`, naming the old side when the lines were removed. */
+function linesLabel(target: DiffTarget): string {
+  if (target.side === "file") return "whole file";
   const lines =
     target.lo === target.hi ? `line ${target.lo}` : `lines ${target.lo}–${target.hi}`;
-  return `${target.file} · ${lines}${target.side === "old" ? " (removed)" : ""}`;
+  return `${lines}${target.side === "old" ? " (removed)" : ""}`;
 }
 
 /**
@@ -178,7 +179,7 @@ function NoteEditor({
       >
         <div className="neo-title">Note</div>
         <div className="note-target">
-          {targetLabel(edit.target)}
+          <PathLabel path={edit.target.file} /> · {linesLabel(edit.target)}
           {edit.flagId ? "" : " · saving flags these lines"}
         </div>
         <div className="commit-editor-shell note-editor-shell">

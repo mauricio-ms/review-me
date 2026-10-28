@@ -14,12 +14,13 @@ const LIMIT = 60;
 
 const EMPTY_FILES: ChangedFile[] = [];
 
-/** Render a path with the fuzzy-matched characters emphasized. */
-function highlight(path: string, indices: number[]) {
-  if (indices.length === 0) return path;
-  const hit = new Set(indices);
-  return [...path].map((ch, i) =>
-    hit.has(i) ? (
+/**
+ * `text` — the slice of a path starting at character `offset` — with the fuzzy-matched
+ * characters emphasized (`hit` holds indices into the whole path).
+ */
+function highlight(text: string, offset: number, hit: Set<number>) {
+  return [...text].map((ch, i) =>
+    hit.has(offset + i) ? (
       <b key={i} className="fz-hit">
         {ch}
       </b>
@@ -109,13 +110,23 @@ export default function FuzzyFinderHost() {
       footer="↑↓ move · ↵ open · Esc cancel"
       emptyText={only && only.length === 0 ? "nothing changed here" : "no matching files"}
       renderRow={(row) => {
-        const icon = fileIcon(row.path.split("/").pop() ?? row.path, false);
+        // The file name first — it's what you're matching — then its folders, shortened
+        // from the left when they don't fit, so the name is never what gets cut.
+        const cut = [...row.path.slice(0, row.path.lastIndexOf("/") + 1)].length;
+        const chars = [...row.path];
+        const name = chars.slice(cut).join("");
+        const dir = chars.slice(0, cut).join("");
+        const hit = new Set(row.indices);
+        const icon = fileIcon(name, false);
         return (
           <>
             <span className="neo-icon" style={{ color: icon.color }}>
               {icon.glyph}
             </span>
-            <span className="fz-path">{highlight(row.path, row.indices)}</span>
+            <span className="fz-name">{highlight(name, cut, hit)}</span>
+            <span className="fz-dir" title={row.path}>
+              <bdi>{highlight(dir, 0, hit)}</bdi>
+            </span>
           </>
         );
       }}

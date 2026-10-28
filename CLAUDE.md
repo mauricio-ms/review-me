@@ -91,6 +91,16 @@ line, headers, gutters, annotations), `--fs-sm` (0.75×) for section labels and 
 Nothing is bigger than the code. Dim text is `--fg-faint` (≥4.5:1 on `--bg-0`/`--bg-deep`)
 or `--fg-dim` (also on `--bg-1`: the tree, headers, pickers); `--fg-3` is 2:1, for rules.
 
+**Paths** are what a reviewer reads, and the file name is the part that matters, so a
+path is never cut on the right. `components/PathLabel.tsx` draws one with the folders
+dimmed and the name bright: `wrap` (diff rows, the viewer header, the note editor) breaks
+between folders (`<wbr>` after each `/`); `elide` (the mode line) keeps the name whole and
+shortens the folders from the left (`direction: rtl` + `<bdi>`). Renames are written
+git-style, `src/{model/Item.java → catalog/CatalogItem.java}` (`renameParts`). Lists that
+need their own markup follow the same rule: the finder and xref put the name first and
+left-elide the folders. The mode line names the file under the cursor (`useUIStore
+.diffCursor`, or the viewer's open file), and its branch labels give way before it does.
+
 Modal pickers (open-repo, recent, fuzzy, checkout-branch, branch-compare, commit-pick,
 xref) and the modal editors (commit message, note) are gated by `useUIStore.picker` or a
 dedicated store and use `useModalFocus`.

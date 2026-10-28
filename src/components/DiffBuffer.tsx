@@ -32,6 +32,7 @@ import {
 } from "../lib/review-actions";
 import { refineHunk, type WordSeg } from "../lib/word-diff";
 import DiffCleanState from "./DiffCleanState";
+import PathLabel from "./PathLabel";
 import { useNotesStore } from "../state/notes";
 import { useRepoStore } from "../state/repo";
 import { useTagsStore } from "../state/tags";
@@ -428,6 +429,17 @@ export default function DiffBuffer() {
   const cursorScrollTarget = useRef<string | null>(null);
   const cursorScrollMeasured = useRef(false);
   currentCursorKey.current = rows[cursor]?.key ?? null;
+
+  // The mode line names the file (and line) under the cursor: the full path, which the
+  // rows above it may have scrolled away.
+  const cursorRow = rows[cursor];
+  const cursorFile = cursorRow && cursorRow.kind !== "section" ? cursorRow.file.path : null;
+  const cursorLine =
+    cursorRow?.kind === "line" ? (cursorRow.line.newLine ?? cursorRow.line.oldLine) : null;
+  const setDiffCursor = useUIStore((s) => s.setDiffCursor);
+  useEffect(() => {
+    setDiffCursor(cursorFile ? { path: cursorFile, line: cursorLine } : null);
+  }, [cursorFile, cursorLine, setDiffCursor]);
 
   const cacheRenderedRowHeights = () => {
     rowElements.current.forEach((element, key) => {
@@ -1046,9 +1058,7 @@ export default function DiffBuffer() {
                   {fileIgnored && <span className="mark-ignored">⊘</span>}
                 </span>
                 <span className="diff-status-glyph">{STATUS_GLYPH[f.status]}</span>
-                <span className="diff-file-path">
-                  {f.oldPath ? `${f.oldPath} → ${f.path}` : f.path}
-                </span>
+                <PathLabel className="diff-file-path" path={f.path} oldPath={f.oldPath} />
                 {fileNotes > 0 && (
                   <span className="diff-file-notes" title={`${fileNotes} with a note`}>
                     ✎ {fileNotes}

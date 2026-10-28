@@ -19,6 +19,9 @@ export type PickerKind =
   | "commitPick"
   | "checkoutBranch";
 
+/** The file (and line) under the diff buffer's cursor, for the mode line. */
+export type CursorPath = { path: string; line: number | null };
+
 /** What the help buffer shows: everything (`C-h b`) or one keymap (`C-h m`). */
 export type HelpView = {
   /** The keymap that was active when help opened; listed first. */
@@ -41,6 +44,7 @@ type UIState = {
   flash: string | null;
   /** A half-typed key sequence (`C-x-`) or `C-h k`'s prompt, for the echo area. */
   keyEcho: string | null;
+  diffCursor: CursorPath | null;
 
   setActiveBuffer: (b: BufferName) => void;
   openHelp: (from: KeyScope, only: boolean) => void;
@@ -54,6 +58,7 @@ type UIState = {
   toggleDiffHighlight: () => void;
   showFlash: (message: string) => void;
   setKeyEcho: (echo: string | null) => void;
+  setDiffCursor: (cursor: CursorPath | null) => void;
 };
 
 /** How long an echo-area message stays up. */
@@ -71,6 +76,7 @@ export const useUIStore = create<UIState>((set) => ({
   diffHighlight: "word",
   flash: null,
   keyEcho: null,
+  diffCursor: null,
 
   setActiveBuffer: (b) =>
     set((s) =>
@@ -102,4 +108,10 @@ export const useUIStore = create<UIState>((set) => ({
     set({ flash: message });
   },
   setKeyEcho: (echo) => set({ keyEcho: echo }),
+  setDiffCursor: (cursor) =>
+    set((s) =>
+      s.diffCursor?.path === cursor?.path && s.diffCursor?.line === cursor?.line
+        ? {}
+        : { diffCursor: cursor },
+    ),
 }));

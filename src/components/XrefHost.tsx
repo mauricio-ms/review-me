@@ -3,6 +3,7 @@ import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { navigateTo } from "../lib/xref";
 import { useUIStore } from "../state/ui";
 import { useXrefStore } from "../state/xref";
+import { splitPath } from "./PathLabel";
 import { useModalFocus } from "./useModalFocus";
 
 export default function XrefHost() {
@@ -103,7 +104,12 @@ export default function XrefHost() {
                     <span className={`xref-kind kind-${r.kind}`}>
                       {r.kind === "definition" ? "def" : "ref"}
                     </span>
-                    {r.file}:{r.line}
+                    <span className="xref-name">
+                      {splitPath(r.file)[1]}:{r.line}
+                    </span>
+                    <span className="xref-dir" title={r.file}>
+                      <bdi>{splitPath(r.file)[0]}</bdi>
+                    </span>
                   </span>
                   <span className="xref-snippet">{r.snippet}</span>
                 </div>

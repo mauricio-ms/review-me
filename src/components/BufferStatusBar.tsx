@@ -1,9 +1,11 @@
 import { reviewProgress } from "../lib/coverage";
 import { timeAgo } from "../lib/time";
+import { useProjectStore } from "../state/project";
 import { useRepoStore } from "../state/repo";
 import { useTagsStore } from "../state/tags";
 import { useUIStore } from "../state/ui";
 import { comparisonLabel, shortOid, type Comparison } from "../types/diff";
+import PathLabel from "./PathLabel";
 
 /** Worktree, branch pair, single commit — each comparison mode gets its own mark. */
 function comparisonGlyph(comparison: Comparison | undefined): string {
@@ -48,8 +50,18 @@ export default function BufferStatusBar() {
   const ignored = useTagsStore((s) => s.ignored);
   const activeBuffer = useUIStore((s) => s.activeBuffer);
   const vimMode = useUIStore((s) => s.vimMode);
+  const diffCursor = useUIStore((s) => s.diffCursor);
+  const openPath = useProjectStore((s) => s.openPath);
 
   const files = diff?.files ?? [];
+  // The file you're on, named in full at the right edge, as Emacs's mode line names the
+  // buffer: the diff's cursor row, or the viewer's open file.
+  const here =
+    activeBuffer === "diff" && diffCursor
+      ? diffCursor
+      : activeBuffer === "project" && openPath
+        ? { path: openPath, line: null }
+        : null;
   const { done, total } = reviewProgress(files, reviewed);
 
   return (
@@ -58,6 +70,9 @@ export default function BufferStatusBar() {
       <span className="status-segment status-buffer">{activeBuffer}</span>
       {repo && (
         <>
+          <span className="status-segment status-repo" title={repo.root}>
+            {repo.root.split("/").filter(Boolean).pop() ?? repo.root}
+          </span>
           {reviewBranch && (
             <span
               className={`status-segment status-review-branch${
@@ -100,6 +115,12 @@ export default function BufferStatusBar() {
             </span>
           )}
         </>
+      )}
+      {here && (
+        <span className="status-segment status-here">
+          <PathLabel path={here.path} mode="elide" />
+          {here.line != null && <span className="status-line">:{here.line}</span>}
+        </span>
       )}
     </div>
   );

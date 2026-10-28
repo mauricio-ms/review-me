@@ -111,7 +111,9 @@ export default function RecentReposHost() {
             {repoGlyph}
           </span>
           <span className="neo-name">{repo.name}</span>
-          <span className="neo-detail">{repo.path}</span>
+          <span className="neo-detail is-path" title={repo.path}>
+            <bdi>{repo.path}</bdi>
+          </span>
         </>
       )}
     />

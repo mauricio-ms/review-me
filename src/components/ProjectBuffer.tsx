@@ -34,6 +34,7 @@ import { useTagsStore } from "../state/tags";
 import { useUIStore, type VimMode } from "../state/ui";
 import type { ChangedFile } from "../types/diff";
 import type { TreeEntry } from "../types/repo";
+import PathLabel from "./PathLabel";
 
 /** A tree row; `change` is set on the files of the changed-files view. */
 type Node = { entry: TreeEntry; depth: number; change?: ChangedFile };
@@ -419,7 +420,7 @@ export default function ProjectBuffer() {
         ) : (
           <>
             <div className="project-viewer-path">
-              <span className="project-viewer-file">{openPath}</span>
+              <PathLabel className="project-viewer-file" path={openPath ?? ""} />
               {openChange && (
                 <span
                   className="project-viewer-change"
