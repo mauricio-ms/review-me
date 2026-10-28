@@ -1,8 +1,8 @@
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 
-import { useProjectStore } from "../state/project";
 import { useRepoStore } from "../state/repo";
 import { useUIStore } from "../state/ui";
+import { isFileKey, selectedBuffer, useWindowStore } from "../state/windows";
 import type { KeyBinding, KeyScope } from "./keymap";
 
 /**
@@ -191,13 +191,12 @@ export function settle(
 
 /** Which buffer-level keymap applies right now, for `C-h m`, `C-h k`, and M-x. */
 export function contextScope(): KeyScope {
-  const { activeBuffer } = useUIStore.getState();
-  if (activeBuffer === "help") return "help";
+  const ws = useWindowStore.getState();
+  const key = selectedBuffer(ws);
+  if (key === "help" && !ws.treeFocused) return "help";
   if (!useRepoStore.getState().repo) return "start";
-  if (activeBuffer === "project") {
-    return useProjectStore.getState().pane === "viewer" ? "viewer" : "tree";
-  }
-  return activeBuffer;
+  if (ws.treeFocused) return "tree";
+  return isFileKey(key) ? "viewer" : key;
 }
 
 // ---------- repeat maps ----------

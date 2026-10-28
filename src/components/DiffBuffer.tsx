@@ -22,7 +22,6 @@ import { KEYMAP, type DiffAction } from "../lib/keymap";
 import { flagTarget, hasNote, openNoteFor } from "../lib/notes";
 import { leaveHistory } from "../lib/open-repo";
 import { openFileFromDiff } from "../lib/project";
-import { setProjectCursor } from "../lib/project-view";
 import {
   addFlag,
   addIgnore,
@@ -37,6 +36,7 @@ import { useNotesStore } from "../state/notes";
 import { useRepoStore } from "../state/repo";
 import { useTagsStore } from "../state/tags";
 import { useUIStore } from "../state/ui";
+import { hasKeyboard, isShown, useWindowStore } from "../state/windows";
 import {
   comparisonLabel,
   shortOid,
@@ -345,7 +345,9 @@ export default function DiffBuffer() {
   const reviewed = useTagsStore((s) => s.reviewed);
   const flags = useTagsStore((s) => s.flags);
   const ignored = useTagsStore((s) => s.ignored);
-  const activeBuffer = useUIStore((s) => s.activeBuffer);
+  // Whether a window shows this buffer, and whether that window has the keyboard.
+  const visible = useWindowStore((s) => isShown(s, "diff"));
+  const focused = useWindowStore((s) => hasKeyboard(s, "diff"));
   const focusRequest = useUIStore((s) => s.focusRequest);
   const diffHighlight = useUIStore((s) => s.diffHighlight);
 
@@ -469,7 +471,7 @@ export default function DiffBuffer() {
         const key = element.dataset.rowKey;
         if (!key) continue;
         const height = measuredRowHeight(element);
-        // AppShell keeps this buffer mounted under display:none in project mode.
+        // This buffer stays mounted while no window shows it, detached at zero size.
         // Ignore those zero-size observations so they cannot poison scroll offsets.
         if (height <= 0) continue;
         const previous = rowHeights.current.get(key);
@@ -525,8 +527,8 @@ export default function DiffBuffer() {
     if (!element) return;
     let lastWidth = element.clientWidth;
     const syncViewport = () => {
-      // Hidden under display:none (project mode): keep the last window rendered so
-      // coming back shows the same rows rather than re-rendering from the top.
+      // Detached (no window shows it): keep the last rows rendered so coming back
+      // shows the same rows rather than re-rendering from the top.
       if (element.clientHeight <= 0) return;
       setViewport((current) => {
         const next = { top: element.scrollTop, height: element.clientHeight };
@@ -579,8 +581,8 @@ export default function DiffBuffer() {
   }, [comparisonEpoch]);
 
   useEffect(() => {
-    if (activeBuffer === "diff") rootRef.current?.focus({ preventScroll: true });
-  }, [activeBuffer, focusRequest]);
+    if (focused) rootRef.current?.focus({ preventScroll: true });
+  }, [focused, focusRequest]);
 
   useLayoutEffect(() => {
     const cursorChanged = previousCursor.current !== cursor;
@@ -595,7 +597,7 @@ export default function DiffBuffer() {
     }
     const element = listRef.current;
     const row = rows[cursor];
-    if (activeBuffer !== "diff" || !element || element.clientHeight <= 0 || !row) {
+    if (!visible || !element || element.clientHeight <= 0 || !row) {
       cursorScrollTarget.current = null;
       cursorScrollMeasured.current = false;
       return;
@@ -626,7 +628,7 @@ export default function DiffBuffer() {
       cursorScrollTarget.current = null;
       cursorScrollMeasured.current = false;
     }
-  }, [activeBuffer, cursor, rowOffsets, rows]);
+  }, [cursor, rowOffsets, rows, visible]);
 
   const selectionRange = (): [number, number] =>
     visualAnchor == null
@@ -821,21 +823,17 @@ export default function DiffBuffer() {
     if (idx >= 0) setCursor(idx);
   };
 
-  // Open the file under the cursor in project mode, positioned at the line the
-  // cursor maps to (line → that line, hunk → its start, file → first change). The
-  // scope's side also picks the revision: old-side content (a deletion) only exists
-  // in the base, so opening it must not fall back to the working tree.
+  // Open the file under the cursor as a buffer, at the line the cursor maps to (line →
+  // that line, hunk → its start, file → first change). The scope's side also picks the
+  // revision: old-side content (a deletion) only exists in the base, so opening it
+  // must not fall back to the working tree.
   const openAtCursor = () => {
     const row = rows[cursor];
     if (!row || row.kind === "section") return;
     const scope = cursorScope();
     const line = scope ? scope.lo : 1;
     const side = scope?.side === "old" ? "old" : "new";
-    void openFileFromDiff(row.file.path, side).then(() => {
-      requestAnimationFrame(() =>
-        requestAnimationFrame(() => setProjectCursor(line)),
-      );
-    });
+    openFileFromDiff(row.file.path, side, line);
   };
 
   const jumpTo = (predicate: (r: Row) => boolean, dir: 1 | -1) => {

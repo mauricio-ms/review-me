@@ -1,11 +1,26 @@
-import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 
+import { bufferNames, openHelp, showBuffer } from "../lib/buffers";
 import { contextScope, dispatchKey, type KeyHandler } from "../lib/key-dispatch";
 import { commandKeys, KEYMAP, type MinibufferAction } from "../lib/keymap";
 import { showLog } from "../lib/log";
+import { useFilesStore } from "../state/files";
 import { useMinibufferStore, type MinibufferRequest } from "../state/minibuffer";
 import { useRepoStore } from "../state/repo";
-import { useUIStore, type BufferName, type PickerKind } from "../state/ui";
+import { useUIStore, type PickerKind } from "../state/ui";
+import {
+  isFileKey,
+  selectedBuffer,
+  useWindowStore,
+  type BufferKey,
+} from "../state/windows";
 import { useXrefStore } from "../state/xref";
 import { type CommandClose, useCommands } from "./useCommands";
 import { useModalFocus } from "./useModalFocus";
@@ -88,14 +103,22 @@ function highlight(text: string, query: string): ReactNode {
   );
 }
 
-const BUFFER_ORDER: BufferName[] = ["diff", "log", "project", "help"];
+/** The buffers that always exist, after whatever was shown most recently. */
+const STANDING: BufferKey[] = ["diff", "log", "help"];
+
+/** The name column's width for a list of buffers: the longest name, 16 to 48ch. */
+function nameWidth(candidates: Candidate[] | null): number {
+  const longest = Math.max(0, ...(candidates ?? []).map((c) => [...c.name].length));
+  return Math.min(48, Math.max(16, longest + 1));
+}
 
 function Prompt({ request }: { request: MinibufferRequest }) {
   const closeMinibuffer = useMinibufferStore((s) => s.close);
   const requestFocus = useUIStore((s) => s.requestFocus);
   const showFlash = useUIStore((s) => s.showFlash);
-  const activeBuffer = useUIStore((s) => s.activeBuffer);
-  const previousBuffer = useUIStore((s) => s.previousBuffer);
+  const shownBuffer = useWindowStore(selectedBuffer);
+  const recent = useWindowStore((s) => s.recent);
+  const fileBuffers = useFilesStore((s) => s.buffers);
   const reviewBranch = useRepoStore((s) => s.reviewBranch);
 
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -134,45 +157,50 @@ function Prompt({ request }: { request: MinibufferRequest }) {
       });
     }
     if (request.kind === "buffer") {
-      const label: Record<BufferName, string> = {
+      const label = {
         diff: "the changes under review",
         log: `commits on ${reviewBranch?.display ?? "HEAD"}`,
-        project: "the files of the revision under review",
         help: "every key binding and command",
       };
-      // The buffer you came from first: RET alone goes back to it, as in Emacs.
+      const files = new Map(fileBuffers.map((b) => [b.id, b]));
+      const names = bufferNames(fileBuffers);
+      // Most recently shown first, so RET alone goes back to the buffer you came from,
+      // as in Emacs; then the rest, open files last.
       const order = [
-        previousBuffer,
-        ...BUFFER_ORDER.filter((b) => b !== previousBuffer),
-      ].filter((b) => b !== activeBuffer);
-      return order.map((buffer) => ({
-        id: buffer,
-        name: buffer,
-        aliases: buffer === "log" ? ["commits"] : [],
-        key: null,
-        label: label[buffer],
-        enabled: true,
-        run: () => {
-          close({ restoreFocus: false });
-          const ui = useUIStore.getState();
-          if (buffer === "log") showLog();
-          else if (buffer === "help") ui.openHelp(scope, false);
-          else {
-            ui.setActiveBuffer(buffer);
-            ui.requestFocus();
-          }
-        },
-      }));
+        ...new Set<BufferKey>([...recent, ...STANDING, ...fileBuffers.map((b) => b.id)]),
+      ].filter((key) => key !== shownBuffer && (!isFileKey(key) || files.has(key)));
+      return order.map((key) => {
+        const file = isFileKey(key) ? files.get(key) : undefined;
+        return {
+          id: key,
+          name: file ? (names.get(file.id) ?? file.path) : key,
+          aliases: key === "log" ? ["commits"] : [],
+          key: null,
+          // A file's whole path (typing any folder of it narrows to it), and the
+          // revision when it isn't the working tree.
+          label: file
+            ? `${file.path}${file.sourceLabel ? ` @ ${file.sourceLabel}` : ""}`
+            : label[key as keyof typeof label],
+          enabled: true,
+          run: () => {
+            close({ restoreFocus: false });
+            if (key === "log") showLog();
+            else if (key === "help") openHelp(scope, false);
+            else showBuffer(key);
+          },
+        };
+      });
     }
     return null;
   }, [
-    activeBuffer,
     close,
     commands,
-    previousBuffer,
+    fileBuffers,
+    recent,
     request.kind,
     reviewBranch,
     scope,
+    shownBuffer,
     showFlash,
   ]);
 
@@ -290,7 +318,18 @@ function Prompt({ request }: { request: MinibufferRequest }) {
         />
       </div>
       {rows && (
-        <div className="mb-list" role="listbox" aria-label="Candidates">
+        <div
+          className={`mb-list${request.kind === "buffer" ? " is-buffers" : ""}`}
+          role="listbox"
+          aria-label="Candidates"
+          // Buffer names are file names, which are never cut: the column fits the
+          // longest one (within reason).
+          style={
+            request.kind === "buffer"
+              ? ({ "--mb-name-width": `${nameWidth(candidates)}ch` } as CSSProperties)
+              : undefined
+          }
+        >
           {rows.length === 0 ? (
             <div className="mb-empty">[No match]</div>
           ) : (

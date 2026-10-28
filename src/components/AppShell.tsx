@@ -1,5 +1,6 @@
 import { EditorView } from "@codemirror/view";
 import { useCallback, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 
 import { inVimInsertMode } from "../editor/cm-shared";
 import {
@@ -14,8 +15,10 @@ import {
 } from "../lib/key-dispatch";
 import { KEYMAP, type GlobalAction, type KeyBinding } from "../lib/keymap";
 import { useMinibufferStore } from "../state/minibuffer";
+import { useProjectStore } from "../state/project";
 import { useRepoStore } from "../state/repo";
 import { useUIStore } from "../state/ui";
+import { activeBuffer as activeBufferOf, selectedBuffer, useWindowStore } from "../state/windows";
 import BranchCompareHost from "./BranchCompareHost";
 import BufferStatusBar from "./BufferStatusBar";
 import CheckoutBranchHost from "./CheckoutBranchHost";
@@ -29,10 +32,11 @@ import LogBuffer from "./LogBuffer";
 import Minibuffer from "./Minibuffer";
 import NoteEditorHost from "./NoteEditorHost";
 import OpenRepoHost from "./OpenRepoHost";
-import ProjectBuffer from "./ProjectBuffer";
+import ProjectTree from "./ProjectTree";
 import RecentReposHost from "./RecentReposHost";
 import StartupDashboard from "./StartupDashboard";
 import { type CommandClose, type CommandId, useCommands } from "./useCommands";
+import Window, { bufferHost } from "./Window";
 import XrefHost from "./XrefHost";
 
 /** Where typed characters are text: a field, or a CodeMirror editor in insert mode. */
@@ -122,11 +126,25 @@ function GlobalKeys() {
   return null;
 }
 
+/** The windows, with the file tree beside them unless it's hidden. */
+function Frame() {
+  const treeHidden = useProjectStore((s) => s.treeHidden);
+  const layout = useWindowStore((s) => s.layout);
+  return (
+    <div className="frame">
+      {!treeHidden && <ProjectTree />}
+      <div className="windows">
+        <Window id={layout.id} />
+      </div>
+    </div>
+  );
+}
+
 export default function AppShell() {
-  const activeBuffer = useUIStore((s) => s.activeBuffer);
+  const activeBuffer = useWindowStore(activeBufferOf);
+  const showHelp = useWindowStore((s) => selectedBuffer(s) === "help");
   const vimMode = useUIStore((s) => s.vimMode);
   const hasRepo = !!useRepoStore((s) => s.repo);
-  const showHelp = activeBuffer === "help";
 
   return (
     <div
@@ -139,38 +157,20 @@ export default function AppShell() {
       <GlobalKeys />
       <div className="app-body">
         {hasRepo ? (
-          <>
-            {/* Every buffer stays mounted; only one is visible, preserving each
-                buffer's cursor/scroll across switches — which is also how leaving a
-                commit lands back on its row in the log. */}
-            <div
-              className="buffer-wrap"
-              style={{ display: activeBuffer === "diff" ? "block" : "none" }}
-            >
-              <DiffBuffer />
-            </div>
-            <div
-              className="buffer-wrap"
-              style={{ display: activeBuffer === "log" ? "block" : "none" }}
-            >
-              <LogBuffer />
-            </div>
-            <div
-              className="buffer-wrap"
-              style={{ display: activeBuffer === "project" ? "block" : "none" }}
-            >
-              <ProjectBuffer />
-            </div>
-          </>
-        ) : (
-          !showHelp && <StartupDashboard />
-        )}
-        {showHelp && (
+          <Frame />
+        ) : showHelp ? (
           <div className="buffer-wrap">
             <HelpBuffer />
           </div>
+        ) : (
+          <StartupDashboard />
         )}
       </div>
+      {/* Mounted once for as long as a repo is open, and moved into whichever window
+          shows them (see Window.tsx) — which is also how leaving a commit lands back
+          on its row in the log. */}
+      {hasRepo && createPortal(<DiffBuffer />, bufferHost("diff"))}
+      {hasRepo && createPortal(<LogBuffer />, bufferHost("log"))}
       {hasRepo && <BufferStatusBar />}
       <Minibuffer />
       <OpenRepoHost />

@@ -1,9 +1,10 @@
+import { useCurrentFile } from "../lib/buffers";
 import { reviewProgress } from "../lib/coverage";
 import { timeAgo } from "../lib/time";
-import { useProjectStore } from "../state/project";
 import { useRepoStore } from "../state/repo";
 import { useTagsStore } from "../state/tags";
 import { useUIStore } from "../state/ui";
+import { isFileKey, selectedBuffer, useWindowStore } from "../state/windows";
 import { comparisonLabel, shortOid, type Comparison } from "../types/diff";
 import PathLabel from "./PathLabel";
 
@@ -48,26 +49,29 @@ export default function BufferStatusBar() {
   const reviewed = useTagsStore((s) => s.reviewed);
   const flags = useTagsStore((s) => s.flags);
   const ignored = useTagsStore((s) => s.ignored);
-  const activeBuffer = useUIStore((s) => s.activeBuffer);
+  // The mode line describes the selected window (the tree being only a way into it).
+  const shown = useWindowStore(selectedBuffer);
+  const treeFocused = useWindowStore((s) => s.treeFocused);
   const vimMode = useUIStore((s) => s.vimMode);
   const diffCursor = useUIStore((s) => s.diffCursor);
-  const openPath = useProjectStore((s) => s.openPath);
+  const file = useCurrentFile();
 
   const files = diff?.files ?? [];
   // The file you're on, named in full at the right edge, as Emacs's mode line names the
-  // buffer: the diff's cursor row, or the viewer's open file.
+  // buffer: the diff's cursor row, or the window's file.
   const here =
-    activeBuffer === "diff" && diffCursor
+    shown === "diff" && diffCursor
       ? diffCursor
-      : activeBuffer === "project" && openPath
-        ? { path: openPath, line: null }
+      : file
+        ? { path: file.path, line: null }
         : null;
+  const bufferLabel = treeFocused ? "tree" : isFileKey(shown) ? "file" : shown;
   const { done, total } = reviewProgress(files, reviewed);
 
   return (
     <div className="status-bar">
       <span className="status-segment status-mode">{vimMode}</span>
-      <span className="status-segment status-buffer">{activeBuffer}</span>
+      <span className="status-segment status-buffer">{bufferLabel}</span>
       {repo && (
         <>
           <span className="status-segment status-repo" title={repo.root}>
@@ -99,7 +103,7 @@ export default function BufferStatusBar() {
           <span className="status-segment status-changes">
             {files.length} changed
           </span>
-          {activeBuffer === "diff" && total > 0 && (
+          {shown === "diff" && total > 0 && (
             <span className="status-segment status-reviewed">
               ✓ {done}/{total} units
             </span>

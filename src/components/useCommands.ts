@@ -1,5 +1,15 @@
 import { useCallback } from "react";
 
+import {
+  currentFile,
+  cycleFileBuffers,
+  focusTree,
+  killCurrentBuffer,
+  openHelp,
+  otherWindow,
+  showBuffer,
+  useCurrentFile,
+} from "../lib/buffers";
 import { contextScope, startDescribeKey } from "../lib/key-dispatch";
 import { showLog } from "../lib/log";
 import { exportNotes, openNoteEditor } from "../lib/notes";
@@ -10,13 +20,15 @@ import { projectSelectionRange } from "../lib/project-view";
 import { addFlag } from "../lib/review-actions";
 import { adjustTextScale } from "../lib/text-scale";
 import { findUsages, gotoDefinition, jumpBack } from "../lib/xref";
+import { useFilesStore } from "../state/files";
 import { useJumpStore } from "../state/jumps";
 import { useLogStore } from "../state/log";
 import { useMinibufferStore } from "../state/minibuffer";
 import { useProjectStore } from "../state/project";
 import { useRepoStore } from "../state/repo";
 import { useTagsStore } from "../state/tags";
-import { useUIStore, type BufferName } from "../state/ui";
+import { useUIStore } from "../state/ui";
+import { activeBuffer as activeBufferOf, useWindowStore, type BufferName } from "../state/windows";
 import { readsCommittedHistory, WORKTREE_SPEC } from "../types/diff";
 
 /** Closes the minibuffer that ran a command (a no-op when a key ran it). */
@@ -48,6 +60,9 @@ export type CommandId =
   | "diff"
   | "project"
   | "switch-buffer"
+  | "kill-buffer"
+  | "previous-buffer"
+  | "next-buffer"
   | "other-window"
   | "help"
   | "describe-mode"
@@ -85,8 +100,7 @@ export function useCommands(close: CommandClose): {
   /** Every command, whatever the buffer — for the help buffer and key dispatch. */
   all: AppCommand[];
 } {
-  const activeBuffer = useUIStore((s) => s.activeBuffer);
-  const setActiveBuffer = useUIStore((s) => s.setActiveBuffer);
+  const activeBuffer = useWindowStore(activeBufferOf);
   const openPicker = useUIStore((s) => s.openPicker);
   const requestFocus = useUIStore((s) => s.requestFocus);
   const repo = useRepoStore((s) => s.repo);
@@ -95,7 +109,7 @@ export function useCommands(close: CommandClose): {
   const closeRepo = useRepoStore((s) => s.closeRepo);
   // A branch pair or a single commit: both sides are already committed history.
   const comparingHistory = readsCommittedHistory(comparison);
-  const openPath = useProjectStore((s) => s.openPath);
+  const openPath = useCurrentFile()?.path ?? null;
   const projectFilter = useProjectStore((s) => s.filter);
   const toggleProjectFilter = useProjectStore((s) => s.toggleFilter);
   const inlineDiff = useProjectStore((s) => s.inlineDiff);
@@ -105,7 +119,6 @@ export function useCommands(close: CommandClose): {
   const jumpDepth = useJumpStore((s) => s.stack.length);
   const diffHighlight = useUIStore((s) => s.diffHighlight);
   const toggleDiffHighlight = useUIStore((s) => s.toggleDiffHighlight);
-  const openHelp = useUIStore((s) => s.openHelp);
   const openMinibuffer = useMinibufferStore((s) => s.open);
 
   const handleOpenRepo = useCallback(() => {
@@ -133,6 +146,8 @@ export function useCommands(close: CommandClose): {
     useTagsStore.getState().clear();
     useLogStore.getState().reset();
     useProjectStore.getState().reset();
+    useFilesStore.getState().reset();
+    useWindowStore.getState().reset();
     requestFocus();
   }, [close, closeRepo, requestFocus]);
 
@@ -203,7 +218,7 @@ export function useCommands(close: CommandClose): {
 
   const handleProjectFlag = useCallback(async () => {
     close({ restoreFocus: false });
-    const path = useProjectStore.getState().openPath;
+    const path = currentFile()?.path;
     const range = projectSelectionRange();
     if (!path || !range) return;
     try {
@@ -246,16 +261,8 @@ export function useCommands(close: CommandClose): {
 
   const handleOtherWindow = useCallback(() => {
     close({ restoreFocus: false });
-    const ps = useProjectStore.getState();
-    // A hidden tree comes back rather than leaving nowhere to go.
-    if (ps.treeHidden) {
-      ps.setTreeHidden(false);
-      ps.setPane("tree");
-    } else {
-      ps.togglePane();
-    }
-    requestFocus();
-  }, [close, requestFocus]);
+    otherWindow();
+  }, [close]);
 
   // Read before closing: the keymap that was active is what help starts from.
   const handleHelp = useCallback(
@@ -264,7 +271,7 @@ export function useCommands(close: CommandClose): {
       close({ restoreFocus: false });
       openHelp(from, only);
     },
-    [close, openHelp],
+    [close],
   );
 
   const handleDescribeKey = useCallback(() => {
@@ -272,14 +279,10 @@ export function useCommands(close: CommandClose): {
     startDescribeKey();
   }, [close]);
 
-  const switchTo = useCallback(
-    (buffer: BufferName) => {
-      close({ restoreFocus: false });
-      setActiveBuffer(buffer);
-      requestFocus();
-    },
-    [close, requestFocus, setActiveBuffer],
-  );
+  const handleShowDiff = useCallback(() => {
+    close({ restoreFocus: false });
+    showBuffer("diff");
+  }, [close]);
 
   const commands: AppCommand[] = [
     {
@@ -497,15 +500,18 @@ export function useCommands(close: CommandClose): {
       aliases: [],
       label: "diff buffer",
       enabled: !!repo,
-      run: () => switchTo("diff"),
+      run: handleShowDiff,
     },
     {
       id: "project",
       name: "project",
-      aliases: [],
-      label: "project buffer",
+      aliases: ["files"],
+      label: "the file tree (shown if hidden)",
       enabled: !!repo,
-      run: () => switchTo("project"),
+      run: () => {
+        close({ restoreFocus: false });
+        focusTree();
+      },
     },
     {
       id: "switch-buffer",
@@ -516,12 +522,44 @@ export function useCommands(close: CommandClose): {
       run: handleSwitchBuffer,
     },
     {
+      id: "kill-buffer",
+      name: "kill-buffer",
+      aliases: ["kill", "close-file"],
+      label: "close the file in this window",
+      enabled: !!repo,
+      run: () => {
+        close({ restoreFocus: false });
+        killCurrentBuffer();
+      },
+    },
+    {
+      id: "previous-buffer",
+      name: "previous-buffer",
+      aliases: ["prev-file"],
+      label: "the previous open file (then <left>, <right> keep going)",
+      enabled: !!repo,
+      run: () => {
+        close({ restoreFocus: false });
+        cycleFileBuffers(-1);
+      },
+    },
+    {
+      id: "next-buffer",
+      name: "next-buffer",
+      aliases: ["next-file"],
+      label: "the next open file (then <left>, <right> keep going)",
+      enabled: !!repo,
+      run: () => {
+        close({ restoreFocus: false });
+        cycleFileBuffers(1);
+      },
+    },
+    {
       id: "other-window",
       name: "other-window",
       aliases: ["window", "pane"],
-      label: "between the file tree and the viewer",
-      buffer: "project",
-      enabled: true,
+      label: "between the file tree and the window",
+      enabled: !!repo,
       run: handleOtherWindow,
     },
     {
@@ -553,8 +591,7 @@ export function useCommands(close: CommandClose): {
       name: "shrink-window-horizontally",
       aliases: ["shrink-tree", "narrower"],
       label: "narrower file tree",
-      buffer: "project",
-      enabled: true,
+      enabled: !!repo,
       run: () => {
         close();
         resizeTree(-1);
@@ -565,8 +602,7 @@ export function useCommands(close: CommandClose): {
       name: "enlarge-window-horizontally",
       aliases: ["enlarge-tree", "wider"],
       label: "wider file tree",
-      buffer: "project",
-      enabled: true,
+      enabled: !!repo,
       run: () => {
         close();
         resizeTree(1);
@@ -576,9 +612,8 @@ export function useCommands(close: CommandClose): {
       id: "toggle-tree",
       name: "toggle-tree",
       aliases: ["hide-tree", "show-tree", "tree"],
-      label: "hide or show the file tree (the viewer alone)",
-      buffer: "project",
-      enabled: true,
+      label: "hide or show the file tree beside the windows",
+      enabled: !!repo,
       run: () => {
         close({ restoreFocus: false });
         toggleTree();

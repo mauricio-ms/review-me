@@ -1,32 +1,23 @@
 import { useJumpStore } from "../state/jumps";
-import { useProjectStore } from "../state/project";
 import { useRepoStore } from "../state/repo";
-import { useUIStore } from "../state/ui";
 import { useXrefStore } from "../state/xref";
 import type { XrefResult } from "../types/xref";
+import { currentFile } from "./buffers";
 import { recordJump } from "./jumps";
-import { openProjectFile } from "./project";
-import { projectCursor, setProjectCursor } from "./project-view";
+import { visitFile, type SourceChoice } from "./project";
+import { projectCursor } from "./project-view";
 import { findDefinition, findReferences, symbolAt } from "./tauri";
 
-/** Cross-references resolve against the revision the project buffer is showing. */
+/**
+ * Cross-references resolve in the revision of the file they start from — the one in the
+ * selected window — and land in files of that same revision.
+ */
 function ctx() {
   const repo = useRepoStore.getState().repoPath;
-  const { openPath: path, source } = useProjectStore.getState();
-  const cursor = projectCursor();
-  if (!repo || !path || !cursor) return null;
-  return { repo, source, path, cursor };
-}
-
-/** Show a file in the project viewer with the cursor at a position. */
-async function openAt(file: string, line: number, col: number): Promise<void> {
-  const ui = useUIStore.getState();
-  await openProjectFile(file);
-  ui.setActiveBuffer("project");
-  // Let the viewer mount/replace its document before moving the cursor.
-  requestAnimationFrame(() =>
-    requestAnimationFrame(() => setProjectCursor(line, col)),
-  );
+  const file = currentFile();
+  if (!repo || !file) return null;
+  const choice: SourceChoice = { source: file.source, label: file.sourceLabel };
+  return { repo, source: file.source, path: file.path, choice };
 }
 
 /**
@@ -37,16 +28,16 @@ async function openAt(file: string, line: number, col: number): Promise<void> {
  * position captured when the reviewer finally picks is still the origin — and
  * dismissing the panel without picking records nothing at all.
  */
-export async function navigateTo(result: XrefResult): Promise<void> {
+export function navigateTo(result: XrefResult, choice: SourceChoice): void {
   recordJump();
-  await openAt(result.file, result.line, result.col);
+  visitFile(result.file, choice, { line: result.line, col: result.col });
 }
 
 /** Return to the position before the last jump (`M-,`). Empty stack: no-op. */
-export async function jumpBack(): Promise<void> {
+export function jumpBack(): void {
   const entry = useJumpStore.getState().pop();
   if (!entry) return;
-  await openAt(entry.file, entry.line, entry.col);
+  visitFile(entry.file, entry.choice, { line: entry.line, col: entry.col });
 }
 
 /**
@@ -55,21 +46,20 @@ export async function jumpBack(): Promise<void> {
  * Ctrl/Cmd+click handler.
  */
 export async function gotoDefinitionAt(line: number, col: number): Promise<void> {
-  const repo = useRepoStore.getState().repoPath;
-  const { openPath: path, source } = useProjectStore.getState();
-  if (!repo || !path) return;
-  const symbol = await symbolAt(repo, source, path, line, col);
+  const c = ctx();
+  if (!c) return;
+  const symbol = await symbolAt(c.repo, c.source, c.path, line, col);
   if (!symbol) return;
-  const defs = await findDefinition(repo, source, symbol);
+  const defs = await findDefinition(c.repo, c.source, symbol);
   if (defs.length === 0) {
-    useXrefStore.getState().show(`no definition for ${symbol.name}`, []);
+    useXrefStore.getState().show(`no definition for ${symbol.name}`, [], c.choice);
   } else if (defs.length === 1) {
-    await navigateTo(defs[0]);
+    navigateTo(defs[0], c.choice);
   } else {
     // The backend couldn't decide — otherwise it would have returned exactly one.
     useXrefStore
       .getState()
-      .show(`${defs.length} candidates for ${symbol.name}`, defs);
+      .show(`${defs.length} candidates for ${symbol.name}`, defs, c.choice);
   }
 }
 
@@ -82,8 +72,9 @@ export async function gotoDefinition(): Promise<void> {
 /** Find references to the symbol under the viewer cursor. */
 export async function findUsages(): Promise<void> {
   const c = ctx();
-  if (!c) return;
-  const symbol = await symbolAt(c.repo, c.source, c.path, c.cursor.line, c.cursor.col);
+  const cursor = projectCursor();
+  if (!c || !cursor) return;
+  const symbol = await symbolAt(c.repo, c.source, c.path, cursor.line, cursor.col);
   if (!symbol) return;
   const refs = await findReferences(c.repo, c.source, symbol);
   const proven = refs.filter((r) => r.confirmed).length;
@@ -91,5 +82,5 @@ export async function findUsages(): Promise<void> {
     proven === refs.length
       ? `references: ${symbol.name} (${refs.length})`
       : `references: ${symbol.name} (${proven} confirmed, ${refs.length - proven} unconfirmed)`;
-  useXrefStore.getState().show(title, refs);
+  useXrefStore.getState().show(title, refs, c.choice);
 }

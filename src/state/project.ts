@@ -15,11 +15,10 @@ const EMPTY_ENTRIES: TreeEntry[] = [];
  */
 export type ProjectFilter = "all" | "changed";
 
-/** Which half of the project buffer has the keyboard: `C-x o` swaps them. */
-export type ProjectPane = "tree" | "viewer";
-
 /** The file tree's width: dragged on its edge or `C-x {` / `C-x }`, remembered. */
 const TREE_WIDTH_KEY = "review-me.tree-width";
+/** Whether the tree is hidden (`M-x toggle-tree`), remembered too. */
+const TREE_HIDDEN_KEY = "review-me.tree-hidden";
 export const TREE_WIDTH_DEFAULT = 380;
 export const TREE_WIDTH_MIN = 180;
 
@@ -40,18 +39,31 @@ function saveTreeWidth(width: number): void {
   }
 }
 
+function savedTreeHidden(): boolean {
+  try {
+    return window.localStorage.getItem(TREE_HIDDEN_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function saveTreeHidden(hidden: boolean): void {
+  try {
+    window.localStorage.setItem(TREE_HIDDEN_KEY, hidden ? "1" : "0");
+  } catch {
+    // Best effort, as with the width.
+  }
+}
+
 type ProjectState = {
   /** Lazily-loaded directory listings, keyed by repo-relative dir path ("" = root). */
   dirs: Record<string, TreeEntry[]>;
   /** Repo-relative dir paths currently expanded in the tree. */
   expanded: Set<string>;
-  /** The file open in the viewer (repo-relative), or null. */
-  openPath: string | null;
-  content: string | null;
-  loadingFile: boolean;
   /**
-   * The revision the tree, viewer, finder, and xref index all read from. Every
-   * project read goes through it, so the buffer is never a mix of snapshots.
+   * The revision the tree and the finder list, and files open from them: the
+   * comparison's new side (`ambientSource`). A file buffer carries its own revision —
+   * a deletion is read at the old side — and xref resolves in that one.
    */
   source: ProjectSource;
   /** How to name `source` in the modeline (e.g. "feature@e780b4a"); null = worktree. */
@@ -71,20 +83,17 @@ type ProjectState = {
    * `inlineDiff`: a block's diff shows when `inlineDiff !== inlineFlipped.has(id)`.
    */
   inlineFlipped: Set<string>;
-  pane: ProjectPane;
   /** The file tree's width in px (the layout clamps it to what fits). */
   treeWidth: number;
-  /** `M-x toggle-tree`: the viewer alone. */
+  /** `M-x toggle-tree`: the windows alone, no tree beside them. */
   treeHidden: boolean;
 
   setDir: (path: string, entries: TreeEntry[]) => void;
   setExpanded: (path: string, open: boolean) => void;
-  setOpenFile: (path: string, content: string) => void;
-  setLoadingFile: (loading: boolean) => void;
   /**
-   * Point the buffer at a different revision. Cached listings and the open file
-   * belong to the old one, so they're dropped; re-pointing at the same revision is
-   * a no-op that keeps the reviewer's place.
+   * Point the tree at a different revision. Cached listings belong to the old one, so
+   * they're dropped; re-pointing at the same revision is a no-op that keeps the
+   * reviewer's place.
    */
   setSource: (source: ProjectSource, label: string | null) => void;
   toggleFilter: () => void;
@@ -94,8 +103,6 @@ type ProjectState = {
   flipChanges: (ids: string[]) => void;
   /** Forget per-change exceptions (they name the changes of one comparison). */
   clearFlipped: () => void;
-  setPane: (pane: ProjectPane) => void;
-  togglePane: () => void;
   /** Set the tree's width; `remember` once a drag or a key settles it. */
   setTreeWidth: (width: number, remember?: boolean) => void;
   setTreeHidden: (hidden: boolean) => void;
@@ -105,17 +112,13 @@ type ProjectState = {
 export const useProjectStore = create<ProjectState>((set) => ({
   dirs: {},
   expanded: new Set(),
-  openPath: null,
-  content: null,
-  loadingFile: false,
   source: WORKTREE_SOURCE,
   sourceLabel: null,
   filter: "all",
   inlineDiff: false,
   inlineFlipped: new Set(),
-  pane: "tree",
   treeWidth: savedTreeWidth(),
-  treeHidden: false,
+  treeHidden: savedTreeHidden(),
 
   setDir: (path, entries) =>
     set((s) => ({ dirs: { ...s.dirs, [path]: entries } })),
@@ -126,9 +129,6 @@ export const useProjectStore = create<ProjectState>((set) => ({
       else next.delete(path);
       return { expanded: next };
     }),
-  setOpenFile: (path, content) =>
-    set({ openPath: path, content, loadingFile: false }),
-  setLoadingFile: (loading) => set({ loadingFile: loading }),
   setSource: (source, label) =>
     set((s) =>
       sameSource(s.source, source) && s.sourceLabel === label
@@ -138,9 +138,6 @@ export const useProjectStore = create<ProjectState>((set) => ({
             sourceLabel: label,
             dirs: {},
             expanded: new Set<string>(),
-            openPath: null,
-            content: null,
-            loadingFile: false,
           },
     ),
   toggleFilter: () =>
@@ -160,22 +157,19 @@ export const useProjectStore = create<ProjectState>((set) => ({
     }),
   clearFlipped: () =>
     set((s) => (s.inlineFlipped.size === 0 ? {} : { inlineFlipped: new Set<string>() })),
-  setPane: (pane) => set({ pane }),
-  togglePane: () => set((s) => ({ pane: s.pane === "tree" ? "viewer" : "tree" })),
   setTreeWidth: (width, remember = false) => {
     const next = Math.max(TREE_WIDTH_MIN, Math.round(width));
     if (remember) saveTreeWidth(next);
     set({ treeWidth: next });
   },
-  setTreeHidden: (hidden) =>
-    set((s) => ({ treeHidden: hidden, pane: hidden ? "viewer" : s.pane })),
+  setTreeHidden: (hidden) => {
+    saveTreeHidden(hidden);
+    set({ treeHidden: hidden });
+  },
   reset: () =>
     set({
       dirs: {},
       expanded: new Set(),
-      openPath: null,
-      content: null,
-      loadingFile: false,
       source: WORKTREE_SOURCE,
       sourceLabel: null,
       inlineFlipped: new Set(),

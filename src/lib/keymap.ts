@@ -50,8 +50,15 @@ const GLOBAL_KEYS = [
     doc: "cancel: a half-typed key, the minibuffer, a selection",
   },
   { keys: ["C-x C-f"], command: "find", doc: "find a file in the revision under review" },
-  { keys: ["C-x b"], command: "switch-buffer", doc: "switch buffer" },
-  { keys: ["C-x o"], command: "other-window", doc: "between the file tree and the viewer" },
+  { keys: ["C-x b"], command: "switch-buffer", doc: "switch buffer (open files too)" },
+  { keys: ["C-x k"], command: "kill-buffer", doc: "close the file in this window" },
+  {
+    keys: ["C-x <left>"],
+    command: "previous-buffer",
+    doc: "previous open file (then <left> <right> alone keep going)",
+  },
+  { keys: ["C-x <right>"], command: "next-buffer", doc: "next open file" },
+  { keys: ["C-x o"], command: "other-window", doc: "between the file tree and the window" },
   {
     keys: ["C-x {"],
     command: "shrink-tree",
@@ -101,7 +108,7 @@ const DIFF_KEYS = [
   { keys: ["] s"], action: "next-section", doc: "next section" },
   { keys: ["[ s"], action: "prev-section", doc: "previous section" },
   { keys: ["TAB"], action: "toggle", doc: "fold or unfold" },
-  { keys: ["RET"], action: "open", doc: "open the file in the project buffer" },
+  { keys: ["RET"], action: "open", doc: "open the file, at this line, as a buffer" },
   { keys: ["v", "V"], action: "visual", doc: "select lines" },
   { keys: ["ESC", "C-g"], action: "escape", doc: "end the selection" },
   { keys: ["r"], action: "review", doc: "mark reviewed" },
@@ -140,7 +147,7 @@ const TREE_KEYS = [
     command: "changed",
     doc: "all files ↔ only what the comparison changed",
   },
-  { keys: ["q"], action: "quit", doc: "back to the diff" },
+  { keys: ["q"], action: "quit", doc: "back to the window" },
 ] as const satisfies readonly KeyBinding[];
 
 /** The code viewer is CodeMirror in vim normal mode; these go through its keymap. */
@@ -150,7 +157,7 @@ const VIEWER_KEYS = [
   { keys: ["M-?"], action: "references", command: "find-refs", doc: "find references" },
   { keys: ["M-g g"], action: "goto-line", doc: "go to line" },
   { keys: ["C-<mouse-1>"], label: "C-click", external: true, doc: "go to definition" },
-  { keys: ["q"], external: true, doc: "back to the diff" },
+  { keys: ["q"], external: true, doc: "back to what this window showed before (the diff)" },
   {
     keys: ["h", "j", "k", "l"],
     label: "h j k l w b / …",

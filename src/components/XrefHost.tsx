@@ -12,6 +12,7 @@ export default function XrefHost() {
   const open = useXrefStore((s) => s.open);
   const title = useXrefStore((s) => s.title);
   const results = useXrefStore((s) => s.results);
+  const choice = useXrefStore((s) => s.choice);
   const closeStore = useXrefStore((s) => s.close);
   const requestFocus = useUIStore((s) => s.requestFocus);
 
@@ -31,11 +32,11 @@ export default function XrefHost() {
   const choose = useCallback(
     (idx: number) => {
       const result = results[idx];
-      if (!result) return;
+      if (!result || !choice) return;
       closeStore();
-      void navigateTo(result);
+      navigateTo(result, choice);
     },
-    [closeStore, results],
+    [choice, closeStore, results],
   );
 
   const move = (delta: number) => {

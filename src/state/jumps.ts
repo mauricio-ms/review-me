@@ -1,7 +1,9 @@
 import { create } from "zustand";
 
-/** A viewer position worth returning to. */
-export type JumpEntry = { file: string; line: number; col: number };
+import type { SourceChoice } from "../lib/project";
+
+/** A viewer position worth returning to: a file at a revision, and a cursor in it. */
+export type JumpEntry = { file: string; choice: SourceChoice; line: number; col: number };
 
 const EMPTY_STACK: JumpEntry[] = [];
 
@@ -18,9 +20,8 @@ type JumpState = {
 
 /**
  * Where navigation came from, emacs-style: a pop-only marker stack (`M-,`), not a
- * back/forward pair. Entries are viewer-local — they name a file and a cursor, never
- * a revision — so the stack is cleared whenever the project source changes, since
- * nothing it points at is reachable in the new one.
+ * back/forward pair. Entries name a file at a revision of the comparison under review,
+ * so the stack is cleared whenever the comparison's revision changes.
  */
 export const useJumpStore = create<JumpState>((set, get) => ({
   stack: EMPTY_STACK,

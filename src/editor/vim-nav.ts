@@ -1,10 +1,13 @@
 import { Vim } from "@replit/codemirror-vim";
 
-import { backToDiff } from "../lib/project";
+import { quitWindow } from "../lib/buffers";
 
 let defined = false;
 
-/** Bind `q` in the project viewer to return to the diff buffer (magit-style quit). */
+/**
+ * Bind `q` in the file viewer to quit its window (magit-style): back to what the window
+ * showed before — the diff, usually.
+ */
 export function defineNavVim(): void {
   if (defined) return;
   defined = true;
@@ -18,6 +21,6 @@ export function defineNavVim(): void {
       extra: object,
     ) => void;
   };
-  v.defineAction("reviewMeBackToDiff", () => backToDiff());
-  v.mapCommand("q", "action", "reviewMeBackToDiff", {}, { context: "normal" });
+  v.defineAction("reviewMeQuitWindow", () => quitWindow());
+  v.mapCommand("q", "action", "reviewMeQuitWindow", {}, { context: "normal" });
 }

@@ -92,6 +92,38 @@ kbd {
   height: 100%;
 }
 
+/* ---------- frame and windows ---------- */
+
+/* The file tree (a sidebar for every window) beside the windows. */
+.frame {
+  height: 100%;
+  display: flex;
+}
+
+.windows {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+}
+
+.window {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.window > * {
+  flex: 1;
+  min-height: 0;
+}
+
+/* The diff and the log are moved into whichever window shows them (Window.tsx). */
+.buffer-host {
+  height: 100%;
+}
+
 .buffer {
   height: 100%;
   width: 100%;
@@ -951,12 +983,7 @@ kbd {
   color: var(--fg-faint);
 }
 
-/* ---------- project buffer ---------- */
-
-.project-buffer {
-  display: flex;
-  background: var(--bg-0);
-}
+/* ---------- file tree and file viewer ---------- */
 
 .project-tree {
   flex: none;
@@ -1069,6 +1096,7 @@ kbd {
 .project-viewer {
   flex: 1;
   display: flex;
+  background: var(--bg-0);
   flex-direction: column;
   min-width: 0;
   overflow: hidden;
@@ -1950,6 +1978,15 @@ kbd {
   align-items: baseline;
   padding: 2px 12px;
   cursor: pointer;
+}
+
+/* `C-x b`: no keys to show, and a name column as wide as the longest file name. */
+.mb-list.is-buffers .mb-row {
+  grid-template-columns: var(--mb-name-width, 16ch) minmax(0, 1fr);
+}
+
+.mb-list.is-buffers .mb-key {
+  display: none;
 }
 
 .mb-row.is-selected {

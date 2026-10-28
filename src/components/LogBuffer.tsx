@@ -8,6 +8,7 @@ import { timeAgo } from "../lib/time";
 import { useLogStore } from "../state/log";
 import { useRepoStore } from "../state/repo";
 import { useUIStore } from "../state/ui";
+import { hasKeyboard, isShown, useWindowStore } from "../state/windows";
 import type { CommitInfo, CommitReview, Decoration, LogRange } from "../types/repo";
 
 /** Start paging in more history once the cursor is this many rows from the end. */
@@ -91,7 +92,8 @@ function refKind(ref: string): "local" | "remote" {
  * unpushed ones when it is its own base, else its whole history — as a magit-style
  * list. `Enter` opens the commit under the cursor in the diff buffer (against its first
  * parent), `b` the whole listed range as one `base...branch` diff, and `q` there comes
- * back here. Stays mounted while hidden, so the cursor is still on the commit you left.
+ * back here. Stays mounted while no window shows it, so the cursor is still on the
+ * commit you left.
  * It is also where a clean checkout opens, having no changes to show.
  */
 export default function LogBuffer() {
@@ -106,7 +108,8 @@ export default function LogBuffer() {
   const loading = useLogStore((s) => s.loading);
   const error = useLogStore((s) => s.error);
   const complete = useLogStore((s) => s.complete);
-  const activeBuffer = useUIStore((s) => s.activeBuffer);
+  const visible = useWindowStore((s) => isShown(s, "log"));
+  const focused = useWindowStore((s) => hasKeyboard(s, "log"));
   const focusRequest = useUIStore((s) => s.focusRequest);
 
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -120,17 +123,16 @@ export default function LogBuffer() {
 
   const found = cursorOid ? commits.findIndex((c) => c.oid === cursorOid) : -1;
   const cursor = found >= 0 ? found : 0;
-  const active = activeBuffer === "log";
 
   useEffect(() => {
-    if (active) rootRef.current?.focus({ preventScroll: true });
-  }, [active, focusRequest]);
+    if (focused) rootRef.current?.focus({ preventScroll: true });
+  }, [focused, focusRequest]);
 
   useEffect(() => {
-    if (!active) return;
+    if (!visible) return;
     const oid = commits[cursor]?.oid;
     if (oid) rowRefs.current.get(oid)?.scrollIntoView({ block: "nearest" });
-  }, [active, commits, cursor]);
+  }, [commits, cursor, visible]);
 
   useEffect(() => {
     if (!complete && commits.length > 0 && cursor >= commits.length - PREFETCH_ROWS) {

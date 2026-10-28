@@ -77,15 +77,19 @@ files → hunks → lines, with Emacs keys: `M-x` and a minibuffer at the bottom
 
 ## Core concepts
 
-### Three buffers
+### Buffers, and the file tree beside them
 
-All stay mounted; you switch between them and keep your cursor/scroll position.
+As in Emacs, the window shows one buffer at a time, and every buffer keeps its cursor and
+scroll while you're elsewhere.
 
 | Buffer | What it is | Tagging |
 | --- | --- | --- |
 | **Diff** | The active comparison as a navigable file/hunk/line list. | Review, flag **and** note |
 | **Commits** | The review branch's history, magit-style; `Enter` opens a commit in the diff buffer. | — |
-| **Project** | Read-only file tree + syntax-highlighted viewer over the whole repo, at the compared revision. | Flag only |
+| **Files** | Each file you open is a buffer of its own: read-only, syntax-highlighted, at the compared revision. | Flag only |
+
+The **file tree** sits beside the window, whatever it shows: the whole revision, or only the
+files the comparison changed.
 
 Opening a repository lands on the diff buffer when the working tree has uncommitted
 changes, and on the commits buffer when it's clean (there would be nothing to diff).
@@ -141,7 +145,7 @@ re-read) and reloads the commits buffer.
 - **Reviewed (`✓`)** — "I have checked this region." Fundamentally per-hunk; file- and
   line-level coverage is *derived*, not stored. Diff buffer only.
 - **Flag (`⚑`)** — "Scrutinize this later." Works on the same scopes (file / hunk / line
-  range), and is available in the diff and project buffers.
+  range), and is available in the diff buffer and in open files.
 - **Note (`✎`)** — a flag that says what to fix, written with `M-x note` while reviewing a
   commit (see [Notes](#notes)).
 
@@ -274,8 +278,9 @@ no-display error, meaning every library loaded and the app started.
 Open the app and pick a repository on the start screen (`j`/`k` and `RET`, or its
 number), `C-x p p` for every recent one, or `M-x open` to browse the disk. The diff buffer
 shows everything changed in the working tree. Expand a file, walk its hunks, and tag as
-you review. `C-x b` switches to the project buffer to browse the rest of the repo or chase
-a definition.
+you review. `RET` opens a file at the line under the cursor; `C-x o` moves to the file tree
+to browse the rest of the repo; every file you open stays open as a buffer, and `C-x b`
+switches between them.
 
 The keys are Emacs's: `M-x` runs any command by name in a minibuffer at the bottom of the
 window — where every picker reads too (find file, branches, commits, recent repositories,
@@ -289,9 +294,11 @@ just the current buffer's keys; `C-h k` tells you what a key does.
 | --- | --- | --- |
 | `M-x` | — | Run any command by name: type to narrow, `↑`/`↓` or `C-n`/`C-p`, `TAB` completes, `RET` runs |
 | `C-g` | — | Cancel: a half-typed key, the minibuffer, a picker, a selection |
-| `C-x C-f` | `find` | Fuzzy file finder → opens in project mode |
-| `C-x b` | `switch-buffer` | Switch buffer (diff, log, project, help); `RET` alone goes back to the last one |
-| `C-x o` | `other-window` | (project) Between the file tree and the viewer |
+| `C-x C-f` | `find` | Fuzzy file finder → opens the file as a buffer |
+| `C-x b` | `switch-buffer` | Switch buffer (diff, log, help, every open file); `RET` alone goes back to the last one |
+| `C-x k` | `kill-buffer` | Close the file in the window |
+| `C-x ←` / `C-x →` | `previous-buffer` / `next-buffer` | Previous / next open file (then `←` `→` alone keep going) |
+| `C-x o` | `other-window` | Between the file tree and the window |
 | `C-x g` | `log` | The commits buffer: the commits the review branch introduced |
 | `C-x p p` | `recent` | Open a recent repository |
 | `C-x p k` | `close` | Close the repository |
@@ -319,7 +326,9 @@ just the current buffer's keys; `C-h k` tells you what a key does.
 | `hunk` | (project) Show/hide the diff of the change at the cursor or selection |
 | `hunks` | (project) Show/hide the diff of every change, in every file |
 | `flag` | (project) Flag the current selection |
-| `diff`, `project` | Switch to that buffer |
+| `diff` | Switch to the diff buffer |
+| `project` | To the file tree (showing it if hidden) |
+| `toggle-tree` | Hide or show the file tree (remembered) |
 
 ### Diff buffer
 
@@ -331,7 +340,7 @@ just the current buffer's keys; `C-h k` tells you what a key does.
 | `]h` / `[h` | Next / previous **hunk** |
 | `]s` / `[s` | Next / previous **section** |
 | `Tab` | Fold / unfold the section, file, or hunk under the cursor |
-| `Enter` | Open the file under the cursor in project mode at that line |
+| `Enter` | Open the file under the cursor, at that line, as a buffer |
 | `v` / `V` | Start/clear a visual line selection (extend with `j`/`k`) |
 | `r` | Mark the file / hunk / selection **reviewed** (`✓`) |
 | `u` | Un-review |
@@ -347,7 +356,7 @@ flagged. Edited lines highlight only the characters that changed.
 
 `Enter` opens the file at the revision the diff came from: the target branch (or the
 reviewed commit) for added/modified content, the merge base (or that commit's first
-parent) for a deletion. The project modeline names that revision whenever it isn't the
+parent) for a deletion. The file's header names that revision whenever it isn't the
 working tree.
 
 ### Branch pickers
@@ -421,9 +430,9 @@ Every commit's notes are written, as you make them, to
 `.review-me/notes/branches/<branch>.md` — one file to hand to an LLM. The files are
 generated from the tag store and never read back: edit notes in the app.
 
-### Project buffer
+### File tree and files
 
-**Tree (left)** lists the whole revision, or — `c` / `M-x changed` — **only the files the
+**The tree (left of the window)** lists the whole revision, or — `c` / `M-x changed` — **only the files the
 comparison on screen changed**: the commit's files while reviewing a commit, every file the
 branch touched in a branch comparison (`b` in the commits buffer), the uncommitted ones in
 the working-tree diff. The choice sticks as you move between comparisons, so it keeps
@@ -434,7 +443,8 @@ opens from the old side, the only revision that still has it.
 A folder that holds nothing but one other folder shares its row with it, so a Java package
 reads `java/com/example/library` instead of four nested rows. Drag the tree's edge (or
 `C-x {` / `C-x }`) to resize it — the width is remembered — and `M-x toggle-tree` gives
-the viewer the whole window until `C-x o` brings the tree back.
+the window the whole frame until `C-x o` brings the tree back. A file opened from the tree
+shows in the window, as a buffer of its own.
 
 | Key | Action |
 | --- | --- |
@@ -444,11 +454,11 @@ the viewer the whole window until `C-x o` brings the tree back.
 | `h` | Collapse the directory, or jump to its parent |
 | `TAB` | Toggle the folder under the cursor |
 | `c` | Only the changed files ↔ all files |
-| `C-x o` | To the viewer |
+| `C-x o` | To the window |
 | `C-x {` / `C-x }` | Narrower / wider tree (then `{` `}` alone keep adjusting) |
-| `q` | Back to the diff |
+| `q` | Back to the window |
 
-**Viewer (right)** — read-only CodeMirror with vim motions and per-file syntax highlighting.
+**A file** — read-only CodeMirror with vim motions and per-file syntax highlighting.
 When the open file is part of the comparison on screen, its changes are marked the way an
 editor's git signs are: a green bar beside added lines, a blue one beside modified lines,
 and a red notch between the lines where something was removed (the modeline adds the
@@ -468,7 +478,7 @@ only the changed files (`c`), the removed lines are always shown in place; `M-x 
 | `Ctrl`/`Cmd` + click | Jump to definition of the symbol clicked |
 | `v` + `j`, then `M-x flag` | Flag the selected lines |
 | `C-x o` | To the tree |
-| `q` | Back to the diff |
+| `q` | Back to what the window showed before (the diff, usually) |
 
 ### Cross-references
 
@@ -487,9 +497,9 @@ same-named symbol are dropped, and ones that can't be proven either way are kept
 separate **unconfirmed** section rather than hidden — in a review tool, a missed caller
 is worse than a spurious one.
 
-`M-,` pops a viewer-local jump stack that records every file you open — definitions,
-reference picks, Ctrl+click, the fuzzy finder, and the tree. It's emacs-style and
-pop-only (no forward), and it resets when you switch to a different revision.
+`M-,` pops a jump stack that records every file you open — definitions, reference picks,
+Ctrl+click, the fuzzy finder, the tree, and `RET` in the diff. It's emacs-style and pop-only
+(no forward), and it resets when you switch to a different revision.
 
 ---
 

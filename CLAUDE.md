@@ -54,10 +54,21 @@ symbol index in a global `Mutex`.
 - `queries.rs` + `xref.rs` tree-sitter symbol index and find-definition/references.
 - `window.rs` builds the main window in `setup` (`tauri.conf.json` has it `"create": false`) so decorations can follow the desktop: off on tiling compositors, on elsewhere, `REVIEW_ME_DECORATIONS` overrides.
 
-**Frontend (`src/`)** — `AppShell.tsx` keeps all three buffers (`DiffBuffer`, `LogBuffer`,
-`ProjectBuffer`) mounted and toggles visibility with `display:none` (preserves
-cursor/scroll); the help buffer (`HelpBuffer`, buffer `"help"`) renders only while shown.
-The window's last line is **`Minibuffer.tsx`**: the echo area (`useUIStore.flash`, and
+**Frontend (`src/`)** — Emacs's model: a **frame** (`AppShell`'s `Frame`) holds the file
+tree as a sidebar (`ProjectTree`, for every window) and the **windows** (`Window`), each
+showing one **buffer** (`state/windows.ts`'s `BufferKey`): `"diff"`, `"log"`, `"help"`, or an
+open file (`file:<n>`, `state/files.ts`). `useWindowStore` holds what each window shows,
+what it showed before (`prev`, where `q` — `lib/buffers.ts`'s `quitWindow` — goes back to),
+the selected window, `treeFocused`, and `recent` (`C-x b`'s order); which kind of buffer has
+the keyboard (`activeBuffer`: diff/log/help, or `project` for a file or the tree) is
+derived, never stored. `DiffBuffer` and `LogBuffer` are rendered **once**, as portals into
+persistent host elements that `Window`'s `BufferSlot` moves into whichever window shows
+them — so their cursor, folds and scroll survive any move — and the slot carries scroll
+offsets and focus across the detach/re-attach (StrictMode re-runs it in dev). Each holds
+one cursor, so each shows in one window at most. Help renders in its window; a file
+renders as a `FileView` (CodeMirror) per window. Every switch goes through `lib/buffers.ts`
+(`showBuffer`, `openHelp`, `quitWindow`, `killCurrentBuffer`, `cycleFileBuffers`).
+The frame's last line is **`Minibuffer.tsx`**: the echo area (`useUIStore.flash`, and
 `keyEcho` for a half-typed `C-x-`) while idle, the minibuffer while something is read
 (`state/minibuffer.ts`: `command` for `M-x`, `buffer` for `C-x b`, `text` for a prompt).
 It sits under the mode line (`BufferStatusBar`) and grows upward.
@@ -100,8 +111,10 @@ between folders (`<wbr>` after each `/`); `elide` (the mode line) keeps the name
 shortens the folders from the left (`direction: rtl` + `<bdi>`). Renames are written
 git-style, `src/{model/Item.java → catalog/CatalogItem.java}` (`renameParts`). Lists that
 need their own markup follow the same rule: the finder and xref put the name first and
-left-elide the folders. The mode line names the file under the cursor (`useUIStore
-.diffCursor`, or the viewer's open file), and its branch labels give way before it does.
+left-elide the folders. The mode line describes the selected window: it names the file under
+the cursor (`useUIStore.diffCursor`, or the window's file), and its branch labels give way
+before it does. `C-x b` writes open files Emacs-uniquify style (`bufferNames`:
+`Item.java<model>`, `Item.java<9fceb02>`) with a name column as wide as the longest.
 
 The pickers (open-repo, recent, fuzzy, checkout-branch, branch-compare, commit-pick) are
 `NeoPicker`s, which render **docked at the bottom as a minibuffer** — prompt line (count,
@@ -112,7 +125,7 @@ modal (`asset-picker`): the clear confirmation, the commit dialog, the note edit
 are gated by `useUIStore.picker` or a dedicated store and use `useModalFocus` (which is
 what turns the global keys off while they're up).
 
-**State** is Zustand in `src/state/` (`ui`, `minibuffer`, `repo`, `tags`, `log`, `notes`, `project`, `xref`). Cross-cutting
+**State** is Zustand in `src/state/` (`ui`, `windows`, `files`, `minibuffer`, `repo`, `tags`, `log`, `notes`, `project`, `xref`, `jumps`). Cross-cutting
 conventions that will bite if ignored:
 - **Wire format:** Rust structs are `#[serde(rename_all = "camelCase")]`; `AppError`
   serializes to a string. serde emits `null` for `Option::None`, so TS types use `| null`
@@ -215,7 +228,7 @@ own `onKeyDown` over a flattened `Row[]` (file/hunk/line) — its keys, sequence
 selection. Line rows carry **intra-line word-diff** segments (`lib/word-diff.ts`: pairs
 each removed line with the added line that replaced it, LCS over tokens) — on by default;
 `M-x diffmode` toggles `useUIStore.diffHighlight` between `word` and whole-`line`. Only the
-**project viewer** (`ProjectBuffer.tsx`) uses CodeMirror (read-only + vim + per-file syntax
+**file viewer** (`FileView.tsx`) uses CodeMirror (read-only + vim + per-file syntax
 highlighting lazy-loaded by extension via `@codemirror/language-data`).
 
 **One row ≠ one visual line.** Line content wraps (`pre-wrap` + `overflow-wrap: anywhere`
@@ -298,22 +311,36 @@ churns; excerpts are the commit's own diff lines over the note's range, or tree 
 code the commit didn't touch, because the reader works at a later HEAD where line numbers
 have drifted.
 
-### Project mode is revision-aware
+### Files are buffers, and revision-aware
 
-`useProjectStore.source` (`ProjectSource`: worktree | commit) is the single revision the
-tree, viewer, fuzzy finder, and xref index all read through — `read_file`,
-`list_repo_dir`, `fuzzy_files`, and every xref command take it. `applyComparison` points
+`useProjectStore.source` (`ProjectSource`: worktree | commit) is the revision the tree and
+the fuzzy finder list — `list_repo_dir` and `fuzzy_files` take it. `applyComparison` points
 it at the target commit in branch mode (so a moved branch re-points it on refresh), at the
 reviewed commit in commit mode, and at the worktree otherwise (`lib/project.ts`'s
-`ambientSource`); `openFileFromDiff` switches to the **old side's** revision for deletions
-— the merge base, or the commit's first parent (`baseSource`) — since that's the only
-revision containing them. Changing the source drops cached listings and the open file —
-they belong to the old snapshot — and `ProjectBuffer`'s modeline names the revision
-whenever it isn't the worktree.
+`ambientSource`). Changing it drops cached listings.
+
+Opening a file never replaces another: **`visitFile(path, choice, at?)`** (Emacs's
+find-file) shows the buffer already open for `(revision, path)` in the selected window, or
+opens a new one (`FileBuffer`: path, its own `source`, content read by `read_file`). Each
+buffer carries its revision: `openFileFromDiff` opens a deletion at the **old side's**
+revision — the merge base, or the commit's first parent (`baseSource`), the only revision
+containing it — as its own buffer, and xref resolves in the revision of the buffer it
+starts from. The viewer's header names the revision whenever it isn't the worktree. A
+buffer's id (`file:<n>`) is stable, so a buffer can be re-pointed in place: on every
+`applyComparison`, `reconcileFileBuffers` keeps buffers whose revision the comparison still
+reads (re-reading working-tree ones — that is the refresh), re-points ones whose revision
+moved under a refresh (a branch got commits), and kills the rest — a review that's over.
+Where each window stands in each buffer (cursor and top line) is remembered per
+`(window, buffer)` in `lib/project-view.ts` (`placeCursor` puts a jump target there before
+the view even mounts), which also keeps each window's CodeMirror view for commands that
+read the selected window's cursor. `C-x k` kills the selected window's file; `C-x <left>`
+/ `C-x <right>` cycle open files (then `<left>`/`<right>` repeat).
 
 The tree's width (`useProjectStore.treeWidth`: dragged on its edge or `C-x {` / `C-x }`,
-remembered, clamped so the viewer keeps 320px) and `treeHidden` (`M-x toggle-tree`; `C-x o`
-brings it back) are layout state, not per-revision.
+remembered, clamped so the windows keep 320px) and `treeHidden` (`M-x toggle-tree`,
+remembered; `C-x o` and `M-x project` bring it back) are layout state, not per-revision.
+`C-x o` moves between the tree and the window; the tree opens files in the selected
+window, and its `q` hands the keyboard back to it.
 
 `useProjectStore.filter` (`all` | `changed`, `c` in the tree / `M-x changed`) narrows the
 tree and the fuzzy finder to **the applied comparison's files** (`useRepoStore.diff`): a
@@ -324,11 +351,11 @@ passes them to `fuzzy_files` as `only`. Changed files open through `openFileFrom
 so a deletion reads from `baseSource`. Xref still indexes the whole revision —
 definitions mostly live in files the change didn't touch.
 
-The viewer marks the open file's changes (`editor/diff-marks.ts`): gutter signs and line
+The viewer marks a file's changes (`editor/diff-marks.ts`): gutter signs and line
 tints always, and inline diffs — removed lines as block widgets, changed words as marks —
 for the blocks shown. Blocks come from `lib/project-diff.ts`'s `changeBlocks` (one per
-maximal removed+added run of a hunk) and only while the viewer reads the comparison's
-new side (`changeForOpenFile`: the source must be `ambientSource`, so a file opened at
+maximal removed+added run of a hunk) and only while the buffer reads the comparison's
+new side (`changeForFile`: its source must be `ambientSource`, so a file opened at
 the merge base shows no marks). What is shown is `useProjectStore.inlineDiff` (`M-x hunks`,
 all files) XOR `inlineFlipped` (`M-x hunk`, the blocks at the cursor/selection, cleared when
 the comparison changes). The changed-files view (`filter === "changed"`) always shows the
@@ -393,12 +420,12 @@ open/refresh (`applyComparison`).
 
 `useJumpStore` (`state/jumps.ts`) is the emacs marker stack: pop-only, no forward.
 `lib/jumps.ts`'s **`recordJump`** is called by the navigation *gestures* — `navigateTo`,
-`openFileInProject`, activating a tree row — and deliberately not by `openProjectFile`,
-which they all share, so `jumpBack` can reuse the same open path without recording the
-position it's leaving (which would make `M-,` ping-pong). Recording inside `navigateTo`
-rather than `gotoDefinitionAt` also means dismissing the picker records nothing.
-Entries are viewer-local (file + cursor, never a revision), so `useProjectSource` clears
-the stack whenever the source changes.
+`openFileInProject`, `openFileFromDiff` — and deliberately not by `visitFile`, which they
+all share, so `jumpBack` can reuse the same open path without recording the position it's
+leaving (which would make `M-,` ping-pong). Recording inside `navigateTo` rather than
+`gotoDefinitionAt` also means dismissing the picker records nothing. Entries name a file
+at a revision and a cursor; `useProjectSource` clears the stack whenever the comparison's
+revision changes.
 
 ## Extending
 

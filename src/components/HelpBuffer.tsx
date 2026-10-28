@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { quitWindow } from "../lib/buffers";
 import { dispatchKey, type KeyHandler } from "../lib/key-dispatch";
 import {
   boundCommands,
@@ -11,6 +12,7 @@ import {
 } from "../lib/keymap";
 import { useMinibufferStore } from "../state/minibuffer";
 import { useUIStore, type HelpView } from "../state/ui";
+import { hasKeyboard, useWindowStore } from "../state/windows";
 import { type AppCommand, type CommandClose, useCommands } from "./useCommands";
 
 type Row = {
@@ -87,9 +89,7 @@ const noClose: CommandClose = () => {};
  */
 export default function HelpBuffer() {
   const view = useUIStore((s) => s.help);
-  const previousBuffer = useUIStore((s) => s.previousBuffer);
-  const setActiveBuffer = useUIStore((s) => s.setActiveBuffer);
-  const requestFocus = useUIStore((s) => s.requestFocus);
+  const focused = useWindowStore((s) => hasKeyboard(s, "help"));
   const focusRequest = useUIStore((s) => s.focusRequest);
   const openMinibuffer = useMinibufferStore((s) => s.open);
 
@@ -99,8 +99,8 @@ export default function HelpBuffer() {
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    rootRef.current?.focus({ preventScroll: true });
-  }, [focusRequest]);
+    if (focused) rootRef.current?.focus({ preventScroll: true });
+  }, [focused, focusRequest]);
 
   // A new view (C-h b after C-h m, help from another buffer) starts unfiltered.
   useEffect(() => {
@@ -131,10 +131,7 @@ export default function HelpBuffer() {
         onAccept: setQuery,
         onCancel: () => setQuery(""),
       }),
-    quit: () => {
-      setActiveBuffer(previousBuffer);
-      requestFocus();
-    },
+    quit: quitWindow,
   };
 
   return (

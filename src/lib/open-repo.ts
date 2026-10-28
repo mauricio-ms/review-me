@@ -1,12 +1,15 @@
+import { useFilesStore } from "../state/files";
 import { useLogStore } from "../state/log";
+import { useProjectStore } from "../state/project";
 import { useRepoStore } from "../state/repo";
 import { useTagsStore } from "../state/tags";
-import { useUIStore } from "../state/ui";
-import { WORKTREE_SPEC, type DiffSpec } from "../types/diff";
+import { useWindowStore } from "../state/windows";
+import { sameSpec, WORKTREE_SPEC, type DiffSpec } from "../types/diff";
 import { branchShorthand, rangeBaseRef, type ReviewBranch } from "../types/repo";
 import { scopeForSpec } from "../types/tags";
+import { showBuffer } from "./buffers";
 import { loadLog, refreshCommitReviews, showLog } from "./log";
-import { ambientSource, useProjectSource } from "./project";
+import { ambientSource, reconcileFileBuffers, useProjectSource } from "./project";
 import { buildSymbolIndex, computeDiff, loadTags, openRepo } from "./tauri";
 
 /**
@@ -31,8 +34,14 @@ export async function applyComparison(spec: DiffSpec): Promise<void> {
     const diff = await computeDiff(path, spec);
     const tags = await loadTags(path, scopeForSpec(spec));
     if (ticket !== requestSeq) return; // a newer selection already won
+    const before = useRepoStore.getState();
+    const prev = before.diff?.comparison;
+    const same = sameSpec(before.comparison, spec);
     useRepoStore.getState().applyComparison(spec, diff);
     useTagsStore.getState().setStore(tags);
+    // `M-x hunk`'s per-change exceptions name the changes of the comparison they were
+    // made in.
+    if (!same) useProjectStore.getState().clearFlipped();
     // Project mode follows the comparison. Re-pointing it drops listings and the
     // open file when the revision changed — including when a branch has moved
     // under a plain refresh — and is a no-op when it hasn't.
@@ -40,6 +49,8 @@ export async function applyComparison(spec: DiffSpec): Promise<void> {
     // history, whose entries name files at the *old* revision.
     const ambient = ambientSource(diff.comparison);
     useProjectSource(ambient);
+    // Open files follow it too: re-read, re-pointed, or — a review that's over — killed.
+    reconcileFileBuffers(prev, diff.comparison, same);
     void buildSymbolIndex(path, ambient.source).catch(() => {});
   } catch (e) {
     if (ticket === requestSeq) {
@@ -57,12 +68,13 @@ export async function applyComparison(spec: DiffSpec): Promise<void> {
  */
 export async function openRepoByPath(path: string): Promise<void> {
   const repoStore = useRepoStore.getState();
-  const ui = useUIStore.getState();
   repoStore.setStatus({ kind: "loading" });
   const info = await openRepo(path);
   repoStore.setRepo(info, info.root);
-  // Even the same repo reopened gets a fresh history.
+  // Even the same repo reopened gets a fresh history — and no files open, one window.
   useLogStore.getState().reset();
+  useFilesStore.getState().reset();
+  useWindowStore.getState().reset();
   // The branch under review starts as whatever the checkout is on (else the repo's
   // default branch) — the backend already picked; we only need its display name.
   repoStore.setReviewBranch(
@@ -83,8 +95,7 @@ export async function openRepoByPath(path: string): Promise<void> {
     showLog();
     return;
   }
-  ui.setActiveBuffer("diff");
-  ui.requestFocus();
+  showBuffer("diff");
 }
 
 /**
@@ -94,9 +105,7 @@ export async function openRepoByPath(path: string): Promise<void> {
 export async function enterCommit(oid: string): Promise<void> {
   const branchRef = useRepoStore.getState().reviewBranch?.ref ?? null;
   await applyComparison({ kind: "commit", oid, branchRef });
-  const ui = useUIStore.getState();
-  ui.setActiveBuffer("diff");
-  ui.requestFocus();
+  showBuffer("diff");
 }
 
 /**
@@ -115,9 +124,7 @@ export async function enterLogRange(): Promise<void> {
     targetRef: ref,
     strategy: "mergeBase",
   });
-  const ui = useUIStore.getState();
-  ui.setActiveBuffer("diff");
-  ui.requestFocus();
+  showBuffer("diff");
 }
 
 /**
@@ -129,9 +136,7 @@ export async function enterLogRange(): Promise<void> {
 export function leaveHistory(): void {
   const { comparison } = useRepoStore.getState();
   if (comparison.kind === "worktree") return;
-  const ui = useUIStore.getState();
-  ui.setActiveBuffer("log");
-  ui.requestFocus();
+  showBuffer("log");
   // A comparison entered from `M-x show` or `M-x compare` may come before the log was ever
   // loaded.
   const log = useLogStore.getState();

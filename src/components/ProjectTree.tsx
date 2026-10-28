@@ -1,48 +1,26 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
-import { LanguageDescription } from "@codemirror/language";
-import { languages } from "@codemirror/language-data";
-import { EditorState, type Extension } from "@codemirror/state";
-import { EditorView } from "@codemirror/view";
-import { getCM, vim } from "@replit/codemirror-vim";
-import CodeMirror from "@uiw/react-codemirror";
-
-import { swallowColonKeymap, vimEscapeKeymap } from "../editor/cm-shared";
-import { diffMarks, setDiffMarks } from "../editor/diff-marks";
-import { flagDecorations, setFlagLines } from "../editor/flag-decorations";
-import { gruberDarkerTheme } from "../editor/gruber-darker";
-import { defineNavVim } from "../editor/vim-nav";
-import { viewerKeymap } from "../editor/viewer-keymap";
-import { xrefClick } from "../editor/xref-click";
 import { fileReviewState } from "../lib/coverage";
+import { useCurrentFile } from "../lib/buffers";
 import { fileIcon } from "../lib/file-icons";
-import { recordJump } from "../lib/jumps";
 import { dispatchKey, type KeyHandler } from "../lib/key-dispatch";
 import { KEYMAP, type TreeAction } from "../lib/keymap";
-import {
-  backToDiff,
-  loadDir,
-  openFileFromDiff,
-  openProjectFile,
-  toggleDir,
-} from "../lib/project";
-import { changeBlocks, changeForOpenFile } from "../lib/project-diff";
-import { setProjectView } from "../lib/project-view";
+import { loadDir, openFileFromDiff, openFileInProject, toggleDir } from "../lib/project";
 import { TREE_WIDTH_MIN, useProjectStore } from "../state/project";
 import { useRepoStore } from "../state/repo";
 import { useTagsStore } from "../state/tags";
-import { useUIStore, type VimMode } from "../state/ui";
+import { useUIStore } from "../state/ui";
+import { useWindowStore } from "../state/windows";
 import type { ChangedFile } from "../types/diff";
 import type { TreeEntry } from "../types/repo";
-import PathLabel from "./PathLabel";
 
 /** A tree row; `change` is set on the files of the changed-files view. */
 type Node = { entry: TreeEntry; depth: number; change?: ChangedFile };
 
 const EMPTY_FILES: ChangedFile[] = [];
 
-/** However wide the tree is set, the viewer keeps at least this much. */
-const VIEWER_MIN_WIDTH = 320;
+/** However wide the tree is set, the windows keep at least this much. */
+const WINDOWS_MIN_WIDTH = 320;
 
 /**
  * A tree row's name. A compacted chain (`java/com/acme`) dims its leading folders and,
@@ -66,13 +44,6 @@ const STATUS_GLYPH: Record<ChangedFile["status"], string> = {
   modified: "M",
   deleted: "D",
   renamed: "R",
-};
-
-const VIM_MODE_MAP: Record<string, VimMode> = {
-  normal: "normal",
-  insert: "insert",
-  visual: "visual",
-  replace: "replace",
 };
 
 function buildVisible(
@@ -147,50 +118,44 @@ function buildChanged(files: ChangedFile[], collapsed: Set<string>): Node[] {
   return out;
 }
 
-export default function ProjectBuffer() {
+/**
+ * The file tree, a sidebar beside every window (treemacs-style): the revision under
+ * review, or only the files its comparison changed (`c`). Opening a file shows it in
+ * the selected window; `C-x o` moves between the tree and the windows.
+ */
+export default function ProjectTree() {
   const dirs = useProjectStore((s) => s.dirs);
   const expanded = useProjectStore((s) => s.expanded);
-  const openPath = useProjectStore((s) => s.openPath);
-  const content = useProjectStore((s) => s.content);
-  // Non-null while the buffer is reading a commit rather than the working tree.
-  const sourceLabel = useProjectStore((s) => s.sourceLabel);
   const filter = useProjectStore((s) => s.filter);
   const toggleFilter = useProjectStore((s) => s.toggleFilter);
   const diff = useRepoStore((s) => s.diff);
   const changedFiles = diff?.files ?? EMPTY_FILES;
-  const source = useProjectStore((s) => s.source);
-  const inlineDiff = useProjectStore((s) => s.inlineDiff);
-  const inlineFlipped = useProjectStore((s) => s.inlineFlipped);
-  const clearFlipped = useProjectStore((s) => s.clearFlipped);
-  // Which half has the keyboard; `C-x o` swaps them.
-  const focusPane = useProjectStore((s) => s.pane);
-  const setFocusPane = useProjectStore((s) => s.setPane);
   const storedTreeWidth = useProjectStore((s) => s.treeWidth);
   const setTreeWidth = useProjectStore((s) => s.setTreeWidth);
-  const treeHidden = useProjectStore((s) => s.treeHidden);
   const comparisonEpoch = useRepoStore((s) => s.comparisonEpoch);
   const reviewed = useTagsStore((s) => s.reviewed);
   const flags = useTagsStore((s) => s.flags);
   const ignored = useTagsStore((s) => s.ignored);
-  const activeBuffer = useUIStore((s) => s.activeBuffer);
+  const focused = useWindowStore((s) => s.treeFocused);
+  const setTreeFocused = useWindowStore((s) => s.setTreeFocused);
   const focusRequest = useUIStore((s) => s.focusRequest);
-  const setVimMode = useUIStore((s) => s.setVimMode);
+  // The file in the selected window — where the tree opens files — is marked open.
+  const openPath = useCurrentFile()?.path ?? null;
 
   const treeRef = useRef<HTMLDivElement | null>(null);
-  const bufferRef = useRef<HTMLDivElement | null>(null);
-  // Never wider than leaves the viewer a usable width: a width set on a wide window
+  // Never wider than leaves the windows a usable width: a width set on a wide window
   // shrinks with a narrow one, without forgetting what was chosen.
-  const [bufferWidth, setBufferWidth] = useState(0);
+  const [frameWidth, setFrameWidth] = useState(0);
   useEffect(() => {
-    const el = bufferRef.current;
-    if (!el) return;
-    const observer = new ResizeObserver(() => setBufferWidth(el.clientWidth));
-    observer.observe(el);
+    const frame = treeRef.current?.parentElement;
+    if (!frame) return;
+    const observer = new ResizeObserver(() => setFrameWidth(frame.clientWidth));
+    observer.observe(frame);
     return () => observer.disconnect();
   }, []);
   const treeWidth =
-    bufferWidth > 0
-      ? Math.max(TREE_WIDTH_MIN, Math.min(storedTreeWidth, bufferWidth - VIEWER_MIN_WIDTH))
+    frameWidth > 0
+      ? Math.max(TREE_WIDTH_MIN, Math.min(storedTreeWidth, frameWidth - WINDOWS_MIN_WIDTH))
       : storedTreeWidth;
 
   // Drag the tree's edge; the width is remembered once the drag ends.
@@ -216,9 +181,8 @@ export default function ProjectBuffer() {
     handle.addEventListener("pointerup", up);
     handle.addEventListener("pointercancel", up);
   };
-  const viewRef = useRef<EditorView | null>(null);
+
   const [cursor, setCursor] = useState(0);
-  const [langExt, setLangExt] = useState<Extension | null>(null);
   // Folders folded in the changed-files view — open by default, so every changed file
   // shows at once. Folds belong to one comparison.
   const [collapsedChanged, setCollapsedChanged] = useState<Set<string>>(() => new Set());
@@ -226,15 +190,7 @@ export default function ProjectBuffer() {
 
   useEffect(() => {
     setCollapsedChanged(new Set());
-    clearFlipped();
-  }, [clearFlipped, comparisonEpoch]);
-
-  // The open file's changes in the comparison on screen, as the viewer marks them.
-  const openChange = useMemo(
-    () => changeForOpenFile(diff, source, openPath),
-    [diff, openPath, source],
-  );
-  const blocks = useMemo(() => (openChange ? changeBlocks(openChange) : []), [openChange]);
+  }, [comparisonEpoch]);
 
   const nodes = useMemo(
     () =>
@@ -267,99 +223,18 @@ export default function ProjectBuffer() {
     // Only on a switch: `nodes` also changes on every fold, where the cursor stays put.
   }, [changedOnly]);
 
-  // Register the project viewer's vim mappings once (q→diff). Code navigation is an
-  // Alt keymap instead — see editor/viewer-keymap.ts.
-  useEffect(() => {
-    defineNavVim();
-  }, []);
-
   // Load the repo root the first time the full tree is shown.
   useEffect(() => {
-    if (activeBuffer === "project" && !changedOnly && !dirs[""]) void loadDir("");
-  }, [activeBuffer, changedOnly, dirs]);
+    if (!changedOnly && !dirs[""]) void loadDir("");
+  }, [changedOnly, dirs]);
 
   useEffect(() => {
     setCursor((c) => Math.min(Math.max(0, c), Math.max(0, nodes.length - 1)));
   }, [nodes.length]);
 
-  // Focus the active pane when the buffer is shown / focus is requested.
   useEffect(() => {
-    if (activeBuffer !== "project") return;
-    if (focusPane === "tree") treeRef.current?.focus({ preventScroll: true });
-    else if (viewRef.current) viewRef.current.focus();
-    // No file open: there is no viewer to hand the keyboard to.
-    else setFocusPane("tree");
-  }, [activeBuffer, focusRequest, focusPane, setFocusPane]);
-
-  // Push flagged line ranges for the open file into the viewer.
-  useEffect(() => {
-    const view = viewRef.current;
-    if (!view) return;
-    const ranges = flags
-      .filter((f) => f.anchor.file === openPath && !f.anchor.stale)
-      .map((f) => [f.anchor.startLine, f.anchor.endLine] as [number, number]);
-    view.dispatch({ effects: setFlagLines.of(ranges) });
-  }, [flags, openPath, content]);
-
-  // Push the open file's change marks into the viewer; `content` re-pushes them onto a
-  // freshly loaded document. Browsing only the changed files, the removed lines always
-  // show — there, what went matters as much as what came.
-  useEffect(() => {
-    const view = viewRef.current;
-    if (!view) return;
-    const shown = blocks.map((b) => ({
-      ...b,
-      shown: inlineDiff !== inlineFlipped.has(b.id),
-      showRemoved: changedOnly,
-    }));
-    view.dispatch({ effects: setDiffMarks.of(shown) });
-  }, [blocks, changedOnly, content, inlineDiff, inlineFlipped, openPath]);
-
-  // Lazily load the CodeMirror language for the open file, dispatched by file
-  // name (extension, plus special names like Dockerfile). The Gruber Darker
-  // theme supplies colors; this just supplies the grammar.
-  useEffect(() => {
-    setLangExt(null);
-    if (!openPath) return;
-    const name = openPath.split("/").pop() ?? openPath;
-    const desc = LanguageDescription.matchFilename(languages, name);
-    if (!desc) return;
-    let cancelled = false;
-    void desc.load().then((support) => {
-      if (!cancelled) setLangExt(support);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [openPath]);
-
-  const extensions = useMemo(() => {
-    const ext = [
-      vim(),
-      swallowColonKeymap,
-      vimEscapeKeymap,
-      viewerKeymap,
-      xrefClick,
-      diffMarks,
-      flagDecorations,
-      EditorState.readOnly.of(true),
-      EditorView.lineWrapping,
-    ];
-    if (langExt) ext.push(langExt);
-    return ext;
-  }, [langExt]);
-
-  const onCreateEditor = useCallback(
-    (view: EditorView) => {
-      viewRef.current = view;
-      setProjectView(view);
-      const cm = getCM(view);
-      cm?.on("vim-mode-change", (e: { mode: string }) =>
-        setVimMode(VIM_MODE_MAP[e.mode] ?? "normal"),
-      );
-    },
-    [setVimMode],
-  );
+    if (focused) treeRef.current?.focus({ preventScroll: true });
+  }, [focused, focusRequest]);
 
   const activate = (node: Node | undefined) => {
     if (!node) return;
@@ -367,17 +242,10 @@ export default function ProjectBuffer() {
       toggleFolder(node.entry.path);
     } else if (node.change) {
       // At the revision that changed it — the old side for a deletion, the only one
-      // that still has it. Records the jump itself.
-      void openFileFromDiff(
-        node.change.path,
-        node.change.status === "deleted" ? "old" : "new",
-      );
-      setFocusPane("viewer");
+      // that still has it.
+      openFileFromDiff(node.change.path, node.change.status === "deleted" ? "old" : "new");
     } else {
-      // Opening from the tree is navigation too — `M-,` should walk back through it.
-      recordJump();
-      void openProjectFile(node.entry.path);
-      setFocusPane("viewer");
+      openFileInProject(node.entry.path);
     }
   };
 
@@ -400,7 +268,7 @@ export default function ProjectBuffer() {
     }
   };
 
-  const treeHandlers: Record<TreeAction, KeyHandler> = {
+  const handlers: Record<TreeAction, KeyHandler> = {
     down: () => setCursor((c) => Math.min(nodes.length - 1, c + 1)),
     up: () => setCursor((c) => Math.max(0, c - 1)),
     first: () => setCursor(0),
@@ -414,22 +282,22 @@ export default function ProjectBuffer() {
     close: () => collapseOrParent(nodes[cursor]),
     // The whole revision ↔ only what the comparison on screen changed.
     filter: toggleFilter,
-    quit: backToDiff,
-  };
-
-  const onTreeKeyDown = (e: React.KeyboardEvent) => {
-    dispatchKey("tree", e, KEYMAP.tree, treeHandlers);
+    // Back to the window the tree opens files in.
+    quit: () => {
+      setTreeFocused(false);
+      useUIStore.getState().requestFocus();
+    },
   };
 
   return (
-    <div className="buffer project-buffer" ref={bufferRef}>
+    <>
       <div
         ref={treeRef}
-        className={`project-tree ${focusPane === "tree" ? "is-focused" : ""}`}
-        style={{ width: treeWidth, display: treeHidden ? "none" : undefined }}
+        className={`project-tree ${focused ? "is-focused" : ""}`}
+        style={{ width: treeWidth }}
         tabIndex={0}
-        onKeyDown={onTreeKeyDown}
-        onFocus={() => setFocusPane("tree")}
+        onKeyDown={(e) => dispatchKey("tree", e, KEYMAP.tree, handlers)}
+        onFocus={() => setTreeFocused(true)}
       >
         <div className="project-tree-mode">
           <span>
@@ -485,68 +353,14 @@ export default function ProjectBuffer() {
           })
         )}
       </div>
-
-      {!treeHidden && (
-        <div
-          className="project-split"
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Resize the file tree"
-          aria-valuenow={treeWidth}
-          onPointerDown={startResize}
-        />
-      )}
-
-      <div className="project-viewer" onFocus={() => setFocusPane("viewer")}>
-        {content == null ? (
-          <div className="project-viewer-empty">
-            <div className="empty-title">
-              no file open{sourceLabel ? ` — ${sourceLabel}` : ""}
-            </div>
-            <div className="empty-hint">
-              Select a file in the tree, or <kbd>C-x C-f</kbd> to find one;{" "}
-              <kbd>c</kbd> in the tree lists only the changed files. <kbd>C-x o</kbd>{" "}
-              switches between the tree and the viewer; <kbd>q</kbd> returns to the diff.
-            </div>
-          </div>
-        ) : (
-          <>
-            <div className="project-viewer-path">
-              <PathLabel className="project-viewer-file" path={openPath ?? ""} />
-              {openChange && (
-                <span
-                  className="project-viewer-change"
-                  title="changed in the comparison on screen — M-x hunk shows the diff at the cursor, M-x hunks every one"
-                >
-                  <span className="stat-add">+{openChange.addedLines}</span>{" "}
-                  <span className="stat-del">−{openChange.removedLines}</span>
-                </span>
-              )}
-              {sourceLabel && (
-                <span
-                  className="project-viewer-rev"
-                  title="reading a committed revision, not the working tree"
-                >
-                  @ {sourceLabel}
-                </span>
-              )}
-            </div>
-            <CodeMirror
-              value={content}
-              extensions={extensions}
-              theme={gruberDarkerTheme}
-              height="100%"
-              onCreateEditor={onCreateEditor}
-              basicSetup={{
-                lineNumbers: true,
-                foldGutter: false,
-                highlightActiveLine: true,
-                highlightSelectionMatches: true,
-              }}
-            />
-          </>
-        )}
-      </div>
-    </div>
+      <div
+        className="project-split"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize the file tree"
+        aria-valuenow={treeWidth}
+        onPointerDown={startResize}
+      />
+    </>
   );
 }

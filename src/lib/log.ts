@@ -1,6 +1,6 @@
 import { useLogStore } from "../state/log";
 import { useRepoStore } from "../state/repo";
-import { useUIStore } from "../state/ui";
+import { showBuffer } from "./buffers";
 import { commitReviews, listCommits } from "./tauri";
 
 /**
@@ -84,8 +84,6 @@ export async function refreshCommitReviews(oids: string[]): Promise<void> {
  * cursor on the same commit across the reload.
  */
 export function showLog(): void {
-  const ui = useUIStore.getState();
-  ui.setActiveBuffer("log");
-  ui.requestFocus();
+  showBuffer("log");
   void loadLog();
 }

@@ -3,6 +3,7 @@ import { useRepoStore } from "../state/repo";
 import { useUIStore } from "../state/ui";
 import type { ChangedFile, DiffLine, DiffSummary } from "../types/diff";
 import { sameSource, type ProjectSource } from "../types/repo";
+import { currentFile } from "./buffers";
 import { ambientSource } from "./project";
 import { projectSelectionRange } from "./project-view";
 import { refineHunk, type WordSeg } from "./word-diff";
@@ -86,19 +87,19 @@ export function changeBlocks(file: ChangedFile): ChangeBlock[] {
 }
 
 /**
- * The open file's change in the applied comparison — only while the viewer reads the
- * revision that comparison's new side is (a file opened at the merge base or a
- * parent shows old content the markers don't describe). Deletions and binary files
- * have no new-side lines to mark.
+ * A file buffer's change in the applied comparison — only when the buffer reads the
+ * revision that comparison's new side is (a file read at the merge base or a parent
+ * shows old content the markers don't describe). Deletions and binary files have no
+ * new-side lines to mark.
  */
-export function changeForOpenFile(
+export function changeForFile(
   diff: DiffSummary | null,
   source: ProjectSource,
-  openPath: string | null,
+  path: string | null,
 ): ChangedFile | null {
-  if (!diff || !openPath) return null;
+  if (!diff || !path) return null;
   if (!sameSource(source, ambientSource(diff.comparison).source)) return null;
-  const file = diff.files.find((f) => f.path === openPath);
+  const file = diff.files.find((f) => f.path === path);
   return file && file.status !== "deleted" && !file.binary ? file : null;
 }
 
@@ -119,12 +120,14 @@ function blockSpan(block: ChangeBlock): [number, number] {
  */
 export function toggleChangesAtCursor(): void {
   const ui = useUIStore.getState();
-  const { source, openPath } = useProjectStore.getState();
-  const change = changeForOpenFile(useRepoStore.getState().diff, source, openPath);
+  const file = currentFile();
+  const change = file
+    ? changeForFile(useRepoStore.getState().diff, file.source, file.path)
+    : null;
   const range = projectSelectionRange();
   if (!change || !range) {
     ui.showFlash(
-      openPath ? "this file has no changes in the comparison on screen" : "no file open",
+      file ? "this file has no changes in the comparison on screen" : "no file here",
     );
     return;
   }

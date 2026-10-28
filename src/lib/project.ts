@@ -1,11 +1,15 @@
+import { fileBuffer, newFileBufferId, useFilesStore, type FileBuffer } from "../state/files";
 import { useJumpStore } from "../state/jumps";
 import { useProjectStore } from "../state/project";
 import { useRepoStore } from "../state/repo";
 import { useUIStore } from "../state/ui";
+import { useWindowStore, type FileBufferId } from "../state/windows";
 import { shortOid, type Comparison } from "../types/diff";
 import { sameSource, WORKTREE_SOURCE, type ProjectSource } from "../types/repo";
+import { findFileBuffer, focusTree, killFileBuffers, showBuffer } from "./buffers";
 import { recordJump } from "./jumps";
 import { armRepeat } from "./key-dispatch";
+import { placeCursor } from "./project-view";
 import { listRepoDir, readFile } from "./tauri";
 
 /** The repo + revision every project read below goes through. */
@@ -14,7 +18,14 @@ function ctx(): { repo: string; source: ProjectSource } | null {
   return repo ? { repo, source: useProjectStore.getState().source } : null;
 }
 
-type SourceChoice = { source: ProjectSource; label: string | null };
+/** A revision, and how to name it. */
+export type SourceChoice = { source: ProjectSource; label: string | null };
+
+/** The revision the tree and the finder list. */
+export function projectChoice(): SourceChoice {
+  const { source, sourceLabel } = useProjectStore.getState();
+  return { source, label: sourceLabel };
+}
 
 /**
  * The revision project mode should default to for a comparison: the checkout in
@@ -66,7 +77,7 @@ export function baseSource(comparison: Comparison | undefined): SourceChoice {
   }
 }
 
-/** Point the project buffer at a revision (no-op when it's already there). */
+/** Point the tree and the finder at a revision (no-op when they're already there). */
 export function useProjectSource(choice: SourceChoice): void {
   const store = useProjectStore.getState();
   // Jump entries name a file and a line in the revision they were recorded in;
@@ -98,11 +109,15 @@ export function resizeTree(step: 1 | -1): void {
   armRepeat({ "{": () => resizeTree(-1), "}": () => resizeTree(1) });
 }
 
-/** `M-x toggle-tree`: the viewer alone, or the tree back beside it. */
+/** `M-x toggle-tree`: the windows alone, or the tree back beside them (with the keyboard). */
 export function toggleTree(): void {
   const ps = useProjectStore.getState();
-  ps.setTreeHidden(!ps.treeHidden);
-  if (!useProjectStore.getState().treeHidden) ps.setPane("tree");
+  if (ps.treeHidden) {
+    focusTree();
+    return;
+  }
+  ps.setTreeHidden(true);
+  useWindowStore.getState().setTreeFocused(false);
   useUIStore.getState().requestFocus();
 }
 
@@ -129,51 +144,109 @@ export async function toggleDir(path: string): Promise<void> {
   }
 }
 
-/** Open a repo-relative file in the project viewer (no buffer switch). */
-export async function openProjectFile(path: string): Promise<void> {
-  const c = ctx();
-  if (!c) return;
-  const ps = useProjectStore.getState();
-  ps.setLoadingFile(true);
+/** Read a buffer's file at its revision; a buffer re-pointed meanwhile keeps the newer read. */
+async function readInto(buffer: FileBuffer): Promise<void> {
+  const repo = useRepoStore.getState().repoPath;
+  if (!repo) return;
+  let content: string;
   try {
-    ps.setOpenFile(path, await readFile(c.repo, c.source, path));
+    content = await readFile(repo, buffer.source, buffer.path);
   } catch (e) {
-    ps.setOpenFile(path, `// failed to read ${path}\n// ${String(e)}`);
+    content = `// failed to read ${buffer.path}\n// ${String(e)}`;
+  }
+  const now = fileBuffer(buffer.id);
+  if (now && sameSource(now.source, buffer.source)) {
+    useFilesStore.getState().update(buffer.id, { content });
   }
 }
 
-/**
- * Open a file and bring the project buffer to the front with the viewer focused, as
- * Emacs's find-file lands you in the file (used by the finder and the diff buffer).
- */
-export async function openFileInProject(path: string): Promise<void> {
-  recordJump();
-  await openProjectFile(path);
-  useProjectStore.getState().setPane("viewer");
-  const ui = useUIStore.getState();
-  ui.setActiveBuffer("project");
-  ui.requestFocus();
+/** The buffer for `path` at a revision — the open one, else a new one being read. */
+function bufferFor(path: string, choice: SourceChoice): FileBufferId {
+  const open = findFileBuffer(choice.source, path);
+  if (open) return open.id;
+  const buffer: FileBuffer = {
+    id: newFileBufferId(),
+    path,
+    source: choice.source,
+    sourceLabel: choice.label,
+    content: null,
+  };
+  useFilesStore.getState().add(buffer);
+  void readInto(buffer);
+  return buffer.id;
 }
 
 /**
- * Open a file from the diff buffer, first pointing project mode at the revision that
- * actually contains it: the target branch normally, the merge base for content that
- * only exists on the old side (a deletion).
+ * Emacs's find-file: show `path` at a revision in the selected window — in the buffer
+ * already open for it, else a new one — with the keyboard there. The cursor goes to
+ * `at`, or back to where this window left the file.
  */
-export async function openFileFromDiff(
+export function visitFile(
   path: string,
-  side: "new" | "old",
-): Promise<void> {
-  const comparison = useRepoStore.getState().diff?.comparison;
-  useProjectSource(
-    side === "old" ? baseSource(comparison) : ambientSource(comparison),
-  );
-  await openFileInProject(path);
+  choice: SourceChoice,
+  at?: { line: number; col?: number },
+): void {
+  if (!useRepoStore.getState().repoPath) return;
+  const id = bufferFor(path, choice);
+  if (at) placeCursor(useWindowStore.getState().selected, id, at.line, at.col ?? 0);
+  showBuffer(id);
 }
 
-/** Leave project mode and return to the diff buffer (its state is preserved). */
-export function backToDiff(): void {
-  const ui = useUIStore.getState();
-  ui.setActiveBuffer("diff");
-  ui.requestFocus();
+/** Open a file from the tree or the finder, at the revision they list (a jump `M-,` undoes). */
+export function openFileInProject(path: string): void {
+  recordJump();
+  visitFile(path, projectChoice());
+}
+
+/**
+ * Open a file from the comparison — the diff buffer, the changed-files view — at the
+ * revision that actually contains it: the comparison's new side normally, the old side
+ * (merge base, first parent) for content only it has, like a deletion.
+ */
+export function openFileFromDiff(path: string, side: "new" | "old", line?: number): void {
+  const comparison = useRepoStore.getState().diff?.comparison;
+  recordJump();
+  visitFile(
+    path,
+    side === "old" ? baseSource(comparison) : ambientSource(comparison),
+    line != null ? { line } : undefined,
+  );
+}
+
+/**
+ * Keep the open files in step with a newly applied comparison. A buffer at a revision
+ * the comparison still reads stays (working-tree ones are re-read: the disk may have
+ * changed); one whose revision moved under a refresh — a branch that got commits —
+ * follows it; the rest belong to a review that is over and are killed, so no window is
+ * left showing a revision nothing on screen is about.
+ */
+export function reconcileFileBuffers(
+  prev: Comparison | undefined,
+  next: Comparison,
+  sameComparison: boolean,
+): void {
+  const now = [ambientSource(next), baseSource(next)];
+  const before = prev && sameComparison ? [ambientSource(prev), baseSource(prev)] : null;
+  const kill: FileBufferId[] = [];
+  for (const buffer of useFilesStore.getState().buffers) {
+    let choice = now.find((c) => sameSource(c.source, buffer.source));
+    if (!choice && before) {
+      const was = before.findIndex((c) => sameSource(c.source, buffer.source));
+      if (was >= 0) choice = now[was];
+    }
+    if (!choice) {
+      kill.push(buffer.id);
+      continue;
+    }
+    const moved = !sameSource(choice.source, buffer.source);
+    if (moved || choice.label !== buffer.sourceLabel) {
+      useFilesStore
+        .getState()
+        .update(buffer.id, { source: choice.source, sourceLabel: choice.label });
+    }
+    if (moved || choice.source.kind === "worktree") {
+      void readInto({ ...buffer, source: choice.source });
+    }
+  }
+  killFileBuffers(kill);
 }
