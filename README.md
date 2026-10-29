@@ -523,6 +523,11 @@ change in every file, and `M-x hunk` then hides just the one you're on. While th
 only the changed files (`c`), the removed lines are always shown in place; `M-x hunk` and
 `M-x hunks` then add the word highlighting.
 
+A strip at the viewer's right edge, beside the scrollbar, maps the whole file: each change
+in its gutter sign's colour, flags in amber, the part on screen as a band and the cursor as
+a line, so a change out of sight still shows. Click a mark to go to that change, or
+anywhere else on the strip to go to that part of the file.
+
 Rest the cursor on a symbol and its other occurrences in the file light up. In Java they
 come from the cross-reference index, so a field and a local of the same name stay apart;
 in other files the word is matched by name, leaving out keywords, comments and strings.

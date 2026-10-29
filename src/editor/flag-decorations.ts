@@ -1,4 +1,4 @@
-import { RangeSetBuilder, StateEffect, StateField } from "@codemirror/state";
+import { type EditorState, RangeSetBuilder, StateEffect, StateField } from "@codemirror/state";
 import { Decoration, type DecorationSet, EditorView } from "@codemirror/view";
 
 /** Replace the set of flagged line ranges (1-based, inclusive) shown in the viewer. */
@@ -30,3 +30,12 @@ export const flagDecorations = StateField.define<DecorationSet>({
   },
   provide: (f) => EditorView.decorations.from(f),
 });
+
+/** The flagged lines (1-based) in a viewer, in order. */
+export function flaggedLines(state: EditorState): number[] {
+  const lines: number[] = [];
+  state.field(flagDecorations, false)?.between(0, state.doc.length, (from) => {
+    lines.push(state.doc.lineAt(from).number);
+  });
+  return lines;
+}

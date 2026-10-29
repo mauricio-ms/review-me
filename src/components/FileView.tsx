@@ -12,6 +12,7 @@ import { diffMarks, setDiffMarks } from "../editor/diff-marks";
 import { flagDecorations, setFlagLines } from "../editor/flag-decorations";
 import { gruberDarkerTheme } from "../editor/gruber-darker";
 import { occurrenceHighlight } from "../editor/occurrences";
+import { overviewRuler } from "../editor/overview-ruler";
 import { viewerKeymap } from "../editor/viewer-keymap";
 import { defineNavVim } from "../editor/vim-nav";
 import { xrefClick } from "../editor/xref-click";
@@ -194,6 +195,7 @@ export default function FileView({ win, bufferId }: { win: WindowId; bufferId: F
       xrefClick,
       diffMarks,
       flagDecorations,
+      overviewRuler,
       occurrences,
       tracker,
       EditorState.readOnly.of(true),

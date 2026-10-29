@@ -127,7 +127,7 @@ function blockSpan(block: ChangeBlock): [number, number] {
 }
 
 /** The line a block starts on: its first new line, or the line after what it removed. */
-function blockStart(block: ChangeBlock): number {
+export function blockStart(block: ChangeBlock): number {
   return block.modified[0] ?? block.added[0] ?? block.removedAt;
 }
 

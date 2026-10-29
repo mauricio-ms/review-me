@@ -1,4 +1,11 @@
-import { RangeSet, StateEffect, StateField, type Range, type Text } from "@codemirror/state";
+import {
+  type EditorState,
+  RangeSet,
+  StateEffect,
+  StateField,
+  type Range,
+  type Text,
+} from "@codemirror/state";
 import {
   Decoration,
   type DecorationSet,
@@ -82,9 +89,9 @@ class RemovedLines extends WidgetType {
   }
 }
 
-type Marks = { deco: DecorationSet; signs: RangeSet<GutterMarker> };
+type Marks = { deco: DecorationSet; signs: RangeSet<GutterMarker>; blocks: ShownBlock[] };
 
-const EMPTY_MARKS: Marks = { deco: Decoration.none, signs: RangeSet.empty };
+const EMPTY_MARKS: Marks = { deco: Decoration.none, signs: RangeSet.empty, blocks: [] };
 
 const lineClass = (cls: string) => Decoration.line({ attributes: { class: cls } });
 const ADDED_LINE = lineClass("cm-diff-line-added");
@@ -160,7 +167,7 @@ function buildMarks(doc: Text, blocks: ShownBlock[]): Marks {
   const signRanges = [...signs]
     .sort(([a], [b]) => a - b)
     .map(([ln, classes]) => new ChangeSign(classes.join(" ")).range(doc.line(ln).from));
-  return { deco: Decoration.set(deco, true), signs: RangeSet.of(signRanges) };
+  return { deco: Decoration.set(deco, true), signs: RangeSet.of(signRanges), blocks };
 }
 
 const diffMarksField = StateField.define<Marks>({
@@ -170,12 +177,17 @@ const diffMarksField = StateField.define<Marks>({
       if (effect.is(setDiffMarks)) return buildMarks(tr.state.doc, effect.value);
     }
     if (!tr.docChanged) return marks;
-    return { deco: marks.deco.map(tr.changes), signs: marks.signs.map(tr.changes) };
+    return { ...marks, deco: marks.deco.map(tr.changes), signs: marks.signs.map(tr.changes) };
   },
   provide: (f) => EditorView.decorations.from(f, (marks) => marks.deco),
 });
 
 const REMOVED_SIGN = new ChangeSign("cm-diff-sign-removed-lines");
+
+/** The change blocks marked in a viewer, as last set. */
+export function markedBlocks(state: EditorState): readonly ShownBlock[] {
+  return state.field(diffMarksField, false)?.blocks ?? [];
+}
 
 /** The project viewer's change marks: add `diffMarks`, then dispatch `setDiffMarks`. */
 export const diffMarks = [

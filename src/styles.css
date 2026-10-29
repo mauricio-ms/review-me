@@ -1268,6 +1268,69 @@ kbd {
   flex: none;
 }
 
+/* The overview ruler (editor/overview-ruler.ts): the whole file's changes and flags in a
+   strip beside the scrollbar, the part on screen as a band, the cursor as a line. */
+.project-viewer .cm-editor.has-overview-ruler {
+  padding-right: 14px;
+}
+
+.cm-overview-ruler {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 14px;
+  background: var(--bg-deep);
+  border-left: 1px solid var(--bg-1);
+  cursor: pointer;
+}
+
+.cm-ruler-view {
+  position: absolute;
+  left: 0;
+  right: 0;
+  background: rgba(var(--accent-teal-rgb), 0.14);
+}
+
+.cm-ruler-cursor {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  margin-top: -1px;
+  background: var(--fg-0);
+  pointer-events: none;
+}
+
+.cm-ruler-mark {
+  position: absolute;
+  left: 2px;
+  width: 7px;
+  min-height: 4px;
+}
+
+.cm-ruler-mark.is-added {
+  background: var(--accent-green);
+}
+
+.cm-ruler-mark.is-modified {
+  background: var(--accent-teal);
+}
+
+.cm-ruler-mark.is-removed {
+  height: 4px;
+  margin-top: -2px;
+  background: var(--accent-red);
+}
+
+.cm-ruler-mark.is-flag {
+  left: auto;
+  right: 1px;
+  width: 3px;
+  min-height: 6px;
+  background: var(--accent-amber);
+}
+
 /* Between the line numbers and the text, like an editor's git signs. */
 .cm-diff-gutter {
   width: 5px;

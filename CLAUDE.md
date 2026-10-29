@@ -442,7 +442,10 @@ the merge base shows no marks). `] c` / `[ c` (`gotoChange`) walk a file's block
 first line, `] f` / `[ f` (`gotoChangedFile`) the comparison's files in the changed-files
 tree's order (`lib/changed-tree.ts`), opened at their first change; the mode line says
 `change i/n` from each window's published cursor line (`useUIStore.fileLines`).
-`changeBlocks` is cached per `ChangedFile`. What is shown is `useProjectStore.inlineDiff` (`M-x hunks`,
+`changeBlocks` is cached per `ChangedFile`. `editor/overview-ruler.ts` draws the same
+blocks (`markedBlocks`) and the flags (`flaggedLines`) on a strip beside the scrollbar,
+placed by CodeMirror's height map; it shows only while there's something to mark, and
+makes room through `editorAttributes`, since CodeMirror owns the editor's classes. What is shown is `useProjectStore.inlineDiff` (`M-x hunks`,
 all files) XOR `inlineFlipped` (`M-x hunk`, the blocks at the cursor/selection, cleared when
 the comparison changes). The changed-files view (`filter === "changed"`) always shows the
 removed lines (`ShownBlock.showRemoved`); the full diff — green new lines, word marks —
