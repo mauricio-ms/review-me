@@ -34,6 +34,10 @@ docker info >/dev/null 2>&1 || { echo "the docker daemon is not reachable" >&2; 
 
 cd "$ROOT"
 
+# The build context leaves out .git, so the version is worked out here: the app
+# reports it (REVIEW_ME_VERSION, read by vite.config.ts) and the .deb carries it.
+VERSION="$(./scripts/version.sh)"
+
 echo "==> Building the Ubuntu $UBUNTU_VERSION builder image"
 docker build \
   --build-arg "UBUNTU_VERSION=$UBUNTU_VERSION" \
@@ -41,8 +45,9 @@ docker build \
   -t "$IMAGE" \
   .
 
-echo "==> Building review-me ($BUNDLES)"
-CONTAINER="$(docker create "$IMAGE" --bundles "$BUNDLES")"
+echo "==> Building review-me $VERSION ($BUNDLES)"
+CONTAINER="$(docker create -e "REVIEW_ME_VERSION=$VERSION" "$IMAGE" \
+  --bundles "$BUNDLES" --config "{\"version\":\"$VERSION\"}")"
 trap 'docker rm -f "$CONTAINER" >/dev/null 2>&1 || true' EXIT
 docker start -a "$CONTAINER"
 

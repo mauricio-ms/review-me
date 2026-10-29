@@ -5,6 +5,7 @@ import { KEYMAP, type StartAction } from "../lib/keymap";
 import { openRepoByPath } from "../lib/open-repo";
 import { listRecentRepos } from "../lib/tauri";
 import { timeAgo } from "../lib/time";
+import { versionLine } from "../lib/version";
 import { useUIStore } from "../state/ui";
 import type { RememberedRepo } from "../types/repo";
 
@@ -195,6 +196,8 @@ export default function StartupDashboard() {
             <span>every key binding</span>
           </div>
         </section>
+
+        <div className="startup-version">{versionLine()}</div>
       </div>
     </div>
   );

@@ -326,6 +326,12 @@ kbd {
   line-height: 1.5;
 }
 
+.startup-version {
+  text-align: center;
+  color: var(--fg-faint);
+  font-size: var(--fs-sm);
+}
+
 .startup-dashboard .startup-logo {
   align-self: center;
 }
@@ -2238,6 +2244,10 @@ kbd {
 .help-hint {
   margin-left: auto;
   color: var(--fg-2);
+}
+
+.help-version {
+  color: var(--fg-dim);
 }
 
 .help-scroll {

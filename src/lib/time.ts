@@ -22,3 +22,12 @@ export function timeAgo(timestamp: number, now = Date.now() / 1000): string {
   }
   return "just now";
 }
+
+/** A unix timestamp (seconds) as `2026-10-29 14:32`, local time. */
+export function dateTime(timestamp: number): string {
+  const d = new Date(timestamp * 1000);
+  const two = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())} ${two(
+    d.getHours(),
+  )}:${two(d.getMinutes())}`;
+}

@@ -29,7 +29,7 @@ import {
   reviewWholeFile,
   unmarkLines,
 } from "../lib/review-actions";
-import { timeAgo } from "../lib/time";
+import { dateTime, timeAgo } from "../lib/time";
 import { refineHunk, type WordSeg } from "../lib/word-diff";
 import DiffCleanState from "./DiffCleanState";
 import PathLabel from "./PathLabel";
@@ -135,15 +135,6 @@ function estimatedRowHeight(kind: Row["kind"]): number {
 /** The file a row is about; null for a section header and the commit's message. */
 function rowFile(row: Row | undefined): ChangedFile | null {
   return row && row.kind !== "section" && row.kind !== "commit" ? row.file : null;
-}
-
-/** An author date as `2026-10-29 14:32`, local time. */
-function commitDate(timestamp: number): string {
-  const d = new Date(timestamp * 1000);
-  const two = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())} ${two(
-    d.getHours(),
-  )}:${two(d.getMinutes())}`;
 }
 
 function measuredRowHeight(element: HTMLDivElement): number {
@@ -1079,7 +1070,7 @@ export default function DiffBuffer() {
                     <span className="diff-commit-oid">{c.shortOid}</span>
                     <span>{c.authorName}</span>
                     <span>
-                      {commitDate(c.timestamp)} ({timeAgo(c.timestamp)})
+                      {dateTime(c.timestamp)} ({timeAgo(c.timestamp)})
                     </span>
                     {c.isMerge && <span>merge, shown against its first parent</span>}
                   </div>

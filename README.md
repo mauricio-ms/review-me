@@ -239,6 +239,15 @@ build is slow; it only needs to re-run when the binary changes.
 
 The entry sets `Path=` to the repo root, so any cwd-relative lookups resolve there.
 
+### Which build is running
+
+`M-x version` says, e.g. `review-me 0.1.102 · built 2026-10-29 18:52 (4m ago)`; the start
+screen and the help buffer show it too. The number is `package.json`'s major.minor plus
+the commit count (`scripts/version.sh`), so it goes up by itself with every commit and the
+same code always gets the same number; a build with uncommitted changes adds `-dev`. After
+`./install.sh --restart`, the build time is the quick check that the app you're looking at
+is the one you just built.
+
 The icon is the app's own startup-dashboard logo — the pixel-art magnifying-glass badge
 from `StartupDashboard.tsx` — so the launcher, window and taskbar all show the mark you
 see on screen. `src-tauri/icons/.gen/logo-mark.html` reproduces that badge at a fixed
@@ -283,7 +292,8 @@ tested. arm64 would need a separate cross-build setup.
 On the target machine:
 
 ```bash
-sudo apt install ./review-me_0.1.0_amd64.deb
+sudo apt install ./review-me_0.1.102_amd64.deb   # the version the app reports
+dpkg -l review-me                                # which one is installed
 review-me                                    # or find it in the app launcher
 ```
 

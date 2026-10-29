@@ -27,6 +27,13 @@ cd src-tauri && cargo check                                  # fast backend type
 ./packaging/build-ubuntu.sh # .deb for Ubuntu 22.04+, built in Docker (see README)
 ```
 
+The version is `scripts/version.sh` (`package.json`'s major.minor + the commit count,
+`-dev` with uncommitted changes) — never bump it by hand. `vite.config.ts` stamps it and
+the build time into the frontend (`__APP_VERSION__`/`__APP_BUILT__`, read through
+`lib/version.ts`: `M-x version`, the start screen, the help header), and
+`build-ubuntu.sh` works it out on the host — the Docker context has no `.git` — passing it
+in as `REVIEW_ME_VERSION` and onto the `.deb` with `tauri build --config`.
+
 There is no linter/formatter configured (matching video-studio); TypeScript runs in
 strict mode with `noUnusedLocals`/`noUnusedParameters`, so dead code fails the build.
 

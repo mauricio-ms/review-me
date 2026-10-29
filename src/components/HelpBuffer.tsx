@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { quitWindow } from "../lib/buffers";
+import { APP_VERSION } from "../lib/version";
 import { dispatchKey, type KeyHandler } from "../lib/key-dispatch";
 import {
   boundCommands,
@@ -149,6 +150,9 @@ export default function HelpBuffer() {
         {query.trim() && <span className="help-query">matching “{query.trim()}”</span>}
         <span className="help-hint">
           q back · C-s search · {view.only ? "C-h b everything" : "C-h m this buffer only"}
+        </span>
+        <span className="help-version" title="M-x version says when it was built">
+          review-me {APP_VERSION}
         </span>
       </div>
       <div ref={scrollRef} className="help-scroll">

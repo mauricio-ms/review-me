@@ -16,6 +16,7 @@ import { resizeTree, toggleTree } from "../lib/project";
 import { toggleChangesAtCursor } from "../lib/project-diff";
 import { flagHere } from "../lib/project-review";
 import { adjustTextScale } from "../lib/text-scale";
+import { versionLine } from "../lib/version";
 import {
   deleteOtherWindows,
   deleteWindow,
@@ -99,7 +100,8 @@ export type CommandId =
   | "toggle-tree"
   | "text-scale-increase"
   | "text-scale-decrease"
-  | "text-scale-reset";
+  | "text-scale-reset"
+  | "version";
 
 export type AppCommand = {
   /** Stable identity, e.g. "open"; what key bindings (`lib/keymap.ts`) refer to. */
@@ -821,6 +823,17 @@ export function useCommands(close: CommandClose): {
       run: () => {
         close();
         adjustTextScale(0);
+      },
+    },
+    {
+      id: "version",
+      name: "version",
+      aliases: ["about", "build"],
+      label: "which build is running, and when it was built",
+      enabled: true,
+      run: () => {
+        close();
+        useUIStore.getState().showFlash(versionLine());
       },
     },
   ];
