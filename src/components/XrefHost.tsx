@@ -58,6 +58,8 @@ export default function XrefHost() {
     complete: () => false,
     accept: () => choose(selected),
     quit: close,
+    yes: () => false,
+    no: () => false,
   };
 
   return (

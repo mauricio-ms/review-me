@@ -110,7 +110,8 @@ window wears an amber top edge when there are several; a click or focus anywhere
 window selects it, and a Ctrl+click selects its window before resolving.
 The frame's last line is **`Minibuffer.tsx`**: the echo area (`useUIStore.flash`, and
 `keyEcho` for a half-typed `C-x-`) while idle, the minibuffer while something is read
-(`state/minibuffer.ts`: `command` for `M-x`, `buffer` for `C-x b`, `text` for a prompt).
+(`state/minibuffer.ts`: `command` for `M-x`, `buffer` for `C-x b`, `text` for a prompt,
+`confirm` for a `y` / `n` question — Emacs's `y-or-n-p`).
 It sits under the mode line (`BufferStatusBar`) and grows upward.
 
 **Commands and keys are Emacs-style; there is no `:` command line and no Space palette**
@@ -130,9 +131,10 @@ buffer (`C-h b`, `C-h m`; `C-h k` describes a key in the echo area). Dispatch li
   fails the build; a handler returning `false` lets the key go on.
 - The viewer's keys are a CodeMirror keymap built from the table
   (`editor/viewer-keymap.ts`) — except `vim: true` entries (`q`, `] c`, `[ c`, `] f`,
-  `[ f`), which `editor/vim-nav.ts` maps as vim commands, because a sequence vim also uses
-  (`]]`, `[(`) must reach vim whole; they stay in the table for help and `C-h k`, and
-  get vim's count (`3]c`). The note and commit editors read `C-c C-c` / `C-c C-k` in a
+  `[ f`, `r`, `!`, `u`), which `editor/vim-nav.ts` maps as vim commands, because a
+  sequence vim also uses (`]]`, `[(`) must reach vim whole; they stay in the table for
+  help and `C-h k`, and get vim's count (`3]c`). `visual: true` ones are mapped in visual
+  mode too: the handler is told so, reads the selection, and vim-nav then ends it. The note and commit editors read `C-c C-c` / `C-c C-k` in a
   capture handler on the dialog, before vim sees them (vim's own `:wq`/`:q` stay).
 - New command: give it an `M-x` name; give it a key only if it's used often, in Emacs
   conventions. Rare or destructive ones stay `M-x` only (`show`, `note`, `export`,
@@ -321,7 +323,15 @@ binary file); file/line coverage is **derived** in `src/lib/coverage.ts`
 each unit into one of four sections — To review / Flagged / Reviewed / Ignored — by
 precedence **flagged > ignored > reviewed > to-review** (`sectionForHunk`/
 `sectionForFile`); `r` reviews, `f` flags, `i` ignores, and `u` unmarks the current
-scope. `review_commit.rs` stages reviewed new-side + old-side hunks via `apply` and
+scope. **Project mode reviews whole files only** (`lib/project-review.ts`): `r` `f` `i`
+`u` in the tree and `r` / `u` in the viewer act on the file — `reviewWholeFile` /
+`ignoreWholeFile` mark it unit by unit, a flag spans `fileTarget`, `unmarkWholeFile` takes
+every mark on either side — while the viewer's `!` (and `M-x flag`) flags lines and `u` on
+a visual selection unmarks lines. Lines are marked only on the side the buffer reads
+(`sideRead`: the new side, or the old one for a deleted file); the flag tint follows the
+same rule. **`u` asks first (`confirm`) whenever it would delete a note**, in every buffer,
+and `addFlag` passes an existing same-range flag's note on, because `add_flag` replaces a
+flag on the same lines. `review_commit.rs` stages reviewed new-side + old-side hunks via `apply` and
 reviewed binary files via index add/remove; it loads **worktree-scoped tags only**, and
 `M-x commit` is disabled (with a defensive guard in `CommitReviewedHost`) whenever
 `readsCommittedHistory` holds — a branch pair or a single commit — where both sides are

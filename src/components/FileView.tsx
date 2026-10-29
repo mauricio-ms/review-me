@@ -15,6 +15,7 @@ import { viewerKeymap } from "../editor/viewer-keymap";
 import { defineNavVim } from "../editor/vim-nav";
 import { xrefClick } from "../editor/xref-click";
 import { changeBlocks, changeForFile } from "../lib/project-diff";
+import { sideRead } from "../lib/project-review";
 import {
   applyPosition,
   positionOf,
@@ -119,13 +120,22 @@ export default function FileView({ win, bufferId }: { win: WindowId; bufferId: F
 
   useEffect(() => () => registerFileView(win, bufferId, null), [bufferId, win]);
 
+  // The flags on the side of the comparison this buffer reads: their line numbers count
+  // that side's lines, so a revision that is neither side shows none.
+  const side = useMemo(
+    () => (source ? sideRead(diff?.comparison, source) : null),
+    [diff, source],
+  );
   useEffect(() => {
     if (!view) return;
     const ranges = flags
-      .filter((f) => f.anchor.file === path && !f.anchor.stale)
+      .filter(
+        (f) =>
+          f.anchor.file === path && !f.anchor.stale && (f.anchor.side ?? "new") === side,
+      )
       .map((f) => [f.anchor.startLine, f.anchor.endLine] as [number, number]);
     view.dispatch({ effects: setFlagLines.of(ranges) });
-  }, [content, flags, path, view]);
+  }, [content, flags, path, side, view]);
 
   // The change marks; `content` re-pushes them onto a re-read document. Browsing only
   // the changed files, the removed lines always show — there, what went matters as

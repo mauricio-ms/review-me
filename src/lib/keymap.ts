@@ -41,6 +41,8 @@ export type KeyBinding = {
    * sequence vim also uses (`]` begins `]]`, `]c`, …) must reach vim whole.
    */
   readonly vim?: true;
+  /** A `vim` key that also works in visual mode, on the selection (which it ends). */
+  readonly visual?: true;
 };
 
 type ActionOfEntry<E> = E extends { readonly action: infer A extends string } ? A : never;
@@ -191,6 +193,10 @@ const TREE_KEYS = [
     command: "changed",
     doc: "all files ↔ only what the comparison changed",
   },
+  { keys: ["r"], action: "review", doc: "mark the file reviewed" },
+  { keys: ["f"], action: "flag", doc: "flag the file" },
+  { keys: ["i"], action: "ignore", doc: "ignore the file" },
+  { keys: ["u"], action: "unmark", doc: "unmark the file (asks before deleting a note)" },
   { keys: ["q"], action: "quit", doc: "back to the diff" },
 ] as const satisfies readonly KeyBinding[];
 
@@ -205,6 +211,22 @@ const VIEWER_KEYS = [
     doc: "next changed file, at its first change",
   },
   { keys: ["[ f"], action: "prev-file", vim: true, doc: "previous changed file" },
+  { keys: ["r"], action: "review", vim: true, doc: "mark this file reviewed" },
+  {
+    keys: ["!"],
+    action: "flag",
+    command: "flag",
+    vim: true,
+    visual: true,
+    doc: "flag the selected lines, or the cursor's",
+  },
+  {
+    keys: ["u"],
+    action: "unmark",
+    vim: true,
+    visual: true,
+    doc: "unmark the selected lines, else the whole file (asks before deleting a note)",
+  },
   { keys: ["M-."], action: "definition", command: "goto-def", doc: "go to definition" },
   { keys: ["M-?"], action: "references", command: "find-refs", doc: "find references" },
   { keys: ["M-g g"], action: "goto-line", doc: "go to line" },
@@ -238,7 +260,9 @@ const MINIBUFFER_KEYS = [
   { keys: ["<up>", "C-p"], action: "prev", doc: "previous candidate" },
   { keys: ["TAB"], action: "complete", doc: "complete the candidate's name" },
   { keys: ["RET"], action: "accept", doc: "run, open, or accept" },
-  { keys: ["C-g", "ESC"], action: "quit", doc: "quit" },
+  { keys: ["y"], action: "yes", doc: "yes, to a question that asks (y or n)" },
+  { keys: ["n"], action: "no", doc: "no, to a question that asks (y or n)" },
+  { keys: ["C-g", "ESC"], action: "quit", doc: "quit (to a question: no)" },
 ] as const satisfies readonly KeyBinding[];
 
 /** The note and commit-message editors (vim inside, Emacs to finish). */

@@ -65,8 +65,8 @@ Reviewing agent-generated code has a different shape than reviewing a human PR:
 - **Fuzzy file finder** — jump to any (non-ignored) file in the repo.
 - **Project mode** — a read-only, IDE-like browser over the *entire* repo, or (`c`) just
   the files the comparison on screen changed — a commit's, a branch's, the uncommitted
-  ones. You can't mark things reviewed here (reviewing is diff-only), but you can still
-  flag regions for later.
+  ones. Review a whole file at a time here — from the tree or from the file itself — and
+  flag lines for later.
 - **Cross-references** — go-to-definition and find-references (tree-sitter, Java) so you
   can trace a changed symbol through the project.
 
@@ -85,7 +85,7 @@ All stay mounted; you switch between them and keep your cursor/scroll position.
 | --- | --- | --- |
 | **Diff** | The active comparison as a navigable file/hunk/line list. | Review, flag **and** note |
 | **Commits** | The review branch's history, magit-style; `Enter` opens a commit in the diff buffer. | — |
-| **Project** | Read-only file tree + syntax-highlighted viewer over the whole repo, at the compared revision. Every file you open in it stays open as a buffer of its own. | Flag only |
+| **Project** | Read-only file tree + syntax-highlighted viewer over the whole repo, at the compared revision. Every file you open in it stays open as a buffer of its own. | Review whole files, flag lines |
 
 The file tree belongs to the project buffer only: the diff, the commits and help never show
 it. Opening a file *beside* the diff (`o`) keeps you in the diff, with no tree; `RET` takes
@@ -168,7 +168,8 @@ re-read) and reloads the commits buffer.
 ### Reviewed vs. flagged
 
 - **Reviewed (`✓`)** — "I have checked this region." Fundamentally per-hunk; file- and
-  line-level coverage is *derived*, not stored. Diff buffer only.
+  line-level coverage is *derived*, not stored. The diff buffer reviews a file, a hunk or
+  lines; the project buffer a whole file at a time (every hunk of it).
 - **Flag (`⚑`)** — "Scrutinize this later." Works on the same scopes (file / hunk / line
   range), and is available in the diff buffer and in open files.
 - **Note (`✎`)** — a flag that says what to fix, written with `M-x note` while reviewing a
@@ -378,8 +379,8 @@ just the current buffer's keys; `C-h k` tells you what a key does.
 | `C-o` | Show it in the other window, staying in the diff |
 | `v` / `V` | Start/clear a visual line selection (extend with `j`/`k`) |
 | `r` | Mark the file / hunk / selection **reviewed** (`✓`) |
-| `u` | Un-review |
-| `f` | Toggle **flag** (`⚑`) on the file / hunk / selection |
+| `u` | Unmark (asks first when that deletes a note) |
+| `f` | **Flag** (`⚑`) the file / hunk / selection (flagging it again keeps its note) |
 | `i` | **Ignore** (`⊘`) the file / hunk / selection |
 | `C-e` / `C-r` | Scroll one line down / up |
 | `q` | Leave a commit or branch comparison for the commits buffer |
@@ -454,7 +455,8 @@ left for later, so it rides on a flag: on lines already flagged it edits that fl
 note; otherwise saving flags the lines with it. `C-c C-c` (or `C-RET`, or vim's `:wq` /
 `:x`) saves and closes, `C-c C-k` (or `:q!`) discards the edit, `:w` saves and keeps
 editing, and `:q` refuses to drop unsaved changes. An empty note clears
-it (the flag stays; `u` removes both). Notes show as rows under their hunk.
+it (the flag stays; `u` removes both, after asking `(y or n)` in the minibuffer). Notes
+show as rows under their hunk.
 
 Every commit's notes are written, as you make them, to
 `.review-me/notes/commits/<full-oid>.md`, indexed in `.review-me/notes/README.md`:
@@ -495,6 +497,10 @@ opens as a buffer of its own; the ones before it stay open (`C-x b`).
 | `h` | Collapse the directory, or jump to its parent |
 | `TAB` | Toggle the folder under the cursor |
 | `c` | Only the changed files ↔ all files |
+| `r` | Mark the file **reviewed** (every hunk of it) |
+| `f` | **Flag** the file |
+| `i` | **Ignore** the file |
+| `u` | Unmark the file (asks first when that deletes a note) |
 | `C-x o` | To the viewer |
 | `C-x {` / `C-x }` | Narrower / wider tree (then `{` `}` alone keep adjusting) |
 | `q` | Back to the diff |
@@ -521,7 +527,9 @@ only the changed files (`c`), the removed lines are always shown in place; `M-x 
 | `]c` / `[c` | Next / previous **change** in the file (a count works: `3]c`) |
 | `]f` / `[f` | Next / previous **changed file**, at its first change |
 | `Ctrl`/`Cmd` + click | Jump to definition of the symbol clicked |
-| `v` + `j`, then `M-x flag` | Flag the selected lines |
+| `r` | Mark this file **reviewed** (every hunk of it) |
+| `!` | **Flag** the cursor's line, or the visual selection (`V` + `j`); `M-x flag` too |
+| `u` | Unmark the visual selection, else the whole file (asks first when that deletes a note) |
 | `C-x o` | To the tree (or the next window) |
 | `q` | Back to the diff (a window split off beside it closes) |
 

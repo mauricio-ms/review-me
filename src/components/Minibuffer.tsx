@@ -265,9 +265,18 @@ function Prompt({ request }: { request: MinibufferRequest }) {
   const cancel = () => {
     if (request.kind === "text") request.onCancel?.();
     close();
+    if (request.kind === "confirm") request.onAnswer(false);
+  };
+
+  const answer = (yes: boolean) => () => {
+    if (request.kind !== "confirm") return false;
+    close();
+    request.onAnswer(yes);
   };
 
   const accept = () => {
+    // A question is answered with `y` or `n` only, as Emacs's `y-or-n-p` is.
+    if (request.kind === "confirm") return;
     if (request.kind === "text") {
       close();
       request.onAccept(query);
@@ -296,6 +305,9 @@ function Prompt({ request }: { request: MinibufferRequest }) {
     },
     accept,
     quit: cancel,
+    // Typed as text anywhere but a question.
+    yes: answer(true),
+    no: answer(false),
   };
 
   // The list opens under wherever the pointer rests; only a real move selects, so a
@@ -309,7 +321,9 @@ function Prompt({ request }: { request: MinibufferRequest }) {
         ? `Switch to buffer${request.other ? " in other window" : ""}${
             candidates?.[0] ? ` (default ${candidates[0].name})` : ""
           }:`
-        : request.prompt;
+        : request.kind === "confirm"
+          ? `${request.prompt} (y or n)`
+          : request.prompt;
 
   return (
     <div
@@ -335,6 +349,7 @@ function Prompt({ request }: { request: MinibufferRequest }) {
           ref={inputRef}
           className="mb-input"
           value={query}
+          readOnly={request.kind === "confirm"}
           spellCheck={false}
           autoComplete="off"
           onChange={(e) => {

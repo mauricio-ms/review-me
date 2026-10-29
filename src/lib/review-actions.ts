@@ -1,3 +1,4 @@
+import { useMinibufferStore } from "../state/minibuffer";
 import { useRepoStore } from "../state/repo";
 import { useTagsStore } from "../state/tags";
 import type { ChangedFile } from "../types/diff";
@@ -5,6 +6,7 @@ import {
   scopeForSpec,
   type AnchorKind,
   type AnchorSide,
+  type FlagTag,
   type ReviewScope,
   type TagStore,
 } from "../types/tags";
@@ -17,6 +19,7 @@ import {
   unmarkRange,
 } from "./tauri";
 import { hunkTarget } from "./coverage";
+import { hasNote } from "./notes";
 import type { NoteEdit } from "../state/notes";
 
 /**
@@ -45,44 +48,112 @@ export async function reviewLines(
 }
 
 /**
- * Mark a whole file reviewed: a binary file as a single file-scope unit, otherwise
- * every reviewable hunk on its own side (new for edits, old for pure deletions).
+ * Mark each unit of a file: a binary file as a single file-scope unit, otherwise every
+ * reviewable hunk on its own side (new for edits, old for pure deletions).
  */
-export async function reviewWholeFile(file: ChangedFile): Promise<void> {
+async function markEachUnit(file: ChangedFile, add: typeof addReviewedTag): Promise<void> {
   const t = target();
   if (!t) return;
   let store: TagStore | null = null;
   if (file.binary) {
-    store = await addReviewedTag(t.repo, t.scope, file.path, 0, 0, "file", "file");
+    store = await add(t.repo, t.scope, file.path, 0, 0, "file", "file");
   } else {
     for (const hunk of file.hunks) {
       const target = hunkTarget(hunk);
       if (!target) continue;
-      store = await addReviewedTag(
-        t.repo,
-        t.scope,
-        file.path,
-        target.lo,
-        target.hi,
-        "hunk",
-        target.side,
-      );
+      store = await add(t.repo, t.scope, file.path, target.lo, target.hi, "hunk", target.side);
     }
   }
   if (store) apply(store);
 }
 
+/** Mark a whole file reviewed, unit by unit. */
+export function reviewWholeFile(file: ChangedFile): Promise<void> {
+  return markEachUnit(file, addReviewedTag);
+}
+
+/** Ignore a whole file, unit by unit — so it leaves the review however its hunks lie. */
+export function ignoreWholeFile(file: ChangedFile): Promise<void> {
+  return markEachUnit(file, addIgnoredTag);
+}
+
+/** Ask a `y` / `n` question in the minibuffer. */
+function yOrN(prompt: string): Promise<boolean> {
+  return new Promise((resolve) =>
+    useMinibufferStore.getState().open({ kind: "confirm", prompt, onAnswer: resolve }),
+  );
+}
+
+/**
+ * Whether an unmark that takes `notes` with it may go ahead: at once when it takes
+ * none, else only on a `y` — a note is writing nothing can bring back.
+ */
+function mayDeleteNotes(notes: FlagTag[], file: string): Promise<boolean> {
+  if (notes.length === 0) return Promise.resolve(true);
+  const what = notes.length === 1 ? "the note" : `${notes.length} notes`;
+  return yOrN(`Unmark and delete ${what} on ${file}?`);
+}
+
+/**
+ * Take every mark on `side` that touches the lines (`unmark_range`'s rule), asking
+ * first when that deletes a note.
+ */
 export async function unmarkLines(
   file: string,
   lo: number,
   hi: number,
   side: AnchorSide,
 ): Promise<void> {
+  const notes = useTagsStore
+    .getState()
+    .flags.filter(
+      (f) =>
+        hasNote(f) &&
+        f.anchor.file === file &&
+        (f.anchor.side ?? "new") === side &&
+        (side === "file" || (f.anchor.startLine <= hi && f.anchor.endLine >= lo)),
+    );
+  if (!(await mayDeleteNotes(notes, file))) return;
   const t = target();
   if (!t) return;
   apply(await unmarkRange(t.repo, t.scope, file, lo, hi, side));
 }
 
+/**
+ * Take every mark off a file — reviewed, flagged and ignored, on either side — asking
+ * first when that deletes a note. Says whether there was anything to take, and whether
+ * it went.
+ */
+export async function unmarkWholeFile(file: string): Promise<"unmarked" | "none" | "kept"> {
+  const { reviewed, flags, ignored } = useTagsStore.getState();
+  // Per side, the span its marks cover: one `unmark_range` each.
+  const spans = new Map<AnchorSide, { lo: number; hi: number }>();
+  for (const { anchor } of [...reviewed, ...flags, ...ignored]) {
+    if (anchor.file !== file) continue;
+    const side = anchor.side ?? "new";
+    const span = spans.get(side);
+    spans.set(side, {
+      lo: Math.min(span?.lo ?? Infinity, anchor.startLine),
+      hi: Math.max(span?.hi ?? -Infinity, anchor.endLine),
+    });
+  }
+  if (spans.size === 0) return "none";
+  const notes = flags.filter((f) => f.anchor.file === file && hasNote(f));
+  if (!(await mayDeleteNotes(notes, file))) return "kept";
+  const t = target();
+  if (!t) return "kept";
+  let store: TagStore | null = null;
+  for (const [side, { lo, hi }] of spans) {
+    store = await unmarkRange(t.repo, t.scope, file, lo, hi, side);
+  }
+  if (store) apply(store);
+  return "unmarked";
+}
+
+/**
+ * Flag lines. Flagging lines that already carry a flag re-anchors it and keeps its
+ * note: `add_flag` replaces a flag on the same lines, and the note would go with it.
+ */
 export async function addFlag(
   file: string,
   lo: number,
@@ -92,7 +163,28 @@ export async function addFlag(
 ): Promise<void> {
   const t = target();
   if (!t) return;
-  apply(await addFlagTag(t.repo, t.scope, file, lo, hi, kind, side));
+  const existing = useTagsStore
+    .getState()
+    .flags.find(
+      (f) =>
+        f.anchor.file === file &&
+        (f.anchor.side ?? "new") === side &&
+        f.anchor.startLine === lo &&
+        f.anchor.endLine === hi,
+    );
+  apply(
+    await addFlagTag(
+      t.repo,
+      t.scope,
+      file,
+      lo,
+      hi,
+      kind,
+      side,
+      existing?.note ?? null,
+      existing?.severity ?? null,
+    ),
+  );
 }
 
 /**

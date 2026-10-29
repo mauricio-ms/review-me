@@ -15,6 +15,7 @@ import {
   sideChoice,
   toggleDir,
 } from "../lib/project";
+import { flagFile, ignoreFile, reviewFile, unmarkFile } from "../lib/project-review";
 import { TREE_WIDTH_MIN, useProjectStore } from "../state/project";
 import { useRepoStore } from "../state/repo";
 import { useTagsStore } from "../state/tags";
@@ -247,6 +248,16 @@ export default function ProjectTree({ hidden }: { hidden: boolean }) {
     }
   };
 
+  // `r` `f` `i` `u` mark the file at the cursor — in either view, so by its path.
+  const markFile = (mark: (path: string) => Promise<void>) => () => {
+    const node = nodes[cursor];
+    if (!node || node.entry.isDir) {
+      useUIStore.getState().showFlash("Not on a file");
+      return;
+    }
+    void mark(node.change?.path ?? node.entry.path);
+  };
+
   const handlers: Record<TreeAction, KeyHandler> = {
     down: () => moveTo(cursor + 1),
     up: () => moveTo(cursor - 1),
@@ -262,6 +273,10 @@ export default function ProjectTree({ hidden }: { hidden: boolean }) {
     close: () => collapseOrParent(nodes[cursor]),
     // The whole revision ↔ only what the comparison on screen changed.
     filter: toggleFilter,
+    review: markFile(reviewFile),
+    flag: markFile(flagFile),
+    ignore: markFile(ignoreFile),
+    unmark: markFile(unmarkFile),
     quit: () => showDiff(),
   };
 

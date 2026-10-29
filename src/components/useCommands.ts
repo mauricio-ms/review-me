@@ -1,7 +1,6 @@
 import { useCallback } from "react";
 
 import {
-  currentFile,
   killCurrentBuffer,
   openHelp,
   showDiff,
@@ -15,8 +14,7 @@ import { exportNotes, openNoteEditor } from "../lib/notes";
 import { applyComparison, refreshDiff } from "../lib/open-repo";
 import { resizeTree, toggleTree } from "../lib/project";
 import { toggleChangesAtCursor } from "../lib/project-diff";
-import { projectSelectionRange } from "../lib/project-view";
-import { addFlag } from "../lib/review-actions";
+import { flagHere } from "../lib/project-review";
 import { adjustTextScale } from "../lib/text-scale";
 import {
   deleteOtherWindows,
@@ -255,11 +253,8 @@ export function useCommands(close: CommandClose): {
 
   const handleProjectFlag = useCallback(async () => {
     close({ restoreFocus: false });
-    const path = currentFile()?.path;
-    const range = projectSelectionRange();
-    if (!path || !range) return;
     try {
-      await addFlag(path, range.lo, range.hi, "range", "new");
+      await flagHere();
     } finally {
       requestFocus();
     }

@@ -5,16 +5,17 @@ import { quitFile } from "../lib/buffers";
 import { recordJump } from "../lib/jumps";
 import { KEYMAP, type ViewerAction } from "../lib/keymap";
 import { gotoChange, gotoChangedFile } from "../lib/project-diff";
+import { flagHere, reviewHere, unmarkHere } from "../lib/project-review";
 import { setProjectCursor } from "../lib/project-view";
 import { findUsages, gotoDefinition } from "../lib/xref";
 import { useMinibufferStore } from "../state/minibuffer";
 import { inVimInsertMode } from "./cm-shared";
 
 /** Run an action unless vim is mid-insert, where the key must stay literal. */
-function normalOnly(action: (count: number) => void) {
+function normalOnly(action: ViewerHandler) {
   return (view: EditorView) => {
     if (inVimInsertMode(view)) return false;
-    action(1);
+    action(1, false);
     return true;
   };
 }
@@ -34,8 +35,13 @@ function promptGotoLine(): void {
   });
 }
 
-/** Every viewer action; `count` is vim's (`3]c`), 1 from a CodeMirror key. */
-export const VIEWER_HANDLERS: Record<ViewerAction, (count: number) => void> = {
+/**
+ * A viewer action. `count` is vim's (`3]c`), 1 from a CodeMirror key; `visual` says it
+ * was pressed in vim's visual mode, on a selection.
+ */
+type ViewerHandler = (count: number, visual: boolean) => void;
+
+export const VIEWER_HANDLERS: Record<ViewerAction, ViewerHandler> = {
   definition: () => void gotoDefinition(),
   references: () => void findUsages(),
   "goto-line": promptGotoLine,
@@ -43,6 +49,9 @@ export const VIEWER_HANDLERS: Record<ViewerAction, (count: number) => void> = {
   "prev-change": (count) => gotoChange(-1, count),
   "next-file": (count) => gotoChangedFile(1, count),
   "prev-file": (count) => gotoChangedFile(-1, count),
+  review: () => void reviewHere(),
+  flag: () => void flagHere(),
+  unmark: (_count, visual) => void unmarkHere(visual),
   quit: quitFile,
 };
 

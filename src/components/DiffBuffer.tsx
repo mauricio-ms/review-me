@@ -1,8 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import {
-  fileNewRange,
-  fileOldRange,
+  fileTarget,
   hunkTarget,
   isFileReviewed,
   isHunkFlagged,
@@ -686,14 +685,8 @@ export default function DiffBuffer() {
     const row = rows[cursor];
     if (!row || row.kind === "section") return null;
     if (row.kind === "file") {
-      if (row.file.binary) {
-        return { file: row.file, lo: 0, hi: 0, kind: "file", side: "file" };
-      }
-      const nr = fileNewRange(row.file);
-      if (nr) return { file: row.file, lo: nr.lo, hi: nr.hi, kind: "file", side: "new" };
-      const or = fileOldRange(row.file);
-      if (or) return { file: row.file, lo: or.lo, hi: or.hi, kind: "file", side: "old" };
-      return null;
+      const t = fileTarget(row.file);
+      return t ? { file: row.file, lo: t.lo, hi: t.hi, kind: "file", side: t.side } : null;
     }
     if (row.kind === "hunk") {
       const t = hunkTarget(row.hunk);

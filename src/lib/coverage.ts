@@ -112,6 +112,19 @@ export function hunkTarget(hunk: Hunk): ReviewTarget | null {
   return r ? { side: "new", lo: r.lo, hi: r.hi } : null;
 }
 
+/**
+ * The side + line span a whole file is flagged or ignored against: the file itself
+ * when binary, else the new-side span of its hunks, else (only removals) the old-side
+ * one. Null for a text file with no lines to point at.
+ */
+export function fileTarget(file: ChangedFile): ReviewTarget | null {
+  if (file.binary) return { side: "file", lo: 0, hi: 0 };
+  const nr = fileNewRange(file);
+  if (nr) return { side: "new", ...nr };
+  const or = fileOldRange(file);
+  return or ? { side: "old", ...or } : null;
+}
+
 type Tagged = { anchor: Anchor };
 
 /** Treat a missing side (tags written before deletion/binary support) as new-side. */

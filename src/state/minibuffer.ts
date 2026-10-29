@@ -4,8 +4,9 @@ import { useUIStore } from "./ui";
 
 /**
  * What the minibuffer at the bottom of the window is reading: a command (`M-x`), a
- * buffer (`C-x b`, `C-x 4 b`), one of a caller's choices (`C-x 4 t`'s candidates), or a
- * line of text for some caller (`M-g g`'s line, `C-s` in help).
+ * buffer (`C-x b`, `C-x 4 b`), one of a caller's choices (`C-x 4 t`'s candidates), a
+ * line of text for some caller (`M-g g`'s line, `C-s` in help), or a `y` / `n` answer
+ * (Emacs's `y-or-n-p`: `u` asks before it deletes a note).
  */
 export type MinibufferRequest =
   | { kind: "command" }
@@ -25,6 +26,13 @@ export type MinibufferRequest =
       onChange?: (value: string) => void;
       onAccept: (value: string) => void;
       onCancel?: () => void;
+    }
+  | {
+      kind: "confirm";
+      /** The question; the minibuffer adds `(y or n)`. */
+      prompt: string;
+      /** `y` answers true; `n`, `C-g` and `ESC` false. */
+      onAnswer: (yes: boolean) => void;
     };
 
 type MinibufferState = {
