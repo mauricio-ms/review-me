@@ -1,6 +1,7 @@
 import { create } from "zustand";
 
 import type { KeyScope } from "../lib/keymap";
+import type { FileBufferId } from "./windows";
 
 export type VimMode = "normal" | "insert" | "visual" | "replace";
 /** How the diff view highlights changes: per-word (intra-line) or whole-line. */
@@ -43,8 +44,11 @@ type UIState = {
   /** A half-typed key sequence (`C-x-`) or `C-h k`'s prompt, for the echo area. */
   keyEcho: string | null;
   diffCursor: CursorPath | null;
-  /** The cursor line of the file in each window, for the mode line. */
-  fileLines: Record<number, number>;
+  /**
+   * The cursor line of the file in each window, for the mode line — and which file,
+   * so a buffer just shown never reports the line of the one it replaced.
+   */
+  fileLines: Record<number, { buffer: FileBufferId; line: number }>;
 
   setHelp: (help: HelpView) => void;
   setVimMode: (m: VimMode) => void;
@@ -58,7 +62,7 @@ type UIState = {
   showFlash: (message: string) => void;
   setKeyEcho: (echo: string | null) => void;
   setDiffCursor: (cursor: CursorPath | null) => void;
-  setFileLine: (win: number, line: number) => void;
+  setFileLine: (win: number, buffer: FileBufferId, line: number) => void;
 };
 
 /** How long an echo-area message stays up. */
@@ -97,8 +101,12 @@ export const useUIStore = create<UIState>((set) => ({
     set({ flash: message });
   },
   setKeyEcho: (echo) => set({ keyEcho: echo }),
-  setFileLine: (win, line) =>
-    set((s) => (s.fileLines[win] === line ? {} : { fileLines: { ...s.fileLines, [win]: line } })),
+  setFileLine: (win, buffer, line) =>
+    set((s) =>
+      s.fileLines[win]?.buffer === buffer && s.fileLines[win]?.line === line
+        ? {}
+        : { fileLines: { ...s.fileLines, [win]: { buffer, line } } },
+    ),
   setDiffCursor: (cursor) =>
     set((s) =>
       s.diffCursor?.path === cursor?.path && s.diffCursor?.line === cursor?.line

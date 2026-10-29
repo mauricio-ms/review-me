@@ -59,7 +59,10 @@ export default function BufferStatusBar() {
   const diffCursor = useUIStore((s) => s.diffCursor);
   const file = useCurrentFile();
   const selected = useWindowStore((s) => s.selected);
-  const line = useUIStore((s) => s.fileLines[selected] ?? null);
+  const line = useUIStore((s) => {
+    const at = s.fileLines[selected];
+    return at && at.buffer === shown ? at.line : null;
+  });
   // Where the cursor is among the file's changes: `change 2/5`, or how many there are.
   const blocks = useMemo(() => {
     const change = file ? changeForFile(diff, file.source, file.path) : null;
