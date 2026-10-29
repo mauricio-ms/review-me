@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { fileReviewState } from "../lib/coverage";
-import { backToDiff, useCurrentFile, type ShowOptions } from "../lib/buffers";
+import { showDiff, useCurrentFile, type ShowOptions } from "../lib/buffers";
 import { buildChanged, type TreeNode as Node } from "../lib/changed-tree";
 import { fileIcon } from "../lib/file-icons";
 import { dispatchKey, type KeyHandler } from "../lib/key-dispatch";
@@ -231,7 +231,7 @@ export default function ProjectTree({ hidden }: { hidden: boolean }) {
     close: () => collapseOrParent(nodes[cursor]),
     // The whole revision ↔ only what the comparison on screen changed.
     filter: toggleFilter,
-    quit: backToDiff,
+    quit: () => showDiff(),
   };
 
   return (

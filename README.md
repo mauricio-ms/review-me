@@ -109,6 +109,12 @@ one split off to the right — so from `OrderServiceTest.java`, `C-x 4 .` on `Or
 puts the class beside the test, and `C-x 4 t` from the class brings you back to the test.
 `q` in a window that was split off to show something closes it again.
 
+Switching to the diff from your files — `q`, `M-x diff`, `C-x b diff`, entering a commit —
+gives it the whole screen, as magit's status does, and keeps your windows: come back to
+the project (`M-x project`, RET on a file, `C-x b`, `M-,`, `C-x ←`) and they're there as you
+left them. A file already in one of them is gone back to there. `C-x 4 b diff` puts the
+diff beside your file instead.
+
 Opening a repository lands on the diff buffer when the working tree has uncommitted
 changes, and on the commits buffer when it's clean (there would be nothing to diff).
 

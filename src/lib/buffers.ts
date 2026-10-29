@@ -1,12 +1,12 @@
 import { useFilesStore, fileBuffer, type FileBuffer } from "../state/files";
 import { useUIStore } from "../state/ui";
 import {
+  inProjectMode,
   isFileKey,
   mainWindow,
   selectedBuffer,
   useWindowStore,
   windowOrder,
-  windowShowing,
   type BufferKey,
   type FileBufferId,
 } from "../state/windows";
@@ -15,7 +15,7 @@ import { sameSource, type ProjectSource } from "../types/repo";
 import { armRepeat } from "./key-dispatch";
 import type { KeyScope } from "./keymap";
 import { forgetPositions } from "./project-view";
-import { display, otherWindowFor } from "./windows";
+import { bringBackProject, display, otherWindowFor } from "./windows";
 
 /** The file buffer in the selected window, if it shows one. */
 export function currentFile(): FileBuffer | null {
@@ -59,16 +59,20 @@ export function openHelp(from: KeyScope, only: boolean, options: ShowOptions = {
 }
 
 /**
- * `q` in the project buffer — the tree or a file — goes back to the diff, as it always
- * has: in the main window, leaving project mode. (A diff another window showed moves
- * here rather than being in two places.)
+ * Switch to the diff — `q` in the project buffer, `M-x diff`, `C-x b diff`, entering a
+ * commit. From project mode it has the frame to itself, as magit's status does: the
+ * windows it covers are stashed and come back with the project buffer
+ * (`bringBackProject`). In the other window (`C-x 4 b diff`) it just shows there.
  */
-export function backToDiff(): void {
+export function showDiff(options: ShowOptions = {}): void {
   const ws = useWindowStore.getState();
-  const main = mainWindow(ws);
-  const elsewhere = windowShowing(ws, "diff", main);
-  if (elsewhere != null) ws.remove(elsewhere);
-  display("diff", main);
+  if (options.other || !inProjectMode(ws) || windowOrder(ws.layout).length === 1) {
+    showBuffer("diff", options);
+    return;
+  }
+  ws.setProjectPane(ws.treeFocused ? "tree" : "viewer");
+  ws.takeFrame(mainWindow(ws), "diff");
+  useUIStore.getState().requestFocus();
 }
 
 /**
@@ -82,7 +86,7 @@ export function quitFile(): void {
     useUIStore.getState().requestFocus();
     return;
   }
-  backToDiff();
+  showDiff();
 }
 
 /**
@@ -177,7 +181,15 @@ export function stepBuffer(dir: "back" | "ahead"): void {
     ui.showFlash(dir === "back" ? "No previous buffer" : "No next buffer");
     return;
   }
-  ws.step(win, target, dir);
+  // The diff and the project buffer trade the frame here as they do everywhere else.
+  if (target === "diff" && inProjectMode(ws) && windowOrder(ws.layout).length > 1) {
+    ws.setProjectPane("viewer");
+    ws.takeFrame(win, target, dir);
+  } else if (bringBackProject(win, target, dir) != null) {
+    useWindowStore.getState().select(win);
+  } else {
+    ws.step(win, target, dir);
+  }
   ws.setTreeFocused(false);
   ui.requestFocus();
   ui.showFlash(`${bufferLabel(target)} — use <left>, <right> for further cycling`);

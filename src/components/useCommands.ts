@@ -4,7 +4,7 @@ import {
   currentFile,
   killCurrentBuffer,
   openHelp,
-  showBuffer,
+  showDiff,
   stepBuffer,
   useCurrentFile,
 } from "../lib/buffers";
@@ -340,7 +340,7 @@ export function useCommands(close: CommandClose): {
   const handleShowDiff = useCallback(() => {
     close({ restoreFocus: false });
     recordJump();
-    showBuffer("diff");
+    showDiff();
   }, [close]);
 
   const commands: AppCommand[] = [

@@ -1,7 +1,7 @@
 import { useHistoryStore, type Place } from "../state/history";
 import { useUIStore } from "../state/ui";
 import { useWindowStore, windowShowing } from "../state/windows";
-import { findFileBuffer, showBuffer } from "./buffers";
+import { findFileBuffer, showBuffer, showDiff } from "./buffers";
 import { moveDiffCursor } from "./diff-view";
 import { currentPlace } from "./jumps";
 import { moveLogCursor } from "./log";
@@ -30,7 +30,7 @@ function visitPlace(place: Place): void {
       return;
     }
     case "diff":
-      showBuffer("diff");
+      showDiff();
       moveDiffCursor(place.path, place.line);
       return;
     case "log":

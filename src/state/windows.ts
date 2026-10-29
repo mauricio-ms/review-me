@@ -110,6 +110,15 @@ const PREV_DEPTH = 20;
 
 const FIRST_WINDOW: WindowId = 1;
 
+/** The windows a frame had: how it was split, what each showed and had shown, which had the selection. */
+export type Stash = {
+  layout: Layout;
+  shown: Record<WindowId, BufferKey>;
+  prev: Record<WindowId, BufferKey[]>;
+  ahead: Record<WindowId, BufferKey[]>;
+  selected: WindowId;
+};
+
 type WindowState = {
   layout: Layout;
   /** What each window shows. */
@@ -127,6 +136,11 @@ type WindowState = {
   /** Every buffer shown so far, most recent first: `C-x b`'s order. */
   recent: BufferKey[];
   nextId: WindowId;
+  /**
+   * Project mode's windows while the diff has the frame to itself (`takeFrame`), put
+   * back on the way back (`unstash`). Only ever set outside project mode.
+   */
+  stash: Stash | null;
 
   /** Show `key` in window `win` (it goes on remembering what was there). */
   show: (win: WindowId, key: BufferKey) => void;
@@ -148,6 +162,17 @@ type WindowState = {
   remove: (win: WindowId) => void;
   /** Close every window but `win`. */
   keepOnly: (win: WindowId) => void;
+  /**
+   * Window `win` alone in the frame, switching to `key` (as `show`, or as `step` with
+   * a `dir`); the windows it covers are stashed to come back.
+   */
+  takeFrame: (win: WindowId, key: BufferKey, dir?: "back" | "ahead") => void;
+  /**
+   * Bring the stashed windows back, window `win` — the one left on screen, which keeps
+   * the history it made meanwhile — switching to `key`. False, with nothing changed,
+   * when there is no stash `win` belongs to.
+   */
+  unstash: (win: WindowId, key: BufferKey, dir?: "back" | "ahead") => boolean;
   setRatio: (path: SplitPath, ratio: number) => void;
   /** Forget killed buffers: a window showing one goes back to what it showed before. */
   forget: (keys: BufferKey[]) => void;
@@ -164,6 +189,7 @@ const initial = () => ({
   projectPane: "tree" as "tree" | "viewer",
   recent: ["diff"] as BufferKey[],
   nextId: FIRST_WINDOW + 1,
+  stash: null as Stash | null,
 });
 
 /** `old` in front of a window's history list, without `old` or `key` further down. */
@@ -172,6 +198,41 @@ const pushFront = (list: BufferKey[] | undefined, old: BufferKey, key: BufferKey
 
 const touch = (recent: BufferKey[], key: BufferKey) =>
   recent[0] === key ? recent : [key, ...recent.filter((k) => k !== key)];
+
+type History = Pick<WindowState, "shown" | "prev" | "ahead" | "recent">;
+
+/**
+ * Window `win` switching to `key`: a new switch remembers what it leaves and, as a new
+ * move in a browser does, drops the way forward; a step (`C-x ←` / `C-x →`) takes `key`
+ * from one side of the window's history and puts what it leaves on the other.
+ */
+function switched(
+  s: History,
+  win: WindowId,
+  key: BufferKey,
+  dir?: "back" | "ahead",
+): Partial<History> {
+  const old = s.shown[win];
+  const recent = touch(s.recent, key);
+  if (old === key) return recent === s.recent ? {} : { recent };
+  if (!dir) {
+    return {
+      shown: { ...s.shown, [win]: key },
+      prev: { ...s.prev, [win]: pushFront(s.prev[win], old, key) },
+      ahead: { ...s.ahead, [win]: [] },
+      recent,
+    };
+  }
+  const [from, to] = dir === "back" ? [s.prev, s.ahead] : [s.ahead, s.prev];
+  const taken = (from[win] ?? []).filter((k) => k !== key && k !== old);
+  const given = pushFront(to[win], old, key);
+  return {
+    shown: { ...s.shown, [win]: key },
+    prev: { ...s.prev, [win]: dir === "back" ? taken : given },
+    ahead: { ...s.ahead, [win]: dir === "back" ? given : taken },
+    recent,
+  };
+}
 
 /** Drop `wins` from the window maps. */
 function dropWindows<T>(map: Record<WindowId, T>, wins: WindowId[]): Record<WindowId, T> {
@@ -183,34 +244,9 @@ function dropWindows<T>(map: Record<WindowId, T>, wins: WindowId[]): Record<Wind
 export const useWindowStore = create<WindowState>((set, get) => ({
   ...initial(),
 
-  show: (win, key) =>
-    set((s) => {
-      const old = s.shown[win];
-      const recent = touch(s.recent, key);
-      if (old === key) return recent === s.recent ? {} : { recent };
-      return {
-        shown: { ...s.shown, [win]: key },
-        prev: { ...s.prev, [win]: pushFront(s.prev[win], old, key) },
-        // A new switch, as a new move in a browser, drops the way forward.
-        ahead: { ...s.ahead, [win]: [] },
-        recent,
-      };
-    }),
+  show: (win, key) => set((s) => switched(s, win, key)),
 
-  step: (win, key, dir) =>
-    set((s) => {
-      const old = s.shown[win];
-      if (old === key) return {};
-      const [from, to] = dir === "back" ? [s.prev, s.ahead] : [s.ahead, s.prev];
-      const taken = (from[win] ?? []).filter((k) => k !== key && k !== old);
-      const given = pushFront(to[win], old, key);
-      return {
-        shown: { ...s.shown, [win]: key },
-        prev: { ...s.prev, [win]: dir === "back" ? taken : given },
-        ahead: { ...s.ahead, [win]: dir === "back" ? given : taken },
-        recent: touch(s.recent, key),
-      };
-    }),
+  step: (win, key, dir) => set((s) => switched(s, win, key, dir)),
 
   quitTo: (win, key) =>
     set((s) => {
@@ -274,6 +310,40 @@ export const useWindowStore = create<WindowState>((set, get) => ({
       };
     }),
 
+  takeFrame: (win, key, dir) =>
+    set((s) => {
+      const others = windowOrder(s.layout).filter((w) => w !== win);
+      const alone = {
+        layout: { kind: "window", id: win } as Layout,
+        shown: dropWindows(s.shown, others),
+        prev: dropWindows(s.prev, others),
+        ahead: dropWindows(s.ahead, others),
+        selected: win,
+        treeFocused: false,
+      };
+      const { layout, shown, prev, ahead, selected } = s;
+      return {
+        ...alone,
+        ...switched({ ...s, ...alone }, win, key, dir),
+        stash: { layout, shown, prev, ahead, selected },
+      };
+    }),
+
+  unstash: (win, key, dir) => {
+    const s = get();
+    const stash = s.stash;
+    if (!stash || !windowOrder(stash.layout).includes(win)) return false;
+    const back = {
+      layout: stash.layout,
+      shown: { ...stash.shown, [win]: s.shown[win] },
+      prev: { ...stash.prev, [win]: s.prev[win] ?? [] },
+      ahead: { ...stash.ahead, [win]: s.ahead[win] ?? [] },
+      selected: stash.selected,
+    };
+    set({ ...back, ...switched({ ...s, ...back }, win, key, dir), stash: null });
+    return true;
+  },
+
   setRatio: (path, ratio) =>
     set((s) => ({ layout: withRatio(s.layout, path, Math.min(0.9, Math.max(0.1, ratio))) })),
 
@@ -314,6 +384,12 @@ export const useWindowStore = create<WindowState>((set, get) => ({
 
   reset: () => set(initial()),
 }));
+
+// A stash is for coming back to project mode from the diff. Back in it any other way —
+// the window beside the diff closed, say — what was stashed is no longer the way back.
+useWindowStore.subscribe((s) => {
+  if (s.stash && inProjectMode(s)) useWindowStore.setState({ stash: null });
+});
 
 /** The buffer in the selected window. */
 export function selectedBuffer(s: WindowState): BufferKey {

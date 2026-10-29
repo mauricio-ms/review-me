@@ -65,8 +65,17 @@ it — and the tree exists **only there**: project mode (`inProjectMode`) is the
 diff with a file opened beside it by `o` — never show the tree (it stays mounted, hidden,
 keeping its cursor and folds). `C-x b project` / `M-x project` (`showProject`) switch the
 main window to it — the file it last showed, else "no file open" — with the keyboard where
-it was left (`projectPane`: tree or viewer); `q` in the tree or a file (`backToDiff` /
-`quitFile`) goes back to the diff, except that a window split off beside it closes. A file
+it was left (`projectPane`: tree or viewer); `q` in the tree or a file (`showDiff` /
+`quitFile`) goes back to the diff, except that a window split off beside it closes.
+**Switching to the diff from project mode gives it the whole frame**, as magit's status
+takes it (`showDiff` — `q`, `M-x diff`, `C-x b diff`, `M-,`, entering a commit — and
+`C-x ←`/`→`): `takeFrame` stashes the project's windows (`useWindowStore.stash`), and any
+way back to the project buffer — `M-x project`, RET on a file, `C-x b`, `M-,`, `C-x ←` —
+puts them back through `display`/`stepBuffer`'s `bringBackProject` (`unstash`), going to
+the window that already shows the file if one does. Files killed meanwhile leave their
+windows as `forget` has them; back in project mode any other way, the stash is dropped (a
+store subscription keeps it only outside project mode). `C-x 4 b diff` still shows the diff
+beside the file. A file
 opened by a plain gesture (RET in the diff, the finder, the tree, a definition) goes to
 `targetWindow()`: the selected window when it's in the project buffer or reading a file,
 else the main window — so from the diff or the log it opens the project buffer, as it

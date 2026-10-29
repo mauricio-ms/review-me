@@ -7,7 +7,7 @@ import {
   type ReactNode,
 } from "react";
 
-import { bufferNames, openHelp, showBuffer } from "../lib/buffers";
+import { bufferNames, openHelp, showBuffer, showDiff } from "../lib/buffers";
 import { recordJump } from "../lib/jumps";
 import { contextScope, dispatchKey, type KeyHandler } from "../lib/key-dispatch";
 import { commandKeys, KEYMAP, type MinibufferAction } from "../lib/keymap";
@@ -212,6 +212,7 @@ function Prompt({ request }: { request: MinibufferRequest }) {
             if (key === "log") showLog({ other });
             else if (key === "help") openHelp(scope, false, { other });
             else if (key === "project" && !other) showProject();
+            else if (key === "diff") showDiff({ other });
             else showBuffer(key, { other });
           },
         };

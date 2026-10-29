@@ -13,7 +13,7 @@ import {
   type ReviewBranch,
 } from "../types/repo";
 import { scopeForSpec } from "../types/tags";
-import { showBuffer, type ShowOptions } from "./buffers";
+import { showBuffer, showDiff, type ShowOptions } from "./buffers";
 import { loadLog, refreshCommitReviews, showLog } from "./log";
 import { ambientSource, reconcileFileBuffers, useProjectSource } from "./project";
 import { buildSymbolIndex, computeDiff, loadTags, openRepo, reviewBaseFor } from "./tauri";
@@ -113,7 +113,7 @@ export async function openRepoByPath(path: string): Promise<void> {
 export async function enterCommit(oid: string, options: ShowOptions = {}): Promise<void> {
   const branchRef = useRepoStore.getState().reviewBranch?.ref ?? null;
   await applyComparison({ kind: "commit", oid, branchRef });
-  showBuffer("diff", options);
+  showDiff(options);
 }
 
 /**
@@ -132,7 +132,7 @@ export async function enterLogRange(): Promise<void> {
     targetRef: ref,
     strategy: "mergeBase",
   });
-  showBuffer("diff");
+  showDiff();
 }
 
 /**

@@ -24,11 +24,14 @@ export function selectWindow(win: WindowId): void {
 /**
  * Show `key` in window `win` and return the window that shows it. A single-cursor
  * buffer (the diff, the log, help) already in another window isn't shown twice: that
- * window is the one (Emacs's reuse-window). `select` (the default) gives it the keyboard.
+ * window is the one (Emacs's reuse-window). Back to the project buffer from the diff,
+ * its windows come back first (`bringBackProject`). `select` (the default) gives the
+ * window the keyboard.
  */
 export function display(key: BufferKey, win: WindowId, select = true): WindowId {
   const ws = useWindowStore.getState();
-  const elsewhere = isSingleton(key) ? windowShowing(ws, key, win) : null;
+  const back = bringBackProject(win, key);
+  const elsewhere = back ?? (isSingleton(key) ? windowShowing(ws, key, win) : null);
   const target = elsewhere ?? win;
   // Leaving the project buffer: remember which half had the keyboard, for coming back.
   if (target === mainWindow(ws) && inProjectMode(ws) && !isProjectKey(key)) {
@@ -39,6 +42,42 @@ export function display(key: BufferKey, win: WindowId, select = true): WindowId 
   else if (ws.treeFocused) ws.setTreeFocused(false);
   useUIStore.getState().requestFocus();
   return target;
+}
+
+/**
+ * Back to the project buffer while the diff has the frame (`showDiff`): the windows the
+ * project had come back as they were, `win` — the window left on screen — switching to
+ * `key` (as `C-x ←`/`→` would with a `dir`). A file another of them already shows is
+ * gone back to there instead, the way `C-x 4 .` reuses a window. Files killed meanwhile
+ * leave the windows that showed them. Returns the window showing `key`, or null when
+ * there is nothing to bring back.
+ */
+export function bringBackProject(
+  win: WindowId,
+  key: BufferKey,
+  dir?: "back" | "ahead",
+): WindowId | null {
+  const ws = useWindowStore.getState();
+  const stash = ws.stash;
+  if (!stash || !isProjectKey(key) || inProjectMode(ws) || win !== mainWindow(ws)) {
+    return null;
+  }
+  const already = dir
+    ? undefined
+    : windowOrder(stash.layout).find((w) => w !== win && stash.shown[w] === key);
+  if (!ws.unstash(win, already != null ? stash.shown[win] : key, dir)) return null;
+
+  const open = new Set(useFilesStore.getState().buffers.map((b) => b.id));
+  const now = useWindowStore.getState();
+  const keys = [
+    ...Object.values(now.shown),
+    ...Object.values(now.prev).flat(),
+    ...Object.values(now.ahead).flat(),
+  ];
+  const dead = keys.filter((k) => isFileKey(k) && !open.has(k));
+  if (dead.length > 0) now.forget([...new Set(dead)]);
+  const after = useWindowStore.getState();
+  return already != null && after.shown[already] === key ? already : win;
 }
 
 /** Split window `win`; the new window shows `key` — at the same place, if it's the same file. */
@@ -147,23 +186,29 @@ export function targetWindow(): WindowId {
 }
 
 /**
- * `C-x b project` / `M-x project`: the project buffer, in the main window — the file it
- * last showed (the most recent open one), else "no file open" — with the keyboard where
- * it was when you left (the tree, with no file to read).
+ * `C-x b project` / `M-x project`: the project buffer — its windows as you left them
+ * for the diff, else the main window showing the file it last showed (the most recent
+ * open one), else "no file open" — with the keyboard where it was when you left (the
+ * tree, with no file to read).
  */
 export function showProject(): void {
   const ws = useWindowStore.getState();
   const main = mainWindow(ws);
+  let win = main;
   if (!inProjectMode(ws)) {
     const files = new Set(useFilesStore.getState().buffers.map((b) => b.id));
-    const last = ws.recent.find((k) => isFileKey(k) && files.has(k));
-    display(last ?? "project", main);
+    const left = ws.stash?.shown[main];
+    const key =
+      left === "project" || (left != null && isFileKey(left) && files.has(left))
+        ? left
+        : (ws.recent.find((k) => isFileKey(k) && files.has(k)) ?? "project");
+    if (bringBackProject(main, key) != null) win = useWindowStore.getState().selected;
+    else display(key, main);
   }
   const now = useWindowStore.getState();
-  const noFile = now.shown[main] === "project";
   if (!inProjectMode(now)) return;
-  if (noFile || now.projectPane === "tree") focusTree();
-  else selectWindow(main);
+  if (now.shown[mainWindow(now)] === "project" || now.projectPane === "tree") focusTree();
+  else selectWindow(win);
 }
 
 /**

@@ -187,8 +187,9 @@ export function visitFile(
   const id = bufferFor(path, choice);
   const { selected } = useWindowStore.getState();
   const win = options.other ? otherWindowFor(id, selected) : targetWindow();
-  if (at) placeCursor(win, id, at.line, at.col ?? 0);
-  display(id, win, options.select ?? true);
+  // Back from the diff, the window showing it may be another one of the project's.
+  const shownIn = display(id, win, options.select ?? true);
+  if (at) placeCursor(shownIn, id, at.line, at.col ?? 0);
 }
 
 /** Open a file from the tree or the finder, at the revision they list (a jump `M-,` undoes). */
