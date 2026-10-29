@@ -430,6 +430,10 @@ an in-file **scope walk** for locals/parameters/catch-and-for bindings; **type
 resolution** by explicit import → same package → wildcard → project-wide name; and
 **member resolution**, which types the receiver via the first two, looks the member up
 on that type, walks `extends`/`implements`, and splits overloads by argument count.
+A member named with no receiver (`foo(..)`, a bare field) is looked up in the enclosing
+types, innermost first, then in what `import static` brings in — a single import naming
+it before the `.*` ones, as in Java; a name inside an `import` line resolves to the type
+(or, in `import static`, the members) it spells.
 Chained calls recurse through a method's declared return type. Locals aren't indexed
 (too many, each visible in one method) — they're `Target::Local`, identified by byte
 offset.
@@ -438,13 +442,14 @@ Failing to resolve splits into **two different answers**, and conflating them is
 makes navigation lie:
 
 - **`External`** — resolved to something outside the project: a JDK/jar type, a member
-  of one, a member absent from a type whose supertype chain we fully see, or an
+  of one (`import static org.junit.Assert.assertEquals` included), a member absent from
+  every type that could declare it when their supertype chains are fully visible, or an
   unresolvable identifier shaped like a type (`System`, `Math`). Nothing declared here
   can be the answer, so `find_definition` returns **nothing** rather than falling back,
   and `find_references` **drops** the occurrence. `books.add(..)` on a `List` must not
   land on some unrelated `add` in this repo.
-- **`Unresolved`** — genuinely undecidable: `var`, generic element types, static
-  imports, or a member missing from a type that extends something we can't read. Here a
+- **`Unresolved`** — genuinely undecidable: `var`, generic element types, or a member
+  missing from a type that extends something we can't read. Here a
   kind-filtered name match is still the best guess, so `find_definition` falls back to
   it and `find_references` keeps the hit as unconfirmed.
 
@@ -522,7 +527,7 @@ test plan.
 
 `xref`'s two- and three-file fixtures are too small to catch resolution bugs that only
 appear across packages, so `xref_validate.rs` runs the resolver over a realistic
-multi-package project — 40 assertions covering every tier plus the residue. Build it with
+multi-package project — 52 assertions covering every tier plus the residue. Build it with
 `./scripts/make-java-sample.sh` (the tree is gitignored); the test skips loudly without
 it. It's also the fixture to open in the app for hand-testing `M-.`/`M-,`/`M-?`.
 

@@ -106,6 +106,8 @@ struct Import {
     /// Fully-qualified path, without any trailing `.*`.
     path: String,
     wildcard: bool,
+    /// `import static`: the path names a member (or, with `.*`, every member) of a type.
+    is_static: bool,
 }
 
 struct FileEntry {
@@ -299,6 +301,12 @@ fn parameter_count(decl: Node) -> Option<usize> {
     Some(params.named_children(&mut cur).count())
 }
 
+fn is_static_import(decl: Node) -> bool {
+    let mut cur = decl.walk();
+    let found = decl.children(&mut cur).any(|n| n.kind() == "static");
+    found
+}
+
 /// A file's `package` name and `import`s.
 fn file_header(tree: &Tree, src: &str) -> (Option<String>, Vec<Import>) {
     let root = tree.root_node();
@@ -321,6 +329,7 @@ fn file_header(tree: &Tree, src: &str) -> (Option<String>, Vec<Import>) {
                     imports.push(Import {
                         path,
                         wildcard: src[child.byte_range()].contains(".*"),
+                        is_static: is_static_import(child),
                     });
                 }
             }
@@ -521,8 +530,9 @@ enum Resolution {
     /// would be provably wrong — `books.add(..)` on a `List` must not land on some
     /// unrelated `add` in this repo. Proof of difference, so references drop it.
     External,
-    /// Genuinely undecidable: `var`, a generic element type, a static import, or an
-    /// expression form we don't model. A name match is still the best guess.
+    /// Genuinely undecidable: `var`, a generic element type, a member of a type that
+    /// extends something we can't see, or an expression form we don't model. A name
+    /// match is still the best guess.
     Unresolved,
 }
 
@@ -567,6 +577,10 @@ fn resolve_at(index: &JavaIndex, file: usize, node: Node, depth: usize) -> Resol
         });
     }
 
+    if let Some(found) = resolve_in_import(index, file, node) {
+        return found;
+    }
+
     if node.kind() == "type_identifier" {
         return match resolve_type(index, file, name) {
             // Definitely a type, and definitely not one of ours.
@@ -593,8 +607,9 @@ fn resolve_at(index: &JavaIndex, file: usize, node: Node, depth: usize) -> Resol
     resolve_bare(index, file, node, name, depth)
 }
 
-/// A bare identifier: a local/parameter, then a field of the enclosing type (or one of
-/// its supertypes), then a type name used statically.
+/// A bare identifier: a local/parameter, then a field of the enclosing types (or their
+/// supertypes), then one brought in by `import static`, then a type name used
+/// statically.
 fn resolve_bare(
     index: &JavaIndex,
     file: usize,
@@ -609,11 +624,16 @@ fn resolve_bare(
             byte: decl.start_byte(),
         });
     }
-    if let Some(owner) = enclosing_type_id(index, file, node) {
-        let (hits, _) = lookup_member(index, owner, name, false, None, depth);
-        if !hits.is_empty() {
-            return finish(hits);
-        }
+    let (hits, _) = enclosing_members(index, file, node, name, false, None, depth);
+    if !hits.is_empty() {
+        return finish(hits);
+    }
+    match statically_imported(index, file, name, false, None, depth) {
+        Imported::Members(hits) => return finish(hits),
+        // `import static java.lang.Math.PI`.
+        Imported::External => return Resolution::External,
+        // Not a field after all: a type name, or a package.
+        Imported::Nothing { .. } => {}
     }
     match resolve_type(index, file, name) {
         Resolution::Unresolved if looks_like_type_name(name) => Resolution::External,
@@ -624,8 +644,8 @@ fn resolve_bare(
 /// Java capitalises type names and SHOUTS constants. An unresolvable identifier shaped
 /// like a type — `System`, `Math`, `Objects` — is one from the JDK or a jar, and
 /// saying so beats letting a name match send `System.out.println` to some `println`
-/// in this repo. ALL_CAPS is excluded: those are constants, possibly static imports,
-/// where a name match really is the best guess available.
+/// in this repo. ALL_CAPS is excluded: those are constants — inherited, perhaps, from
+/// a type we can't see — where a name match really is the best guess available.
 fn looks_like_type_name(name: &str) -> bool {
     name.starts_with(char::is_uppercase) && name.chars().any(char::is_lowercase)
 }
@@ -648,16 +668,12 @@ fn resolve_member(
         None
     };
     let owner = match access.child_by_field_name("object") {
-        // No receiver: the enclosing type, then up its supertype chain.
-        None => enclosing_type_id(index, file, access),
+        None => return resolve_unqualified(index, file, access, name, want_method, arity, depth),
         Some(obj) => match expr_type(index, file, obj, depth + 1) {
-            RecvType::Known(id) => Some(id),
+            RecvType::Known(id) => id,
             RecvType::External => return Resolution::External,
             RecvType::Unknown => return Resolution::Unresolved,
         },
-    };
-    let Some(owner) = owner else {
-        return Resolution::Unresolved;
     };
 
     let (hits, chain_complete) = lookup_member(index, owner, name, want_method, arity, depth);
@@ -672,6 +688,152 @@ fn resolve_member(
         };
     }
     finish(hits)
+}
+
+/// A member called with no receiver — `foo(..)`: the enclosing types, then what
+/// `import static` brings in. Only when everything that could declare it was in full
+/// view is a miss proof that it comes from outside.
+fn resolve_unqualified(
+    index: &JavaIndex,
+    file: usize,
+    access: Node,
+    name: &str,
+    want_method: bool,
+    arity: Option<usize>,
+    depth: usize,
+) -> Resolution {
+    let (hits, enclosing_complete) =
+        enclosing_members(index, file, access, name, want_method, arity, depth);
+    if !hits.is_empty() {
+        return finish(hits);
+    }
+    match statically_imported(index, file, name, want_method, arity, depth) {
+        Imported::Members(hits) => finish(hits),
+        Imported::External => Resolution::External,
+        Imported::Nothing { complete } if complete && enclosing_complete => Resolution::External,
+        Imported::Nothing { .. } => Resolution::Unresolved,
+    }
+}
+
+/// Members named `name` that code inside `node` reaches without a receiver: those of
+/// the enclosing types, innermost first and each up its supertype chain — a nested class
+/// sees its outer class's members. Also whether every chain searched was fully visible;
+/// outside any type, nothing was.
+fn enclosing_members(
+    index: &JavaIndex,
+    file: usize,
+    node: Node,
+    name: &str,
+    want_method: bool,
+    arity: Option<usize>,
+    depth: usize,
+) -> (Vec<DefId>, bool) {
+    let mut searched = false;
+    let mut complete = true;
+    let mut decl = enclosing_type_decl(node);
+    while let Some(d) = decl {
+        if let Some(&owner) = index.type_by_node.get(&(file, d.id())) {
+            let (hits, chain_complete) =
+                lookup_member(index, owner, name, want_method, arity, depth);
+            if !hits.is_empty() {
+                return (hits, true);
+            }
+            searched = true;
+            complete &= chain_complete;
+        }
+        decl = enclosing_type_decl(d);
+    }
+    (Vec::new(), searched && complete)
+}
+
+/// What `import static` brings into a file under one name.
+enum Imported {
+    /// Members of a project type.
+    Members(Vec<DefId>),
+    /// A single static import names it, from a type outside the project.
+    External,
+    /// No import supplies it: provably so, unless an imported project type extends
+    /// something we can't see.
+    Nothing { complete: bool },
+}
+
+/// Members named `name` that `import static` brings into `file`. As in Java, a single
+/// import naming it shadows the on-demand ones (`.*`).
+fn statically_imported(
+    index: &JavaIndex,
+    file: usize,
+    name: &str,
+    want_method: bool,
+    arity: Option<usize>,
+    depth: usize,
+) -> Imported {
+    let imports = index.files[file].imports.iter().filter(|i| i.is_static);
+    let singles = imports
+        .clone()
+        .filter(|i| !i.wildcard)
+        .filter_map(|i| i.path.rsplit_once('.'))
+        .filter(|&(_, member)| member == name)
+        .map(|(owner, _)| (owner, true));
+    let on_demand = imports
+        .filter(|i| i.wildcard)
+        .map(|i| (i.path.as_str(), false));
+    let mut complete = true;
+    for (owner, single) in singles.chain(on_demand) {
+        match index.by_fqn.get(owner) {
+            Some(&owner) => {
+                let (hits, chain_complete) =
+                    lookup_member(index, owner, name, want_method, arity, depth + 1);
+                if !hits.is_empty() {
+                    return Imported::Members(hits);
+                }
+                complete &= chain_complete;
+            }
+            // `import static org.junit.Assert.assertEquals`: that's where it comes from.
+            None if single => return Imported::External,
+            // A jar's `.*` may well supply it, but proves nothing about our own types.
+            None => {}
+        }
+    }
+    Imported::Nothing { complete }
+}
+
+/// A name inside an `import`: the type its path spells out so far, else — in an
+/// `import static` — the members of the type before it. Anything else there (a package,
+/// a jar's type) is nothing declared in this project. `None` outside imports.
+fn resolve_in_import(index: &JavaIndex, file: usize, node: Node) -> Option<Resolution> {
+    let mut decl = node.parent()?;
+    while decl.kind() == "scoped_identifier" {
+        decl = decl.parent()?;
+    }
+    if decl.kind() != "import_declaration" {
+        return None;
+    }
+    // The path up to this name: the scoped identifier it ends, or just the name.
+    let path_node = node
+        .parent()
+        .filter(|p| {
+            p.kind() == "scoped_identifier"
+                && p.child_by_field_name("name").map(|n| n.id()) == Some(node.id())
+        })
+        .unwrap_or(node);
+    let src = &index.files[file].source;
+    let path: String = src[path_node.byte_range()].split_whitespace().collect();
+    if let Some(&id) = index.by_fqn.get(&path) {
+        return Some(Resolution::Found(Target::Def(id)));
+    }
+    if is_static_import(decl) {
+        if let Some((owner, member)) = path.rsplit_once('.') {
+            if let Some(&owner) = index.by_fqn.get(owner) {
+                // `import static` brings in every member by that name, field or method.
+                let (mut hits, _) = lookup_member(index, owner, member, true, None, 0);
+                hits.extend(lookup_member(index, owner, member, false, None, 0).0);
+                if !hits.is_empty() {
+                    return Some(finish(hits));
+                }
+            }
+        }
+    }
+    Some(Resolution::External)
 }
 
 /// Resolve a type *name* against a file's imports, then its package, then wildcards,
@@ -1646,6 +1808,111 @@ mod tests {
         let defs = def_at(&repo, dir.path(), &rels, &sym("ping", "Use.java", 4, 10));
         assert_eq!(defs.len(), 1, "an unreadable supertype means we can't rule it out");
         assert_eq!(defs[0].file, "Helper.java");
+    }
+
+    const STRINGS: (&str, &str) = (
+        "util/Strings.java",
+        "package util;\n\npublic class Strings {\n    public static String shout(String s) { return s; }\n    public static final String SEP = \"/\";\n}\n",
+    );
+    /// A same-named method a name match would also offer.
+    const MEGAPHONE: (&str, &str) = (
+        "other/Megaphone.java",
+        "package other;\n\npublic class Megaphone {\n    public String shout(String s) { return s; }\n}\n",
+    );
+
+    #[test]
+    fn resolves_what_a_static_import_names() {
+        let (dir, repo, rels, _lock) = fixture(&[
+            STRINGS,
+            MEGAPHONE,
+            (
+                "app/Use.java",
+                "package app;\n\nimport static util.Strings.shout;\nimport static util.Strings.SEP;\n\nclass Use {\n    String run() {\n        return shout(\"x\") + SEP;\n    }\n}\n",
+            ),
+        ]);
+        let root = dir.path();
+        let lands_on = |symbol: SymbolRef| {
+            let defs = def_at(&repo, root, &rels, &symbol);
+            assert_eq!(defs.len(), 1, "{symbol:?}: {defs:?}");
+            (defs[0].file.clone(), defs[0].line)
+        };
+
+        assert_eq!(lands_on(sym("shout", "app/Use.java", 8, 15)), ("util/Strings.java".into(), 4));
+        assert_eq!(lands_on(sym("SEP", "app/Use.java", 8, 28)), ("util/Strings.java".into(), 5));
+        // The name in the import itself.
+        assert_eq!(lands_on(sym("shout", "app/Use.java", 3, 27)), ("util/Strings.java".into(), 4));
+
+        let refs = find_references(
+            &repo,
+            root,
+            &ProjectSource::Worktree,
+            &rels,
+            &sym("shout", "util/Strings.java", 4, 25),
+        )
+        .unwrap();
+        let confirmed = |line| refs.iter().any(|r| r.file == "app/Use.java" && r.line == line && r.confirmed);
+        assert!(confirmed(8), "the call is a confirmed reference: {refs:?}");
+        assert!(confirmed(3), "so is the import naming it: {refs:?}");
+        assert!(
+            !refs.iter().any(|r| r.file == "other/Megaphone.java"),
+            "Megaphone.shout is another method: {refs:?}"
+        );
+    }
+
+    #[test]
+    fn resolves_an_on_demand_static_import() {
+        let (dir, repo, rels, _lock) = fixture(&[
+            STRINGS,
+            MEGAPHONE,
+            (
+                "app/Use.java",
+                "package app;\n\nimport static util.Strings.*;\n\nclass Use {\n    String run() {\n        return shout(\"x\");\n    }\n}\n",
+            ),
+        ]);
+        let defs = def_at(&repo, dir.path(), &rels, &sym("shout", "app/Use.java", 7, 15));
+        assert_eq!(defs.len(), 1, "{defs:?}");
+        assert_eq!((defs[0].file.as_str(), defs[0].line), ("util/Strings.java", 4));
+    }
+
+    #[test]
+    fn an_enclosing_class_shadows_a_static_import_even_from_a_nested_class() {
+        let (dir, repo, rels, _lock) = fixture(&[
+            STRINGS,
+            (
+                "app/Use.java",
+                "package app;\n\nimport static util.Strings.shout;\n\nclass Use {\n    String shout(String s) { return s; }\n    class Inner {\n        String run() {\n            return shout(\"x\");\n        }\n    }\n}\n",
+            ),
+        ]);
+        let defs = def_at(&repo, dir.path(), &rels, &sym("shout", "app/Use.java", 9, 19));
+        assert_eq!(defs.len(), 1, "{defs:?}");
+        assert_eq!((defs[0].file.as_str(), defs[0].line), ("app/Use.java", 6));
+    }
+
+    #[test]
+    fn a_static_import_from_a_jar_is_external() {
+        let (dir, repo, rels, _lock) = fixture(&[
+            (
+                "util/Checks.java",
+                "package util;\n\npublic class Checks {\n    public static void assertEquals(Object a, Object b) {}\n}\n",
+            ),
+            (
+                "app/UseTest.java",
+                "package app;\n\nimport static org.junit.Assert.assertEquals;\n\nclass UseTest {\n    void check() {\n        assertEquals(1, 1);\n    }\n}\n",
+            ),
+        ]);
+        let root = dir.path();
+        let defs = def_at(&repo, root, &rels, &sym("assertEquals", "app/UseTest.java", 7, 8));
+        assert!(defs.is_empty(), "JUnit's assertEquals is not Checks': {defs:?}");
+
+        let refs = find_references(
+            &repo,
+            root,
+            &ProjectSource::Worktree,
+            &rels,
+            &sym("assertEquals", "util/Checks.java", 4, 23),
+        )
+        .unwrap();
+        assert!(!refs.iter().any(|r| r.file == "app/UseTest.java"), "{refs:?}");
     }
 
     #[test]

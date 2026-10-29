@@ -527,9 +527,11 @@ definition, **`M-,`** back, **`M-?`** find references.
 
 Resolution walks scopes for locals and parameters, resolves types through a file's
 `package`/`import`s, and types a call's receiver to find the member on the right class —
-following supertypes and splitting overloads by argument count. So `M-.` **jumps
-straight to the declaration**; a picker appears only where resolution genuinely can't
-decide (`var`, generic element types, static imports, or a type that lives in a jar).
+following supertypes and splitting overloads by argument count. A call with no receiver
+is found in the enclosing classes, then through `import static` (single or `.*`). So
+`M-.` **jumps straight to the declaration**; a picker appears only where resolution
+genuinely can't decide (`var`, generic element types, or a class that extends one in a
+jar).
 
 `M-?` applies the same resolution in reverse: occurrences proven to be a *different*
 same-named symbol are dropped, and ones that can't be proven either way are kept in a

@@ -26,11 +26,16 @@ Deliberate traps:
 - `Book.restock` has three overloads; `Author.name()` and `Library.name` share one.
 - `Library.legacyRestock` uses `var`, which the resolver cannot see through.
 - `List`, `RuntimeException` and friends live in jars, so they are unresolvable.
+- `service.Catalog` calls `Strings.shout`/`join` and reads `Strings.SEPARATOR` through
+  `import static`, and `App` through `import static ...Strings.*`; `dup.Megaphone.shout`
+  shares the name. `requireNonNull` is statically imported from the JDK.
 JAVA_EOF
 
 mkdir -p sample-java/src/com/example
 cat > sample-java/src/com/example/App.java <<'JAVA_EOF'
 package com.example;
+
+import static com.example.util.Strings.*;
 
 import com.example.model.Book;
 import com.example.model.Genre;
@@ -42,6 +47,7 @@ public class App {
         Book book = library.create("Dune", 1965, "Herbert", Genre.SCIENCE);
         library.add(book);
         book.restock();
+        String banner = shout(library.rename("main"));
     }
 }
 JAVA_EOF
@@ -57,6 +63,22 @@ public class Book {
     }
 
     public void restock(int amount) {
+    }
+}
+JAVA_EOF
+
+mkdir -p sample-java/src/com/example/dup
+cat > sample-java/src/com/example/dup/Megaphone.java <<'JAVA_EOF'
+package com.example.dup;
+
+/** Its shout shares a name with Strings.shout, which the static imports bring in. */
+public class Megaphone {
+    public String shout(String words) {
+        return words + "!";
+    }
+
+    public String twice(String words) {
+        return shout(shout(words));
     }
 }
 JAVA_EOF
@@ -197,6 +219,37 @@ public abstract class Media implements Item {
 JAVA_EOF
 
 mkdir -p sample-java/src/com/example/service
+cat > sample-java/src/com/example/service/Catalog.java <<'JAVA_EOF'
+package com.example.service;
+
+import static com.example.util.Strings.SEPARATOR;
+import static com.example.util.Strings.join;
+import static com.example.util.Strings.shout;
+import static java.util.Objects.requireNonNull;
+
+import com.example.model.Book;
+
+/** Static imports: the helpers are called bare, as if they were Catalog's own. */
+public class Catalog {
+    private final Library library;
+
+    public Catalog(Library library) {
+        this.library = requireNonNull(library);
+    }
+
+    /** Strings.shout, not Megaphone's. */
+    public String headline(Book book) {
+        return shout(book.title());
+    }
+
+    /** Nested static-import calls, and a static-import constant. */
+    public String label(Book book) {
+        return join(shout(book.title()), SEPARATOR);
+    }
+}
+JAVA_EOF
+
+mkdir -p sample-java/src/com/example/service
 cat > sample-java/src/com/example/service/Library.java <<'JAVA_EOF'
 package com.example.service;
 
@@ -312,6 +365,8 @@ cat > sample-java/src/com/example/util/Strings.java <<'JAVA_EOF'
 package com.example.util;
 
 public final class Strings {
+    public static final String SEPARATOR = " / ";
+
     private Strings() {
     }
 
