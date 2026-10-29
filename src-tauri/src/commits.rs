@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
-use git2::{Branch, BranchType, Commit, Oid, Repository, Sort};
+use git2::{BranchType, Commit, Oid, Repository, Sort};
 use serde::Serialize;
 
-use crate::branches::{short_oid, shorthand};
+use crate::branches::{self, short_oid, shorthand, Upstream};
 use crate::error::{AppError, AppResult};
 
 /// One selectable commit in the commit picker. `oid` is the full 40-char id — specs
@@ -69,8 +69,8 @@ pub enum LogRange {
     /// stale local base can't leak mainline commits in — doesn't.
     #[serde(rename_all = "camelCase")]
     Unmerged { base_ref: String, base_name: String },
-    /// The branch is its own base (reviewing `master` itself): its commits not yet on
-    /// its upstream — what an agent just committed.
+    /// The branch held against what it tracks, or its own base (reviewing `master`
+    /// itself): its commits not yet on its upstream — what an agent just committed.
     #[serde(rename_all = "camelCase")]
     Unpushed {
         upstream_ref: String,
@@ -99,7 +99,8 @@ pub struct CommitLog {
 }
 
 /// The commits `ref_name` introduced relative to `base_ref` (both canonical refs).
-/// A base that names the branch itself, or doesn't resolve, falls back to the
+/// Held against the branch it tracks, that's what it hasn't pushed — none is an answer
+/// too. A base that names the branch itself, or doesn't resolve, falls back to the
 /// branch's unpushed commits, and then to its whole history.
 pub fn resolve_range(
     repo: &Repository,
@@ -107,10 +108,14 @@ pub fn resolve_range(
     base_ref: Option<&str>,
 ) -> AppResult<ResolvedRange> {
     let tip = resolve(repo, ref_name)?.oid;
+    let upstream = branches::upstream(repo, ref_name);
     if let Some(base_ref) = base_ref.filter(|base| *base != ref_name) {
+        if let Some(upstream) = upstream.as_ref().filter(|upstream| upstream.ref_name == base_ref) {
+            return Ok(unpushed(tip, upstream));
+        }
         if let Ok(base) = find_commit(repo, base_ref) {
             let mut hide = vec![base.id()];
-            hide.extend(upstream(repo, base_ref).map(|upstream| upstream.oid));
+            hide.extend(branches::upstream(repo, base_ref).map(|upstream| upstream.oid));
             return Ok(ResolvedRange {
                 tip,
                 hide,
@@ -121,17 +126,10 @@ pub fn resolve_range(
             });
         }
     }
-    if let Some(upstream) = upstream(repo, ref_name) {
+    if let Some(upstream) = &upstream {
         let (ahead, _) = repo.graph_ahead_behind(tip, upstream.oid)?;
         if ahead > 0 {
-            return Ok(ResolvedRange {
-                tip,
-                hide: vec![upstream.oid],
-                range: LogRange::Unpushed {
-                    upstream_ref: upstream.ref_name,
-                    upstream_name: upstream.name,
-                },
-            });
+            return Ok(unpushed(tip, upstream));
         }
     }
     Ok(ResolvedRange {
@@ -141,29 +139,16 @@ pub fn resolve_range(
     })
 }
 
-/// The branch a local branch tracks.
-struct Upstream {
-    /// Canonical: `refs/remotes/origin/master`.
-    ref_name: String,
-    /// Shorthand: `origin/master`.
-    name: String,
-    oid: Oid,
-}
-
-/// `ref_name`'s upstream. `None` for anything but a local branch with one configured:
-/// a remote-tracking ref, `HEAD`, a branch that tracks nothing.
-fn upstream(repo: &Repository, ref_name: &str) -> Option<Upstream> {
-    let reference = repo.find_reference(ref_name).ok()?;
-    if !reference.is_branch() {
-        return None;
+/// `upstream..tip`: what the branch hasn't pushed.
+fn unpushed(tip: Oid, upstream: &Upstream) -> ResolvedRange {
+    ResolvedRange {
+        tip,
+        hide: vec![upstream.oid],
+        range: LogRange::Unpushed {
+            upstream_ref: upstream.ref_name.clone(),
+            upstream_name: upstream.name.clone(),
+        },
     }
-    let upstream = Branch::wrap(reference).upstream().ok()?;
-    let reference = upstream.get();
-    Some(Upstream {
-        ref_name: reference.name()?.to_string(),
-        name: reference.shorthand()?.to_string(),
-        oid: reference.peel_to_commit().ok()?.id(),
-    })
 }
 
 /// A page of the commits `ref_name` introduced over `base_ref` (see `resolve_range`),
@@ -517,6 +502,32 @@ mod tests {
         let log = list(&repo, "refs/heads/master", master, 0, 100).unwrap();
         assert_eq!(log.range, LogRange::All);
         assert_eq!(log.commits.len(), 3);
+    }
+
+    #[test]
+    fn held_against_its_upstream_a_branch_lists_what_it_hasnt_pushed() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        repo_with_feature_branch(root);
+        git(root, &["remote", "add", "origin", "https://example.invalid/r.git"]);
+        git(root, &["update-ref", "refs/remotes/origin/feature", "feature~1"]);
+        git(root, &["branch", "-q", "-u", "origin/feature", "feature"]);
+        let repo = Repository::open(root).unwrap();
+        let upstream = Some("refs/remotes/origin/feature");
+
+        let log = list(&repo, "refs/heads/feature", upstream, 0, 100).unwrap();
+        let unpushed = LogRange::Unpushed {
+            upstream_ref: "refs/remotes/origin/feature".into(),
+            upstream_name: "origin/feature".into(),
+        };
+        assert_eq!(log.range, unpushed);
+        assert_eq!(summaries(&log), vec!["f3"]);
+
+        // All of it pushed: nothing to list, which is the answer — not the history.
+        git(root, &["update-ref", "refs/remotes/origin/feature", "feature"]);
+        let log = list(&repo, "refs/heads/feature", upstream, 0, 100).unwrap();
+        assert_eq!(log.range, unpushed);
+        assert!(log.commits.is_empty());
     }
 
     #[test]

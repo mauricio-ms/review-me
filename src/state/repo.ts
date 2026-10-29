@@ -20,10 +20,13 @@ type RepoState = {
   reviewBranch: ReviewBranch | null;
   /**
    * What the review branch is held against: the base its commits are listed over in
-   * the commits buffer. Starts as the repo's default branch; picking a base in
-   * `M-x compare` replaces it, so the log and the branch diff always share one base.
+   * the commits buffer. Starts as the branch it tracks (else the repo's default
+   * branch), and follows the review branch to its own; picking a base in `M-x compare`
+   * replaces it for good, so the log and the branch diff always share one base.
    */
   reviewBase: ReviewBranch | null;
+  /** Whether `M-x compare` picked `reviewBase`, rather than it following the branch. */
+  reviewBaseChosen: boolean;
   diff: DiffSummary | null;
   /** The comparison currently applied — what `diff` was computed from. */
   comparison: DiffSpec;
@@ -42,7 +45,7 @@ type RepoState = {
 
   setRepo: (repo: RepoInfo, path: string) => void;
   setReviewBranch: (branch: ReviewBranch | null) => void;
-  setReviewBase: (base: ReviewBranch | null) => void;
+  setReviewBase: (base: ReviewBranch | null, chosen: boolean) => void;
   /**
    * Commit a freshly computed comparison. Folds reset only when the comparison's
    * identity changed — a plain refresh keeps the reviewer's place.
@@ -61,6 +64,7 @@ export const useRepoStore = create<RepoState>((set) => ({
   repoPath: null,
   reviewBranch: null,
   reviewBase: null,
+  reviewBaseChosen: false,
   diff: null,
   comparison: WORKTREE_SPEC,
   comparisonEpoch: 0,
@@ -70,7 +74,7 @@ export const useRepoStore = create<RepoState>((set) => ({
   collapsedSections: new Set(),
 
   setReviewBranch: (reviewBranch) => set({ reviewBranch }),
-  setReviewBase: (reviewBase) => set({ reviewBase }),
+  setReviewBase: (reviewBase, reviewBaseChosen) => set({ reviewBase, reviewBaseChosen }),
   setRepo: (repo, path) =>
     set((s) =>
       s.repoPath === path
@@ -132,6 +136,7 @@ export const useRepoStore = create<RepoState>((set) => ({
       repoPath: null,
       reviewBranch: null,
       reviewBase: null,
+      reviewBaseChosen: false,
       diff: null,
       comparison: WORKTREE_SPEC,
       comparisonEpoch: s.comparisonEpoch + 1,

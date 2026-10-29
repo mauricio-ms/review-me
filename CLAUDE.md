@@ -234,13 +234,18 @@ export covers exactly the log's commits — which yields a `LogRange`:
 - `unmerged` — `base..ref`, also hiding the base's upstream (a stale local `master`
   mustn't leak `origin/master`'s commits in). An empty result is a real answer
   ("no commits beyond master"), not a reason to fall back.
-- `unpushed` — the base names the branch itself (reviewing `master`): `upstream..ref`.
+- `unpushed` — `upstream..ref`: the base is the branch's upstream, where an empty result
+  is a real answer too ("no commits beyond origin/x"); or the base names the branch
+  itself (reviewing `master`) and something is ahead of its upstream.
 - `all` — no base, or its own base with no upstream or nothing ahead of it.
 
-The base is **`useRepoStore.reviewBase`**: seeded on open from
-`RepoInfo.defaultBranchRef`, replaced by whatever `M-x compare` picks (`chooseReviewBase`,
-which reloads the log) so the log and the branch diff always share one base. `M-x show`'s
-picker passes no base — it is for the whole history.
+The base is **`useRepoStore.reviewBase`**: seeded on open from `RepoInfo.reviewBaseRef`
+(`branches::review_base_ref`: the review branch's upstream, else the default branch),
+followed to the new branch's on `M-x checkout` (`switchReviewBranch`, via the
+`review_base` command), and replaced for good by whatever `M-x compare` picks
+(`chooseReviewBase` sets `reviewBaseChosen`; it reloads the log) so the log and the
+branch diff always share one base. `M-x show`'s picker passes no base — it is for the
+whole history.
 
 `useLogStore` holds the listed `ref` (`lib/log.ts`'s `logRef()`: the review branch, else
 `HEAD`) and `base` (`logBase()`) — a change to either is a different list — the `range`

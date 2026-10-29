@@ -1,4 +1,4 @@
-use git2::{BranchType, Oid, Repository};
+use git2::{Branch, BranchType, Oid, Repository};
 use serde::Serialize;
 
 use crate::error::{AppError, AppResult};
@@ -127,6 +127,42 @@ fn remote_head_ref(repo: &Repository) -> Option<String> {
         }
     }
     None
+}
+
+/// The branch a local branch tracks.
+pub struct Upstream {
+    /// Canonical: `refs/remotes/origin/master`.
+    pub ref_name: String,
+    /// Shorthand: `origin/master`.
+    pub name: String,
+    pub oid: Oid,
+}
+
+/// `ref_name`'s upstream. `None` for anything but a local branch with one configured
+/// that still resolves: a remote-tracking ref, `HEAD`, a branch that tracks nothing or
+/// whose upstream is gone.
+pub fn upstream(repo: &Repository, ref_name: &str) -> Option<Upstream> {
+    let reference = repo.find_reference(ref_name).ok()?;
+    if !reference.is_branch() {
+        return None;
+    }
+    let upstream = Branch::wrap(reference).upstream().ok()?;
+    let reference = upstream.get();
+    Some(Upstream {
+        ref_name: reference.name()?.to_string(),
+        name: reference.shorthand()?.to_string(),
+        oid: reference.peel_to_commit().ok()?.id(),
+    })
+}
+
+/// What the review branch is held against until `M-x compare` picks another base: the
+/// branch it tracks — so the commits buffer lists what it hasn't pushed — else the
+/// repo's default branch. `None` when there is neither.
+pub fn review_base_ref(repo: &Repository, branch_ref: Option<&str>) -> Option<String> {
+    branch_ref
+        .and_then(|branch| upstream(repo, branch))
+        .map(|upstream| upstream.ref_name)
+        .or_else(|| default_branch_ref(repo))
 }
 
 /// Resolve a base/target ref pair to their tips and merge base. Errors when either
@@ -276,6 +312,32 @@ mod tests {
             .map(|b| b.name.as_str())
             .collect();
         assert_eq!(default, vec!["refs/heads/master"]);
+    }
+
+    #[test]
+    fn review_base_is_the_branchs_upstream_else_the_default_branch() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        diverged_repo(root);
+        let repo = Repository::open(root).unwrap();
+        let feature = Some("refs/heads/feature");
+
+        // Tracking nothing: held against the default branch.
+        assert_eq!(review_base_ref(&repo, feature).as_deref(), Some("refs/heads/master"));
+        assert_eq!(review_base_ref(&repo, None).as_deref(), Some("refs/heads/master"));
+
+        git(root, &["remote", "add", "origin", "https://example.invalid/r.git"]);
+        git(root, &["update-ref", "refs/remotes/origin/feature", "master"]);
+        git(root, &["branch", "-q", "-u", "origin/feature", "feature"]);
+        assert_eq!(
+            review_base_ref(&repo, feature).as_deref(),
+            Some("refs/remotes/origin/feature"),
+            "a branch that tracks one is held against its upstream"
+        );
+
+        // An upstream that is gone is no base at all.
+        git(root, &["update-ref", "-d", "refs/remotes/origin/feature"]);
+        assert_eq!(review_base_ref(&repo, feature).as_deref(), Some("refs/heads/master"));
     }
 
     #[test]

@@ -28,6 +28,7 @@ pub fn run() {
             commands::open_repo,
             commands::compute_diff,
             commands::list_branches,
+            commands::review_base,
             commands::list_commits,
             commands::commit_reviews,
             commands::resolve_commit,

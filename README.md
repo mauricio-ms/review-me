@@ -128,7 +128,8 @@ Both committed-history views derive from it, so you name a branch once:
 
 - `M-x compare` asks only for a **base** and shows `base...reviewBranch`.
 - `M-x log` (the commits buffer) lists the commits the **review branch introduced** over
-  its base — `M-x compare`'s pick, the repo's default branch until you make one.
+  its base — `M-x compare`'s pick; until you make one, the branch it tracks (its
+  upstream, so the log lists what isn't pushed yet), else the repo's default branch.
 
 Switching while comparing branches re-targets the comparison, so you can walk several
 branches against the same base. (If the new branch *is* that base, there's nothing to
@@ -395,8 +396,9 @@ selection starts on the branch already under review. `origin/HEAD` is never list
 an alias for a branch that is).
 
 `M-x compare` (**Compare against**) collects just the base, defaulting to the current one —
-the repo's default branch (from `refs/remotes/*/HEAD`, else `master`, else `main`) until
-you pick another. The pick stays the base for the session, so the commits buffer lists
+until you pick another, the review branch's upstream, else the repo's default branch (from
+`refs/remotes/*/HEAD`, else `master`, else `main`). The pick stays the base for the session,
+across `M-x checkout` too, so the commits buffer lists
 what the branch introduced over that same base. The branch under review is dimmed and
 unselectable — it can't be its own base. Errors (an unknown ref, two branches with no
 common ancestor) show inline without closing the picker.
@@ -413,8 +415,11 @@ the base is) — short oid, ref decorations (local branches, remote-tracking bra
 tags; the branch under review boxed), subject, author and age. Commits on the base's
 upstream are left out too, so a stale local `master` can't leak mainline work in.
 
-When the branch under review *is* its base (reviewing `master` itself), the list is its
-**Unpushed to origin/master** commits — what an agent just committed — and, with no
+Until `M-x compare` picks a base, a branch is held against the one it tracks: the list
+is its **Unpushed to origin/feature** commits — what an agent just committed — with
+`Upstream:` in place of `Base:`, and empty once everything is pushed. A branch that
+tracks nothing is held against the default branch. When the branch under review *is* its
+base (reviewing `master` itself), the list is its unpushed commits too and, with no
 upstream or nothing unpushed, its whole history under **Recent commits**.
 
 | Key | Action |

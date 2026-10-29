@@ -62,6 +62,14 @@ pub fn list_branches(repo: String) -> AppResult<Vec<BranchInfo>> {
     branches::list(&repository)
 }
 
+/// What `branch_ref` is held against when it becomes the review branch: its upstream,
+/// else the default branch (`branches::review_base_ref`).
+#[tauri::command]
+pub fn review_base(repo: String, branch_ref: String) -> AppResult<Option<String>> {
+    let repository = repo::open(&PathBuf::from(repo))?;
+    Ok(branches::review_base_ref(&repository, Some(&branch_ref)))
+}
+
 /// A page of the commits `ref_name` introduced over `base_ref`, newest first, for the
 /// commits buffer; with no base, its whole history, for the commit picker.
 #[tauri::command]

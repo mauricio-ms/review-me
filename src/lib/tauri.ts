@@ -41,6 +41,11 @@ export function listBranches(repo: string): Promise<BranchInfo[]> {
   return invoke<BranchInfo[]>("list_branches", { repo });
 }
 
+/** What `branchRef` is held against as the review branch: its upstream, else the default branch. */
+export function reviewBaseFor(repo: string, branchRef: string): Promise<string | null> {
+  return invoke<string | null>("review_base", { repo, branchRef });
+}
+
 /**
  * A page of the commits `refName` introduced over `baseRef`, newest first: `limit`
  * commits after the newest `skip`. A null base lists the whole history.

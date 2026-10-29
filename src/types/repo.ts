@@ -8,10 +8,10 @@ export interface RepoInfo {
    */
   reviewBranchRef: string | null;
   /**
-   * The repo's default branch — the base the review branch's commits are listed
-   * against until `M-x compare` picks another. Null when there is no such branch.
+   * What the review branch is held against until `M-x compare` picks another base: the
+   * branch it tracks, else the repo's default branch. Null when there is neither.
    */
-  defaultBranchRef: string | null;
+  reviewBaseRef: string | null;
   isDirty: boolean;
 }
 

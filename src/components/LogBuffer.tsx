@@ -313,8 +313,8 @@ export default function LogBuffer() {
           <div className="log-empty">
             {error
               ? "no history to show"
-              : range?.kind === "unmerged"
-                ? `${branchName} has no commits beyond ${range.baseName}`
+              : rangeBase
+                ? `${branchName} has no commits beyond ${rangeBase.name}`
                 : "no commits yet"}
           </div>
         )}

@@ -16,7 +16,7 @@ import { scopeForSpec } from "../types/tags";
 import { showBuffer, type ShowOptions } from "./buffers";
 import { loadLog, refreshCommitReviews, showLog } from "./log";
 import { ambientSource, reconcileFileBuffers, useProjectSource } from "./project";
-import { buildSymbolIndex, computeDiff, loadTags, openRepo } from "./tauri";
+import { buildSymbolIndex, computeDiff, loadTags, openRepo, reviewBaseFor } from "./tauri";
 
 /**
  * Guards against an older comparison request landing after a newer one. Every
@@ -92,12 +92,9 @@ export async function openRepoByPath(path: string): Promise<void> {
       ? { ref: info.reviewBranchRef, display: branchShorthand(info.reviewBranchRef) }
       : null,
   );
-  // ...and is held against the default branch until `M-x compare` picks another base.
-  repoStore.setReviewBase(
-    info.defaultBranchRef
-      ? { ref: info.defaultBranchRef, display: branchShorthand(info.defaultBranchRef) }
-      : null,
-  );
+  // ...and is held against the branch it tracks (else the default branch) until
+  // `M-x compare` picks another base.
+  repoStore.setReviewBase(asReviewBranch(info.reviewBaseRef), false);
   await applyComparison(WORKTREE_SPEC);
   const clean = (useRepoStore.getState().diff?.files.length ?? 0) === 0;
   // An unborn branch has no history to list either; its (empty) diff stays put.
@@ -163,30 +160,43 @@ export function leaveHistory(): void {
  * diff uses. The log follows, once it has been opened.
  */
 export function chooseReviewBase(base: ReviewBranch): void {
-  if (useRepoStore.getState().reviewBase?.ref === base.ref) return;
-  useRepoStore.getState().setReviewBase(base);
-  if (useLogStore.getState().ref !== null) void loadLog();
+  const moved = useRepoStore.getState().reviewBase?.ref !== base.ref;
+  useRepoStore.getState().setReviewBase(base, true);
+  if (moved && useLogStore.getState().ref !== null) void loadLog();
 }
 
 /**
- * Point the app at a different branch to review. A branch comparison re-targets so the
- * concept stays live — you see the new branch's work against the same base — unless
+ * Point the app at a different branch to review. Its base comes along: the branch it
+ * tracks, unless `M-x compare` picked one, which stays. A branch comparison re-targets
+ * so the concept stays live — you see the new branch's work against its base — unless
  * that would compare the base against itself, which is no comparison at all and falls
  * back to the working-tree diff. A commit comparison is left alone: a commit belongs to
  * no branch in particular.
  */
 export async function switchReviewBranch(branch: ReviewBranch): Promise<void> {
-  const { reviewBranch, comparison } = useRepoStore.getState();
-  if (reviewBranch?.ref === branch.ref) return;
+  const { repoPath, reviewBranch, reviewBase, reviewBaseChosen, comparison } =
+    useRepoStore.getState();
+  if (!repoPath || reviewBranch?.ref === branch.ref) return;
+  const base = reviewBaseChosen
+    ? reviewBase
+    : asReviewBranch(await reviewBaseFor(repoPath, branch.ref));
   useRepoStore.getState().setReviewBranch(branch);
+  useRepoStore.getState().setReviewBase(base, reviewBaseChosen);
   // The log lists the review branch, so it follows too — once it has been opened.
   if (useLogStore.getState().ref !== null) void loadLog();
   if (comparison.kind !== "branches") return;
+  // Held against the old branch's base, the comparison moves to the new one's.
+  const baseRef =
+    base && comparison.baseRef === reviewBase?.ref ? base.ref : comparison.baseRef;
   const spec: DiffSpec =
-    comparison.baseRef === branch.ref
+    baseRef === branch.ref
       ? WORKTREE_SPEC
-      : { ...comparison, targetRef: branch.ref };
+      : { ...comparison, baseRef, targetRef: branch.ref };
   await applyComparison(spec);
+}
+
+function asReviewBranch(ref: string | null): ReviewBranch | null {
+  return ref ? { ref, display: branchShorthand(ref) } : null;
 }
 
 /**
