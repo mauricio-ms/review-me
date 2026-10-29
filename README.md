@@ -362,7 +362,7 @@ just the current buffer's keys; `C-h k` tells you what a key does.
 | `hunks` | (project) Show/hide the diff of every change, in every file |
 | `flag` | (project) Flag the current selection |
 | `diff`, `project` | Switch to that buffer |
-| `toggle-tree` | (project) Hide or show the file tree |
+| `toggle-tree` | (project) Hide or show the file tree (`C-x t t`) |
 
 ### Diff buffer
 
@@ -485,7 +485,7 @@ opens from the old side, the only revision that still has it.
 A folder that holds nothing but one other folder shares its row with it, so a Java package
 reads `java/com/example/library` instead of four nested rows. Drag the tree's edge (or
 `C-x {` / `C-x }`) to resize it — the width is remembered — and `M-x toggle-tree` gives
-the viewer the whole window until `C-x o` brings the tree back. A file opened from the tree
+the viewer the whole window (`C-x t t` too) until `C-x o` or `C-x t t` brings the tree back. A file opened from the tree
 opens as a buffer of its own; the ones before it stay open (`C-x b`).
 
 | Key | Action |
@@ -503,6 +503,7 @@ opens as a buffer of its own; the ones before it stay open (`C-x b`).
 | `u` | Unmark the file (asks first when that deletes a note) |
 | `C-x o` | To the viewer |
 | `C-x {` / `C-x }` | Narrower / wider tree (then `{` `}` alone keep adjusting) |
+| `C-x t t` | Hide the tree (again: show it) |
 | `q` | Back to the diff |
 
 **Viewer (right)** — read-only CodeMirror with vim motions and per-file syntax highlighting.

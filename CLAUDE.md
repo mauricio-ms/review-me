@@ -400,7 +400,7 @@ switch drops the way forward); once its history runs out, back goes on through t
 shown buffers. `<left>`/`<right>` alone repeat.
 
 The tree's width (`useProjectStore.treeWidth`: dragged on its edge or `C-x {` / `C-x }`,
-remembered, clamped so the windows keep 320px) and `treeHidden` (`M-x toggle-tree`; `C-x o`
+remembered, clamped so the windows keep 320px) and `treeHidden` (`M-x toggle-tree` / `C-x t t`; `C-x o`
 brings it back) are layout state, not per-revision. In the project buffer `C-x o` moves
 between the tree and the viewer (and on through any other windows); the tree opens files in
 the selected window, and its `q` goes back to the diff.

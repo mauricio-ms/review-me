@@ -103,6 +103,7 @@ const GLOBAL_KEYS = [
     doc: "narrower file tree (then { } alone keep adjusting)",
   },
   { keys: ["C-x }"], command: "enlarge-tree", doc: "wider file tree" },
+  { keys: ["C-x t t"], command: "toggle-tree", doc: "hide the file tree, or show it again" },
   { keys: ["C-x g"], command: "log", doc: "the commits buffer" },
   { keys: ["C-x p p"], command: "recent", doc: "recent repositories" },
   { keys: ["C-x p k"], command: "close", doc: "close the repository" },
