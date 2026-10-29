@@ -17,7 +17,7 @@ use crate::review_commit::{
 };
 use crate::tags::{self, AnchorKind, AnchorSide, ReviewScope, TagStore};
 use crate::tree::{self, TreeListing};
-use crate::xref::{self, IndexStats, SymbolRef, XrefResult};
+use crate::xref::{self, IndexStats, Occurrences, SymbolRef, XrefResult};
 
 /// Resolve and validate the repo at `repo`, returning its canonical working-dir root.
 fn repo_root(repo: String) -> AppResult<PathBuf> {
@@ -315,6 +315,21 @@ pub fn find_references(
     let root = repo::root(&repository)?;
     let files = fuzzy::repo_files(&repository, &source)?;
     xref::find_references(&repository, &root, &source, &files, &symbol)
+}
+
+/// The occurrences, in `path`, of the symbol at a cursor (1-based line, 0-based UTF-16
+/// col), for the viewer to highlight. `None` when the index can't say.
+#[tauri::command]
+pub fn symbol_occurrences(
+    repo: String,
+    source: ProjectSource,
+    path: String,
+    line: u32,
+    col: u32,
+) -> AppResult<Option<Occurrences>> {
+    let repository = repo::open(&PathBuf::from(repo))?;
+    let root = repo::root(&repository)?;
+    xref::occurrences(&root, &source, &path, line, col)
 }
 
 /// Remove every reviewed, flag, and ignore tag overlapping `[start_line, end_line]` in `file`.

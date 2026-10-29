@@ -77,6 +77,10 @@ const gruberDarkerEditorTheme = EditorView.theme(
     ".cm-selectionMatch": {
       backgroundColor: c.bg2,
     },
+    ".cm-occurrence": {
+      backgroundColor: c.niagara2,
+      boxShadow: `inset 0 -1px ${c.niagara1}`,
+    },
     ".cm-panels": {
       backgroundColor: c.bgMinus1,
       color: c.fg,

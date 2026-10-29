@@ -506,6 +506,14 @@ jumps to definition; it and `M-.` both route through `xref.ts`'s
 `gotoDefinitionAt(line, col)`. The index is warmed in the background on repo
 open/refresh (`applyComparison`).
 
+The viewer marks **the other occurrences of the symbol under the cursor** once it rests
+there (`editor/occurrences.ts`). In Java the index answers (`xref::occurrences`:
+find-references' drop rule over one file, so a field and a same-named local stay
+apart); it never waits for the index lock, and says `None` when the index isn't built
+for that revision. Elsewhere — or when the index can't say, or read the file before it
+changed on disk — the word matches by name, skipping keywords, comments and literals by
+their highlight tags. Columns cross the wire in UTF-16 units, CodeMirror's.
+
 **History** (`state/history.ts`'s `useHistoryStore`) is back/forward, as a browser or
 Emacs 29's xref keeps it: **`M-,`** back, **`C-M-,`** forward, both global, and a new move
 drops the way forward. A `Place` is a spot in a file at a revision, a diff row (path +

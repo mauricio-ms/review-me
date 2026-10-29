@@ -27,7 +27,7 @@ import type {
   ReviewScope,
   TagStore,
 } from "../types/tags";
-import type { IndexStats, SymbolRef, XrefResult } from "../types/xref";
+import type { IndexStats, Occurrences, SymbolRef, XrefResult } from "../types/xref";
 
 export function openRepo(path: string): Promise<RepoInfo> {
   return invoke<RepoInfo>("open_repo", { path });
@@ -313,4 +313,15 @@ export function findReferences(
   symbol: SymbolRef,
 ): Promise<XrefResult[]> {
   return invoke<XrefResult[]>("find_references", { repo, source, symbol });
+}
+
+/** Where the symbol at a cursor occurs in its file — null when the index can't say. */
+export function symbolOccurrences(
+  repo: string,
+  source: ProjectSource,
+  path: string,
+  line: number,
+  col: number,
+): Promise<Occurrences | null> {
+  return invoke<Occurrences | null>("symbol_occurrences", { repo, source, path, line, col });
 }

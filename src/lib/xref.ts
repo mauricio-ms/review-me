@@ -1,11 +1,12 @@
 import { useRepoStore } from "../state/repo";
 import { useXrefStore } from "../state/xref";
-import type { XrefResult } from "../types/xref";
+import type { ProjectSource } from "../types/repo";
+import type { Occurrences, XrefResult } from "../types/xref";
 import { currentFile } from "./buffers";
 import { recordJump } from "./jumps";
 import { visitFile, type SourceChoice } from "./project";
 import { projectCursor } from "./project-view";
-import { findDefinition, findReferences, symbolAt } from "./tauri";
+import { findDefinition, findReferences, symbolAt, symbolOccurrences } from "./tauri";
 
 /**
  * Cross-references resolve in the revision of the file they start from — the one in the
@@ -76,4 +77,20 @@ export async function findUsages(): Promise<void> {
       ? `references: ${symbol.name} (${refs.length})`
       : `references: ${symbol.name} (${proven} confirmed, ${refs.length - proven} unconfirmed)`;
   useXrefStore.getState().show(title, refs, c.choice);
+}
+
+/**
+ * How a viewer of `path` at `source` asks the index where the symbol at its cursor
+ * occurs. Null for a file the index doesn't read — it parses Java only — whose viewer
+ * matches by name without asking.
+ */
+export function occurrenceLookup(
+  source: ProjectSource,
+  path: string,
+): ((line: number, col: number) => Promise<Occurrences | null>) | null {
+  if (!path.endsWith(".java")) return null;
+  return (line, col) => {
+    const repo = useRepoStore.getState().repoPath;
+    return repo ? symbolOccurrences(repo, source, path, line, col) : Promise.resolve(null);
+  };
 }

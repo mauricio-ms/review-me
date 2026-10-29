@@ -11,11 +11,13 @@ import { swallowColonKeymap, vimEscapeKeymap } from "../editor/cm-shared";
 import { diffMarks, setDiffMarks } from "../editor/diff-marks";
 import { flagDecorations, setFlagLines } from "../editor/flag-decorations";
 import { gruberDarkerTheme } from "../editor/gruber-darker";
+import { occurrenceHighlight } from "../editor/occurrences";
 import { viewerKeymap } from "../editor/viewer-keymap";
 import { defineNavVim } from "../editor/vim-nav";
 import { xrefClick } from "../editor/xref-click";
 import { changeBlocks, changeForFile } from "../lib/project-diff";
 import { sideRead } from "../lib/project-review";
+import { occurrenceLookup } from "../lib/xref";
 import {
   applyPosition,
   positionOf,
@@ -179,6 +181,10 @@ export default function FileView({ win, bufferId }: { win: WindowId; bufferId: F
   }, [path]);
 
   const tracker = useMemo(() => trackPosition(win, bufferId), [bufferId, win]);
+  const occurrences = useMemo(
+    () => occurrenceHighlight(source && path ? occurrenceLookup(source, path) : null),
+    [path, source],
+  );
   const extensions = useMemo(() => {
     const ext = [
       vim(),
@@ -188,13 +194,14 @@ export default function FileView({ win, bufferId }: { win: WindowId; bufferId: F
       xrefClick,
       diffMarks,
       flagDecorations,
+      occurrences,
       tracker,
       EditorState.readOnly.of(true),
       EditorView.lineWrapping,
     ];
     if (langExt) ext.push(langExt);
     return ext;
-  }, [langExt, tracker]);
+  }, [langExt, occurrences, tracker]);
 
   const onCreateEditor = useCallback(
     (created: EditorView) => {

@@ -1433,6 +1433,132 @@ pub fn find_references(
     Ok(results)
 }
 
+/// One occurrence of a symbol in a file, in the viewer's units: a 1-based line and a
+/// 0-based UTF-16 column.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Span {
+    pub line: u32,
+    pub col: u32,
+}
+
+/// The symbol under the viewer's cursor and where else in its file it occurs.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Occurrences {
+    pub name: String,
+    /// In document order; the cursor's own occurrence included.
+    pub spans: Vec<Span>,
+}
+
+/// The occurrences in `rel` of the symbol at `(line, col)` — a 0-based UTF-16 column, as
+/// the viewer counts — for highlighting: every name match the resolver can't prove is a
+/// different symbol, by the same rule `find_references` drops by.
+///
+/// `None` means the index can't answer for this file — not Java, not indexed at `source`
+/// yet, or being built right now (it never waits for the lock) — and the viewer matches
+/// by name instead. `Some` with no spans means the cursor isn't on an identifier.
+pub fn occurrences(
+    root: &Path,
+    source: &ProjectSource,
+    rel: &str,
+    line: u32,
+    col: u32,
+) -> AppResult<Option<Occurrences>> {
+    if !is_java(rel) {
+        return Ok(None);
+    }
+    let Ok(guard) = INDEX.try_lock() else {
+        return Ok(None);
+    };
+    let Some(index) = guard.as_ref() else {
+        return Ok(None);
+    };
+    if index.key.root != root || index.key.source != *source {
+        return Ok(None);
+    }
+    let Some(&fi) = index.file_index.get(rel) else {
+        return Ok(None);
+    };
+    let entry = &index.files[fi];
+    let src = &entry.source;
+    let row = line.saturating_sub(1) as usize;
+    let Some(start) = row_start(src, row) else {
+        return Ok(Some(Occurrences { name: String::new(), spans: Vec::new() }));
+    };
+    let point = Point::new(row, utf16_to_byte(&src[start..], col));
+    let node = entry.tree.root_node().descendant_for_point_range(point, point);
+    let Some(node) = node.filter(|n| matches!(n.kind(), "identifier" | "type_identifier")) else {
+        return Ok(Some(Occurrences { name: String::new(), spans: Vec::new() }));
+    };
+    let name = &src[node.byte_range()];
+    let want = resolve(index, fi, node);
+
+    let language = java_language();
+    let ref_query = Query::new(&language, queries::java::REFERENCES)
+        .map_err(|e| AppError::TreeSitter(e.to_string()))?;
+    let mut spans = Vec::new();
+    let mut cursor = QueryCursor::new();
+    let mut matches = cursor.matches(&ref_query, entry.tree.root_node(), src.as_bytes());
+    while let Some(m) = matches.next() {
+        for cap in m.captures {
+            let other = cap.node;
+            if &src[other.byte_range()] != name {
+                continue;
+            }
+            if other.id() != node.id() && provably_different(&want, &resolve(index, fi, other)) {
+                continue;
+            }
+            let pos = other.start_position();
+            let line_from = other.start_byte() - pos.column;
+            spans.push(Span {
+                line: pos.row as u32 + 1,
+                col: src[line_from..other.start_byte()].encode_utf16().count() as u32,
+            });
+        }
+    }
+    spans.sort_by_key(|s| (s.line, s.col));
+    spans.dedup();
+    Ok(Some(Occurrences { name: name.to_string(), spans }))
+}
+
+/// Whether an occurrence resolving to `got` is provably not the symbol that resolved to
+/// `want` — find-references' rule: different declarations, or ours against a jar's.
+/// Anything undecidable on either side stays.
+fn provably_different(want: &Resolution, got: &Resolution) -> bool {
+    use Resolution::*;
+    match (want, got) {
+        (Found(w), Found(g)) => w != g,
+        (Found(_), External) | (External, Found(_)) => true,
+        (Ambiguous(_), External) | (External, Ambiguous(_)) => true,
+        (Ambiguous(ids), Found(t)) | (Found(t), Ambiguous(ids)) => match t {
+            Target::Def(id) => !ids.contains(id),
+            Target::Local { .. } => true,
+        },
+        _ => false,
+    }
+}
+
+/// The byte offset where 0-based `row` starts, if the text has that many lines.
+fn row_start(src: &str, row: usize) -> Option<usize> {
+    if row == 0 {
+        return Some(0);
+    }
+    src.match_indices('\n').nth(row - 1).map(|(i, _)| i + 1)
+}
+
+/// The byte offset in `line` of its `col`-th UTF-16 unit, clamped to the line's end.
+fn utf16_to_byte(line: &str, col: u32) -> usize {
+    let mut units = 0;
+    for (i, ch) in line.char_indices() {
+        if units >= col as usize || ch == '\n' {
+            return i;
+        }
+        units += ch.len_utf16();
+    }
+    line.len()
+}
+
 /// Order results: proven hits first, then the file the cursor is in, then by path/line.
 fn rank(results: &mut [XrefResult], same_file: &str) {
     results.sort_by(|a, b| {
@@ -1982,5 +2108,65 @@ mod tests {
         if let (Some(first), Some(last)) = (first_unconfirmed, last_confirmed) {
             assert!(last < first, "every confirmed hit sorts before any unconfirmed");
         }
+    }
+
+    fn lines_of(found: &Occurrences) -> Vec<(u32, u32)> {
+        found.spans.iter().map(|s| (s.line, s.col)).collect()
+    }
+
+    #[test]
+    fn occurrences_keep_the_field_apart_from_a_same_named_local() {
+        let (dir, _repo, _rels, _lock) = fixture(&[(
+            "Item.java",
+            "class Item {\n    String name;\n    void rename(String to) {\n        this.name = to;\n    }\n    void shadow() {\n        String name = \"x\";\n        use(name);\n    }\n}\n",
+        )]);
+        let root = dir.path();
+
+        // On the field's declaration: its use in `rename`, never the local in `shadow`.
+        let field = occurrences(root, &ProjectSource::Worktree, "Item.java", 2, 11)
+            .unwrap()
+            .expect("an indexed Java file answers");
+        assert_eq!(field.name, "name");
+        assert_eq!(lines_of(&field), vec![(2, 11), (4, 13)]);
+
+        // On the local's use: the local and its declaration only.
+        let local = occurrences(root, &ProjectSource::Worktree, "Item.java", 8, 12)
+            .unwrap()
+            .unwrap();
+        assert_eq!(lines_of(&local), vec![(7, 15), (8, 12)]);
+    }
+
+    #[test]
+    fn occurrences_count_columns_in_utf16() {
+        let (dir, _repo, _rels, _lock) = fixture(&[(
+            "Greet.java",
+            "class Greet {\n    String hi(String n) {\n        return \"olá 👋 \" + n;\n    }\n}\n",
+        )]);
+        // `n` on line 3 sits after `return "olá 👋 " + `: 27 UTF-16 units, 30 bytes.
+        let found = occurrences(dir.path(), &ProjectSource::Worktree, "Greet.java", 3, 27)
+            .unwrap()
+            .unwrap();
+        assert_eq!(found.name, "n");
+        assert_eq!(lines_of(&found), vec![(2, 21), (3, 27)]);
+    }
+
+    #[test]
+    fn occurrences_answer_only_for_what_is_indexed() {
+        let (dir, _repo, _rels, _lock) = fixture(&[(
+            "Item.java",
+            "class Item {\n    int size;\n}\n",
+        )]);
+        let root = dir.path();
+        let at = |rel: &str, source: &ProjectSource, line, col| {
+            occurrences(root, source, rel, line, col).unwrap()
+        };
+
+        assert!(at("notes.md", &ProjectSource::Worktree, 1, 0).is_none(), "not Java");
+        assert!(at("Missing.java", &ProjectSource::Worktree, 1, 0).is_none(), "not indexed");
+        let other = ProjectSource::Commit { oid: "0".repeat(40) };
+        assert!(at("Item.java", &other, 2, 9).is_none(), "indexed at another revision");
+
+        let keyword = at("Item.java", &ProjectSource::Worktree, 1, 2).expect("indexed");
+        assert!(keyword.spans.is_empty(), "`class` is no symbol");
     }
 }

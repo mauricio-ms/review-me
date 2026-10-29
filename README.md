@@ -518,6 +518,10 @@ change in every file, and `M-x hunk` then hides just the one you're on. While th
 only the changed files (`c`), the removed lines are always shown in place; `M-x hunk` and
 `M-x hunks` then add the word highlighting.
 
+Rest the cursor on a symbol and its other occurrences in the file light up. In Java they
+come from the cross-reference index, so a field and a local of the same name stay apart;
+in other files the word is matched by name, leaving out keywords, comments and strings.
+
 | Key | Action |
 | --- | --- |
 | `j`/`k`, `gg`/`G`, `w`/`b`, `/search` | Standard vim motions |

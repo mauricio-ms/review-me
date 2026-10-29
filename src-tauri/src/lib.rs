@@ -57,6 +57,7 @@ pub fn run() {
             commands::symbol_at,
             commands::find_definition,
             commands::find_references,
+            commands::symbol_occurrences,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

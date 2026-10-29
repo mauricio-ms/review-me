@@ -37,3 +37,10 @@ export interface IndexStats {
   files: number;
   symbols: number;
 }
+
+/** A symbol's occurrences in one file, as `symbol_occurrences` returns them. */
+export interface Occurrences {
+  name: string;
+  /** 1-based line, 0-based UTF-16 column; the cursor's own one included. */
+  spans: { line: number; col: number }[];
+}
