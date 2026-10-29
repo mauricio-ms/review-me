@@ -110,6 +110,13 @@ const PREV_DEPTH = 20;
 
 const FIRST_WINDOW: WindowId = 1;
 
+/**
+ * A file the tree's cursor rests on, shown in window `win` over what the window really
+ * shows (`under`) while the tree has the keyboard (`lib/project.ts`'s `previewFile`).
+ * Going into the window opens it there (`openPreview`); anything else puts `under` back.
+ */
+export type Preview = { win: WindowId; key: FileBufferId; under: BufferKey };
+
 /** The windows a frame had: how it was split, what each showed and had shown, which had the selection. */
 export type Stash = {
   layout: Layout;
@@ -141,6 +148,8 @@ type WindowState = {
    * back on the way back (`unstash`). Only ever set outside project mode.
    */
   stash: Stash | null;
+  /** The file the tree is previewing, and where — never in `shown` or any history. */
+  preview: Preview | null;
 
   /** Show `key` in window `win` (it goes on remembering what was there). */
   show: (win: WindowId, key: BufferKey) => void;
@@ -156,6 +165,7 @@ type WindowState = {
   select: (win: WindowId) => void;
   setTreeFocused: (focused: boolean) => void;
   setProjectPane: (pane: "tree" | "viewer") => void;
+  setPreview: (preview: Preview | null) => void;
   /** Split window `win`; the new window — returned — shows `key`. */
   split: (win: WindowId, dir: "row" | "column", key: BufferKey) => WindowId;
   /** Close window `win` (never the last one); its space goes to its sibling. */
@@ -190,6 +200,7 @@ const initial = () => ({
   recent: ["diff"] as BufferKey[],
   nextId: FIRST_WINDOW + 1,
   stash: null as Stash | null,
+  preview: null as Preview | null,
 });
 
 /** `old` in front of a window's history list, without `old` or `key` further down. */
@@ -268,6 +279,8 @@ export const useWindowStore = create<WindowState>((set, get) => ({
     set((s) => (s.treeFocused === focused ? {} : { treeFocused: focused })),
 
   setProjectPane: (pane) => set((s) => (s.projectPane === pane ? {} : { projectPane: pane })),
+
+  setPreview: (preview) => set((s) => (s.preview === preview ? {} : { preview })),
 
   split: (win, dir, key) => {
     const added = get().nextId;
@@ -390,6 +403,26 @@ export const useWindowStore = create<WindowState>((set, get) => ({
 useWindowStore.subscribe((s) => {
   if (s.stash && inProjectMode(s)) useWindowStore.setState({ stash: null });
 });
+
+// A preview lasts while the tree has the keyboard over the window it's in — or while that
+// window is taking the keyboard from the tree, which opens it (`openPreview`). The window
+// showing something else, another one selected, project mode left: it's gone.
+useWindowStore.subscribe((s) => {
+  const p = s.preview;
+  if (
+    p &&
+    (s.shown[p.win] !== p.under ||
+      !inProjectMode(s) ||
+      (!s.treeFocused && s.selected !== p.win))
+  ) {
+    useWindowStore.setState({ preview: null });
+  }
+});
+
+/** What window `win` has on screen: the file the tree previews over it, else what it shows. */
+export function onScreen(s: WindowState, win: WindowId): BufferKey | undefined {
+  return s.preview?.win === win ? s.preview.key : s.shown[win];
+}
 
 /** The buffer in the selected window. */
 export function selectedBuffer(s: WindowState): BufferKey {

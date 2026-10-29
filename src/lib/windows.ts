@@ -15,8 +15,12 @@ import {
 } from "../state/windows";
 import { positionOf, savePosition } from "./project-view";
 
-/** Give window `win` the selection and the keyboard. */
+/**
+ * Give window `win` the selection and the keyboard — as a jump there: a file the tree
+ * previews in it isn't what was asked for.
+ */
 export function selectWindow(win: WindowId): void {
+  useWindowStore.getState().setPreview(null);
   useWindowStore.getState().select(win);
   useUIStore.getState().requestFocus();
 }
@@ -26,10 +30,11 @@ export function selectWindow(win: WindowId): void {
  * buffer (the diff, the log, help) already in another window isn't shown twice: that
  * window is the one (Emacs's reuse-window). Back to the project buffer from the diff,
  * its windows come back first (`bringBackProject`). `select` (the default) gives the
- * window the keyboard.
+ * window the keyboard. Whatever the tree was previewing goes: this is what was asked for.
  */
 export function display(key: BufferKey, win: WindowId, select = true): WindowId {
   const ws = useWindowStore.getState();
+  ws.setPreview(null);
   const back = bringBackProject(win, key);
   const elsewhere = back ?? (isSingleton(key) ? windowShowing(ws, key, win) : null);
   const target = elsewhere ?? win;

@@ -22,7 +22,7 @@ import {
   savePosition,
   topLine,
 } from "../lib/project-view";
-import { useFilesStore } from "../state/files";
+import { bufferOnScreen, useFilesStore } from "../state/files";
 import { useProjectStore } from "../state/project";
 import { useRepoStore } from "../state/repo";
 import { useTagsStore } from "../state/tags";
@@ -78,10 +78,12 @@ function trackPosition(win: WindowId, buffer: FileBufferId): Extension {
  * One window's view of a file buffer: the path line, then the file read-only in
  * CodeMirror with vim, its syntax, its changes in the comparison under review, and its
  * flags. Keyed by buffer, so each buffer gets a fresh editor that opens at the place
- * this window left it.
+ * this window left it — and a preview that gets opened keeps the one it has.
  */
 export default function FileView({ win, bufferId }: { win: WindowId; bufferId: FileBufferId }) {
-  const buffer = useFilesStore((s) => s.buffers.find((b) => b.id === bufferId));
+  const buffer = useFilesStore((s) => bufferOnScreen(s, bufferId));
+  // The tree's cursor is on it: shown here, not open yet.
+  const preview = useWindowStore((s) => s.preview?.win === win && s.preview.key === bufferId);
   const diff = useRepoStore((s) => s.diff);
   const flags = useTagsStore((s) => s.flags);
   const changedOnly = useProjectStore((s) => s.filter === "changed");
@@ -199,7 +201,7 @@ export default function FileView({ win, bufferId }: { win: WindowId; bufferId: F
   if (!buffer) return null;
 
   return (
-    <div className="project-viewer">
+    <div className={`project-viewer${preview ? " is-preview" : ""}`}>
       <div className="project-viewer-path">
         <PathLabel className="project-viewer-file" path={buffer.path} />
         {change && (
@@ -217,6 +219,14 @@ export default function FileView({ win, bufferId }: { win: WindowId; bufferId: F
             title="reading a committed revision, not the working tree"
           >
             @ {buffer.sourceLabel}
+          </span>
+        )}
+        {preview && (
+          <span
+            className="project-viewer-preview"
+            title="the file under the tree's cursor — not open until you go into it"
+          >
+            preview · <kbd>RET</kbd> or a click opens it
           </span>
         )}
       </div>

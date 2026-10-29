@@ -2,13 +2,18 @@ import { fileBuffer, newFileBufferId, useFilesStore, type FileBuffer } from "../
 import { useProjectStore } from "../state/project";
 import { useRepoStore } from "../state/repo";
 import { useUIStore } from "../state/ui";
-import { useWindowStore, type FileBufferId } from "../state/windows";
+import {
+  inProjectMode,
+  useWindowStore,
+  type FileBufferId,
+  type WindowId,
+} from "../state/windows";
 import { shortOid, type Comparison } from "../types/diff";
 import { sameSource, WORKTREE_SOURCE, type ProjectSource } from "../types/repo";
 import { findFileBuffer, killFileBuffers, type ShowOptions } from "./buffers";
 import { recordJump } from "./jumps";
 import { armRepeat } from "./key-dispatch";
-import { placeCursor } from "./project-view";
+import { forgetPositions, placeCursor } from "./project-view";
 import { display, focusTree, otherWindowFor, targetWindow } from "./windows";
 import { listRepoDir, readFile } from "./tauri";
 
@@ -140,26 +145,44 @@ export async function toggleDir(path: string): Promise<void> {
   }
 }
 
+/** A file's text at a revision — or, when it can't be read, a note saying why. */
+async function readText(repo: string, source: ProjectSource, path: string): Promise<string> {
+  try {
+    return await readFile(repo, source, path);
+  } catch (e) {
+    return `// failed to read ${path}\n// ${String(e)}`;
+  }
+}
+
 /** Read a buffer's file at its revision; a buffer re-pointed meanwhile keeps the newer read. */
 async function readInto(buffer: FileBuffer): Promise<void> {
   const repo = useRepoStore.getState().repoPath;
   if (!repo) return;
-  let content: string;
-  try {
-    content = await readFile(repo, buffer.source, buffer.path);
-  } catch (e) {
-    content = `// failed to read ${buffer.path}\n// ${String(e)}`;
-  }
+  const content = await readText(repo, buffer.source, buffer.path);
   const now = fileBuffer(buffer.id);
   if (now && sameSource(now.source, buffer.source)) {
     useFilesStore.getState().update(buffer.id, { content });
   }
 }
 
-/** The buffer for `path` at a revision — the open one, else a new one being read. */
+/** The file being previewed, when it's `path` at `source`. */
+function previewOf(source: ProjectSource, path: string): FileBuffer | undefined {
+  const fresh = useFilesStore.getState().preview;
+  return fresh && fresh.path === path && sameSource(fresh.source, source) ? fresh : undefined;
+}
+
+/**
+ * The buffer for `path` at a revision — the open one, else the preview of it (opened
+ * now, so the window previewing it keeps its view), else a new one being read.
+ */
 function bufferFor(path: string, choice: SourceChoice): FileBufferId {
   const open = findFileBuffer(choice.source, path);
   if (open) return open.id;
+  const preview = previewOf(choice.source, path);
+  if (preview) {
+    useFilesStore.getState().adopt(preview.id);
+    return preview.id;
+  }
   const buffer: FileBuffer = {
     id: newFileBufferId(),
     path,
@@ -192,6 +215,76 @@ export function visitFile(
   if (at) placeCursor(shownIn, id, at.line, at.col ?? 0);
 }
 
+/** Previews asked for; a read that finishes after a newer one was asked is dropped. */
+let previewSeq = 0;
+
+/** A preview is for while the tree has the keyboard. */
+function treeBrowsing(): boolean {
+  const ws = useWindowStore.getState();
+  return ws.treeFocused && inProjectMode(ws);
+}
+
+/** Drop the file read for a preview, with every place a window had in it. */
+function dropPreviewBuffer(): void {
+  const fresh = useFilesStore.getState().preview;
+  if (!fresh) return;
+  useFilesStore.getState().setPreview(null);
+  forgetPositions([fresh.id]);
+}
+
+// The file read for a preview goes with the preview — unless opening it adopted it.
+useWindowStore.subscribe(() => {
+  const fresh = useFilesStore.getState().preview;
+  if (fresh && useWindowStore.getState().preview?.key !== fresh.id) dropPreviewBuffer();
+});
+
+/**
+ * The tree's cursor resting on a file: show it where opening it would (`targetWindow`)
+ * without opening it, the tree keeping the keyboard. A buffer already open for it is
+ * shown as it stands; otherwise the file is read into the one preview buffer, which no
+ * buffer list sees and the next preview replaces. When the tree lets go, the window goes
+ * back to what it showed — unless it's the window that takes the keyboard
+ * (`openPreview`), or the file was opened.
+ */
+export async function previewFile(path: string, choice: SourceChoice): Promise<void> {
+  const seq = ++previewSeq;
+  const repo = useRepoStore.getState().repoPath;
+  if (!repo || !treeBrowsing()) return;
+  let key = (findFileBuffer(choice.source, path) ?? previewOf(choice.source, path))?.id;
+  if (!key) {
+    const content = await readText(repo, choice.source, path);
+    if (seq !== previewSeq || !treeBrowsing()) return;
+    dropPreviewBuffer();
+    const buffer: FileBuffer = {
+      id: newFileBufferId(),
+      path,
+      source: choice.source,
+      sourceLabel: choice.label,
+      content,
+    };
+    useFilesStore.getState().setPreview(buffer);
+    key = buffer.id;
+  }
+  const win = targetWindow();
+  const ws = useWindowStore.getState();
+  const under = ws.shown[win];
+  ws.setPreview(under === key ? null : { win, key, under });
+}
+
+/**
+ * Into the window the tree is previewing a file in — a click in the file, `C-x o`,
+ * `C-w l`: the file opens there, as `RET` would have opened it, and `M-,` goes back.
+ * False when `win` isn't previewing anything.
+ */
+export function openPreview(win: WindowId): boolean {
+  const preview = useWindowStore.getState().preview;
+  if (preview?.win !== win) return false;
+  recordJump();
+  useFilesStore.getState().adopt(preview.key);
+  display(preview.key, win);
+  return true;
+}
+
 /** Open a file from the tree or the finder, at the revision they list (a jump `M-,` undoes). */
 export function openFileInProject(path: string, options: ShowOptions = {}): void {
   if (options.select ?? true) recordJump();
@@ -209,14 +302,14 @@ export function openFileFromDiff(
   line?: number,
   options: ShowOptions = {},
 ): void {
-  const comparison = useRepoStore.getState().diff?.comparison;
   if (options.select ?? true) recordJump();
-  visitFile(
-    path,
-    side === "old" ? baseSource(comparison) : ambientSource(comparison),
-    line != null ? { line } : undefined,
-    options,
-  );
+  visitFile(path, sideChoice(side), line != null ? { line } : undefined, options);
+}
+
+/** The revision holding one side of the comparison on screen. */
+export function sideChoice(side: "new" | "old"): SourceChoice {
+  const comparison = useRepoStore.getState().diff?.comparison;
+  return side === "old" ? baseSource(comparison) : ambientSource(comparison);
 }
 
 /**
@@ -231,6 +324,8 @@ export function reconcileFileBuffers(
   next: Comparison,
   sameComparison: boolean,
 ): void {
+  // A preview is of what was on screen before.
+  useWindowStore.getState().setPreview(null);
   const now = [ambientSource(next), baseSource(next)];
   const before = prev && sameComparison ? [ambientSource(prev), baseSource(prev)] : null;
   const kill: FileBufferId[] = [];

@@ -2,11 +2,13 @@ import { useEffect, useLayoutEffect, useMemo, useRef, type CSSProperties } from 
 
 import {
   isFileKey,
+  onScreen,
   useWindowStore,
   type Layout,
   type SplitPath,
   type WindowId,
 } from "../state/windows";
+import { openPreview } from "../lib/project";
 import { focusTree } from "../lib/windows";
 import { useProjectStore } from "../state/project";
 import FileView from "./FileView";
@@ -94,8 +96,9 @@ function NoFileOpen({ win }: { win: WindowId }) {
 }
 
 /**
- * One Emacs window: a view onto a buffer. Focus landing anywhere in it — a click, or
- * a buffer taking the keyboard — makes it the selected one, and the tree lets go.
+ * One Emacs window: a view onto a buffer — or onto the file the tree previews in it. Focus
+ * landing anywhere in it — a click, or a buffer taking the keyboard — makes it the selected
+ * one, and the tree lets go; landing in a preview opens the file there.
  */
 function Window({
   id,
@@ -106,7 +109,7 @@ function Window({
   className: string;
   style: CSSProperties;
 }) {
-  const key = useWindowStore((s) => s.shown[id]);
+  const key = useWindowStore((s) => onScreen(s, id));
   const rootRef = useRef<HTMLDivElement | null>(null);
 
   // A native listener: the diff and the log are portals, so their React focus events
@@ -114,7 +117,9 @@ function Window({
   useEffect(() => {
     const root = rootRef.current;
     if (!root) return;
-    const onFocusIn = () => useWindowStore.getState().select(id);
+    const onFocusIn = () => {
+      if (!openPreview(id)) useWindowStore.getState().select(id);
+    };
     root.addEventListener("focusin", onFocusIn);
     return () => root.removeEventListener("focusin", onFocusIn);
   }, [id]);

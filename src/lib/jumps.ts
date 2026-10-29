@@ -3,17 +3,20 @@ import { useUIStore } from "../state/ui";
 import { isFileKey, selectedBuffer, useWindowStore } from "../state/windows";
 import { currentFile } from "./buffers";
 import { logCursor } from "./log";
-import { projectCursor } from "./project-view";
+import { positionOf, projectCursor } from "./project-view";
 
 /**
  * Where the selected window is: a spot in its file, the diff's row, or the log's
  * commit. Help is nowhere worth coming back to.
  */
 export function currentPlace(): Place | null {
-  const key = selectedBuffer(useWindowStore.getState());
+  const ws = useWindowStore.getState();
+  const key = selectedBuffer(ws);
   if (isFileKey(key)) {
     const file = currentFile();
-    const cursor = projectCursor();
+    // With the tree previewing another file over it, the window's own view is gone: it
+    // stands where it left the file.
+    const cursor = projectCursor() ?? positionOf(ws.selected, key);
     if (!file || !cursor) return null;
     return {
       kind: "file",

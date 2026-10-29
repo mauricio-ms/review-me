@@ -1189,6 +1189,17 @@ kbd {
   color: var(--accent-violet);
 }
 
+/* The file under the tree's cursor, shown but not open (lib/project.ts's previewFile). */
+.project-viewer.is-preview .project-viewer-file {
+  font-style: italic;
+}
+
+.project-viewer-preview {
+  flex: none;
+  margin-left: auto;
+  color: var(--fg-dim);
+}
+
 .project-viewer-empty {
   flex: 1;
   display: flex;

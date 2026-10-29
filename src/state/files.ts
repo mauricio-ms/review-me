@@ -28,7 +28,16 @@ export function newFileBufferId(): FileBufferId {
 type FilesState = {
   /** Open buffers, in the order they were opened (`C-x <left>`/`<right>` cycle them). */
   buffers: FileBuffer[];
+  /**
+   * A file read only to be previewed from the tree (`lib/project.ts`'s `previewFile`):
+   * not open, so nothing that lists buffers sees it — until opening it adopts it, id and
+   * all, which keeps the window's view of it.
+   */
+  preview: FileBuffer | null;
   add: (buffer: FileBuffer) => void;
+  setPreview: (buffer: FileBuffer | null) => void;
+  /** The preview, opened: one of `buffers` from now on. */
+  adopt: (id: FileBufferId) => void;
   update: (id: FileBufferId, patch: Partial<Omit<FileBuffer, "id">>) => void;
   remove: (ids: FileBufferId[]) => void;
   reset: () => void;
@@ -38,7 +47,13 @@ const EMPTY_BUFFERS: FileBuffer[] = [];
 
 export const useFilesStore = create<FilesState>((set) => ({
   buffers: EMPTY_BUFFERS,
+  preview: null,
   add: (buffer) => set((s) => ({ buffers: [...s.buffers, buffer] })),
+  setPreview: (buffer) => set({ preview: buffer }),
+  adopt: (id) =>
+    set((s) =>
+      s.preview?.id === id ? { buffers: [...s.buffers, s.preview], preview: null } : {},
+    ),
   update: (id, patch) =>
     set((s) => ({ buffers: s.buffers.map((b) => (b.id === id ? { ...b, ...patch } : b)) })),
   remove: (ids) =>
@@ -47,8 +62,13 @@ export const useFilesStore = create<FilesState>((set) => ({
       const buffers = s.buffers.filter((b) => !gone.has(b.id));
       return buffers.length === s.buffers.length ? {} : { buffers };
     }),
-  reset: () => set({ buffers: EMPTY_BUFFERS }),
+  reset: () => set({ buffers: EMPTY_BUFFERS, preview: null }),
 }));
+
+/** A buffer a window can have on screen: an open one, or the file being previewed. */
+export function bufferOnScreen(s: FilesState, id: FileBufferId): FileBuffer | undefined {
+  return s.buffers.find((b) => b.id === id) ?? (s.preview?.id === id ? s.preview : undefined);
+}
 
 /** The buffer with this id, if it is still open. */
 export function fileBuffer(id: FileBufferId): FileBuffer | undefined {

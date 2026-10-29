@@ -6,7 +6,15 @@ import { buildChanged, type TreeNode as Node } from "../lib/changed-tree";
 import { fileIcon } from "../lib/file-icons";
 import { dispatchKey, type KeyHandler } from "../lib/key-dispatch";
 import { KEYMAP, type TreeAction } from "../lib/keymap";
-import { loadDir, openFileFromDiff, openFileInProject, toggleDir } from "../lib/project";
+import {
+  loadDir,
+  openFileFromDiff,
+  openFileInProject,
+  previewFile,
+  projectChoice,
+  sideChoice,
+  toggleDir,
+} from "../lib/project";
 import { TREE_WIDTH_MIN, useProjectStore } from "../state/project";
 import { useRepoStore } from "../state/repo";
 import { useTagsStore } from "../state/tags";
@@ -20,6 +28,12 @@ const EMPTY_FILES: ChangedFile[] = [];
 
 /** However wide the tree is set, the windows keep at least this much. */
 const WINDOWS_MIN_WIDTH = 320;
+
+/** How long the cursor rests on a file before it's previewed: holding `j` reads nothing. */
+const PREVIEW_DELAY_MS = 60;
+
+/** Where a changed file is read: the old side for a deletion, the only one that has it. */
+const sideOf = (change: ChangedFile) => (change.status === "deleted" ? "old" : "new");
 
 /**
  * A tree row's name. A compacted chain (`java/com/acme`) dims its leading folders and,
@@ -63,8 +77,10 @@ function buildVisible(
 /**
  * The file tree, fixed at the left of project mode (`inProjectMode`: the main window
  * shows a file, or you're in the tree) and hidden everywhere else: the revision under
- * review, or only the files its comparison changed (`c`). Opening a file shows it in the
- * selected window; `C-x o` moves between the tree and the windows.
+ * review, or only the files its comparison changed (`c`). The file under the cursor — moved
+ * to, or clicked — is previewed in the selected window while the tree keeps the keyboard;
+ * opening one (`RET`, a double-click, or going into the preview) shows it there for good.
+ * `C-x o` moves between the tree and the windows.
  */
 export default function ProjectTree({ hidden }: { hidden: boolean }) {
   const dirs = useProjectStore((s) => s.dirs);
@@ -179,19 +195,34 @@ export default function ProjectTree({ hidden }: { hidden: boolean }) {
     if (focused) treeRef.current?.focus({ preventScroll: true });
   }, [focused, focusRequest]);
 
+  // Show the file at the cursor where opening it would — now, or once the cursor has
+  // rested on it. On a folder, the last file previewed stays.
+  const previewTimer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(previewTimer.current), []);
+  const preview = (node: Node | undefined, delay = 0) => {
+    window.clearTimeout(previewTimer.current);
+    if (!node || node.entry.isDir) return;
+    const show = () => {
+      if (node.change) void previewFile(node.change.path, sideChoice(sideOf(node.change)));
+      else void previewFile(node.entry.path, projectChoice());
+    };
+    if (delay > 0) previewTimer.current = window.setTimeout(show, delay);
+    else show();
+  };
+
+  const moveTo = (idx: number) => {
+    const next = Math.max(0, Math.min(idx, nodes.length - 1));
+    setCursor(next);
+    preview(nodes[next], PREVIEW_DELAY_MS);
+  };
+
   const activate = (node: Node | undefined, options: ShowOptions = {}) => {
     if (!node) return;
+    window.clearTimeout(previewTimer.current);
     if (node.entry.isDir) {
       toggleFolder(node.entry.path);
     } else if (node.change) {
-      // At the revision that changed it — the old side for a deletion, the only one
-      // that still has it.
-      openFileFromDiff(
-        node.change.path,
-        node.change.status === "deleted" ? "old" : "new",
-        undefined,
-        options,
-      );
+      openFileFromDiff(node.change.path, sideOf(node.change), undefined, options);
     } else {
       openFileInProject(node.entry.path, options);
     }
@@ -210,17 +241,17 @@ export default function ProjectTree({ hidden }: { hidden: boolean }) {
       parent = parent.slice(0, parent.lastIndexOf("/"));
       const idx = nodes.findIndex((n) => n.entry.path === parent);
       if (idx >= 0) {
-        setCursor(idx);
+        moveTo(idx);
         return;
       }
     }
   };
 
   const handlers: Record<TreeAction, KeyHandler> = {
-    down: () => setCursor((c) => Math.min(nodes.length - 1, c + 1)),
-    up: () => setCursor((c) => Math.max(0, c - 1)),
-    first: () => setCursor(0),
-    last: () => setCursor(Math.max(0, nodes.length - 1)),
+    down: () => moveTo(cursor + 1),
+    up: () => moveTo(cursor - 1),
+    first: () => moveTo(0),
+    last: () => moveTo(nodes.length - 1),
     // Fold the folder under the cursor (no-op on files).
     toggle: () => {
       const node = nodes[cursor];
@@ -277,9 +308,15 @@ export default function ProjectTree({ hidden }: { hidden: boolean }) {
                 }${change ? ` status-${change.status}` : ""}`}
                 style={{ paddingLeft: `calc(8px + ${node.depth} * 1.2ch)` }}
                 title={change?.oldPath ? `renamed from ${change.oldPath}` : undefined}
+                // A click picks the row — a folder folds, a file is previewed — and the
+                // keyboard stays in the tree; a double-click opens the file.
                 onClick={() => {
                   setCursor(idx);
-                  activate(node);
+                  if (node.entry.isDir) toggleFolder(node.entry.path);
+                  else preview(node);
+                }}
+                onDoubleClick={() => {
+                  if (!node.entry.isDir) activate(node);
                 }}
               >
                 <span className="tree-icon" style={{ color: icon.color }}>

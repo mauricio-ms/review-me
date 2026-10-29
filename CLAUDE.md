@@ -395,6 +395,22 @@ brings it back) are layout state, not per-revision. In the project buffer `C-x o
 between the tree and the viewer (and on through any other windows); the tree opens files in
 the selected window, and its `q` goes back to the diff.
 
+**The tree previews; it doesn't open.** Moving its cursor onto a file (after a 60ms rest,
+so holding `j` reads nothing) or clicking one calls `lib/project.ts`'s `previewFile`, and
+the tree keeps the keyboard: `useWindowStore.preview` (`{win, key, under}`) lays the file
+over `targetWindow()` — `Window` renders `onScreen`, not `shown` — without touching
+`shown`, any history or `recent`. An open buffer for it is shown as it stands; otherwise
+it is read into `useFilesStore.preview`, a buffer outside `buffers` (so `C-x b` and every
+list skip it) that the next preview replaces. It opens — `adopt`, same id, so the
+`FileView` isn't remounted — on `RET`/double-click (`bufferFor` adopts a matching preview)
+or when focus lands in its window (`Window`'s focusin → `openPreview`, which records a
+jump): a click in the file, `C-x o`, `C-w l`, `C-x 1`. That's why a plain `select` of
+the preview's window keeps it (the window store's subscription drops it only when the
+window shows something else, another window is selected, or project mode ends), while
+`display` and `selectWindow` — something deliberately shown — clear it first.
+`applyComparison` clears it too. `currentPlace` falls back to the saved position because
+the covered window's own view is unmounted.
+
 `useProjectStore.filter` (`all` | `changed`, `c` in the tree / `M-x changed`) narrows the
 tree and the fuzzy finder to **the applied comparison's files** (`useRepoStore.diff`): a
 commit's, a branch's, or the uncommitted ones. It is a standing preference — `setSource`

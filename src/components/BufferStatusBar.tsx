@@ -4,6 +4,7 @@ import { useCurrentFile } from "../lib/buffers";
 import { reviewProgress } from "../lib/coverage";
 import { changeAtLine, changeBlocks, changeForFile } from "../lib/project-diff";
 import { timeAgo } from "../lib/time";
+import { bufferOnScreen, useFilesStore } from "../state/files";
 import { useRepoStore } from "../state/repo";
 import { useTagsStore } from "../state/tags";
 import { useUIStore } from "../state/ui";
@@ -69,12 +70,18 @@ export default function BufferStatusBar() {
     return change ? changeBlocks(change) : null;
   }, [diff, file]);
   const onChange = blocks && line != null ? changeAtLine(blocks, line) : -1;
+  // What the tree previews in the selected window is what that window has on screen.
+  const previewKey = useWindowStore((s) => (s.preview?.win === s.selected ? s.preview.key : null));
+  const previewPath = useFilesStore((s) =>
+    previewKey ? (bufferOnScreen(s, previewKey)?.path ?? null) : null,
+  );
 
   const files = diff?.files ?? [];
   // The file you're on, named in full at the right edge, as Emacs's mode line names the
   // buffer: the diff's cursor row, or the window's file.
-  const here =
-    shown === "diff" && diffCursor
+  const here = previewPath
+    ? { path: previewPath, line: null }
+    : shown === "diff" && diffCursor
       ? diffCursor
       : file
         ? { path: file.path, line }
