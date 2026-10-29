@@ -59,6 +59,8 @@ export type Comparison =
       oid: string;
       shortOid: string;
       summary: string;
+      /** The message after its subject, trimmed; empty when there's none. */
+      body: string;
       authorName: string;
       /** Author time, seconds since the epoch. */
       timestamp: number;

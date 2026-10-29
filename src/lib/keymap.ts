@@ -146,7 +146,7 @@ const DIFF_KEYS = [
   { keys: ["[ f"], action: "prev-file", doc: "previous file" },
   { keys: ["] s"], action: "next-section", doc: "next section" },
   { keys: ["[ s"], action: "prev-section", doc: "previous section" },
-  { keys: ["TAB"], action: "toggle", doc: "fold or unfold" },
+  { keys: ["TAB"], action: "toggle", doc: "fold or unfold (the commit message too)" },
   { keys: ["RET"], action: "open", doc: "open the file, at this line, as a buffer" },
   { keys: ["o"], action: "open-other", doc: "open the file, at this line, in the other window" },
   {

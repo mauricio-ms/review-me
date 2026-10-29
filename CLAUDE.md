@@ -277,7 +277,10 @@ own `onKeyDown` over a flattened `Row[]` (file/hunk/line) — its keys, sequence
 `g g` and `] h` included, are `keymap.ts`'s `diff` scope — and a `visualAnchor` for `v`
 selection. Line rows carry **intra-line word-diff** segments (`lib/word-diff.ts`: pairs
 each removed line with the added line that replaced it, LCS over tokens) — on by default;
-`M-x diffmode` toggles `useUIStore.diffHighlight` between `word` and whole-`line`. Only the
+`M-x diffmode` toggles `useUIStore.diffHighlight` between `word` and whole-`line`. In commit
+mode the first row is the commit itself (`kind: "commit"`: `Comparison::Commit`'s subject,
+author, date and `body`, which `TAB` folds to the subject); it belongs to no file, so read a
+row's file through `rowFile` rather than assuming every non-section row has one. Only the
 **file viewer** (`FileView.tsx`) uses CodeMirror (read-only + vim + per-file syntax
 highlighting lazy-loaded by extension via `@codemirror/language-data`).
 

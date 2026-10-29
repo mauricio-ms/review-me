@@ -76,6 +76,8 @@ pub enum Comparison {
         oid: String,
         short_oid: String,
         summary: String,
+        /// The message after its subject, for the diff buffer's commit header.
+        body: String,
         author_name: String,
         timestamp: i64,
         /// The first parent, whose tree is the old side. `None` for a root commit,
@@ -284,6 +286,7 @@ fn compute_commit(
             oid: info.oid.clone(),
             short_oid: info.short_oid.clone(),
             summary: info.summary.clone(),
+            body: resolved.body.clone(),
             author_name: info.author_name.clone(),
             timestamp: info.timestamp,
             parent_oid: resolved.parent_oid.map(|oid| oid.to_string()),
@@ -801,6 +804,30 @@ mod tests {
     }
 
     #[test]
+    fn commit_comparison_carries_the_message_body() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        diverged_repo(root);
+        run(root, &["checkout", "-q", "feature"]);
+        fs::write(root.join("later.txt"), "more\n").unwrap();
+        run(root, &["add", "."]);
+        run(root, &["commit", "-qm", "subject line", "-m", "Why it changed.", "-m", "- one\n- two"]);
+        let repo = Repository::open(root).unwrap();
+
+        let with_body = compute(&repo, &commit_spec(&oid_of(&repo, "HEAD"), None)).unwrap();
+        let without = compute(&repo, &commit_spec(&oid_of(&repo, "HEAD~1"), None)).unwrap();
+        let body = |summary: &DiffSummary| match &summary.comparison {
+            Comparison::Commit { summary, body, .. } => (summary.clone(), body.clone()),
+            _ => panic!("expected a commit comparison"),
+        };
+        assert_eq!(
+            body(&with_body),
+            ("subject line".to_string(), "Why it changed.\n\n- one\n- two".to_string())
+        );
+        assert_eq!(body(&without).1, "", "a subject alone has no body");
+    }
+
+    #[test]
     fn commit_diff_shows_one_commit_against_its_parent() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
@@ -986,6 +1013,7 @@ mod tests {
             oid: "a".repeat(40),
             short_oid: "aaaaaaa".into(),
             summary: "subject".into(),
+            body: String::new(),
             author_name: "Ada".into(),
             timestamp: 7,
             parent_oid: None,
@@ -999,6 +1027,7 @@ mod tests {
             keys,
             vec![
                 "authorName",
+                "body",
                 "branchName",
                 "isMerge",
                 "kind",

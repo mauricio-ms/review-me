@@ -58,6 +58,8 @@ pub struct ResolvedCommit {
     pub info: CommitInfo,
     /// The whole message, subject and body.
     pub message: String,
+    /// The message after its subject paragraph, trimmed; empty when there's none.
+    pub body: String,
 }
 
 /// Which part of a branch's history the commits buffer lists: the commits the branch
@@ -244,6 +246,7 @@ pub fn resolve(repo: &Repository, rev: &str) -> AppResult<ResolvedCommit> {
         parent_oid: commit.parent_ids().next(),
         info: info(&commit, head_oid(repo)),
         message: String::from_utf8_lossy(commit.message_bytes()).into_owned(),
+        body: commit.body().unwrap_or("").to_string(),
     })
 }
 

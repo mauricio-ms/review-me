@@ -160,6 +160,10 @@ and a dirty checkout can't affect what you see. Because both sides are already c
 Merges are reviewed against their **first parent** (never as a combined diff), and a root
 commit — having no parent — reads as all additions.
 
+A commit's diff starts with its message, as magit's revision buffer does: the subject,
+the author and date, then the body. `Tab` on it folds it down to the subject line, and it
+stays folded for the next commit until you unfold it.
+
 Opening a repository always starts on the working-tree diff (shown in the commits buffer
 instead when there is none); `C-x x g` recomputes whichever comparison is active (picking
 up new commits on either branch; a commit comparison is immutable, so only its marks are
@@ -373,7 +377,7 @@ just the current buffer's keys; `C-h k` tells you what a key does.
 | `]f` / `[f` | Next / previous **file** |
 | `]h` / `[h` | Next / previous **hunk** |
 | `]s` / `[s` | Next / previous **section** |
-| `Tab` | Fold / unfold the section, file, or hunk under the cursor |
+| `Tab` | Fold / unfold the section, file, or hunk under the cursor (or a commit's message) |
 | `Enter` | Open the file under the cursor, at that line, as a buffer |
 | `o` | The same, in the other window |
 | `C-o` | Show it in the other window, staying in the diff |

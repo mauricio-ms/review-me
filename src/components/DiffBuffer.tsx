@@ -29,6 +29,7 @@ import {
   reviewWholeFile,
   unmarkLines,
 } from "../lib/review-actions";
+import { timeAgo } from "../lib/time";
 import { refineHunk, type WordSeg } from "../lib/word-diff";
 import DiffCleanState from "./DiffCleanState";
 import PathLabel from "./PathLabel";
@@ -53,7 +54,11 @@ import type {
   ReviewedTag,
 } from "../types/tags";
 
+type CommitComparison = Extract<Comparison, { kind: "commit" }>;
+
 type Row =
+  /** The commit under review, magit-revision style: subject, author, date, body. */
+  | { key: string; kind: "commit"; commit: CommitComparison }
   | { key: string; kind: "section"; section: ReviewSection; count: number }
   | { key: string; kind: "file"; section: ReviewSection; file: ChangedFile }
   | {
@@ -112,6 +117,8 @@ const VIRTUAL_OVERSCAN = 800;
 
 function estimatedRowHeight(kind: Row["kind"]): number {
   switch (kind) {
+    case "commit":
+      return 120;
     case "section":
       return 38;
     case "file":
@@ -123,6 +130,20 @@ function estimatedRowHeight(kind: Row["kind"]): number {
     case "note":
       return 32;
   }
+}
+
+/** The file a row is about; null for a section header and the commit's message. */
+function rowFile(row: Row | undefined): ChangedFile | null {
+  return row && row.kind !== "section" && row.kind !== "commit" ? row.file : null;
+}
+
+/** An author date as `2026-10-29 14:32`, local time. */
+function commitDate(timestamp: number): string {
+  const d = new Date(timestamp * 1000);
+  const two = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())} ${two(
+    d.getHours(),
+  )}:${two(d.getMinutes())}`;
 }
 
 function measuredRowHeight(element: HTMLDivElement): number {
@@ -214,6 +235,7 @@ function placeNotes(
 }
 
 function buildRows(
+  commit: CommitComparison | null,
   files: ChangedFile[],
   expanded: Set<string>,
   collapsedHunks: Set<string>,
@@ -263,7 +285,7 @@ function buildRows(
     }
   }
 
-  const rows: Row[] = [];
+  const rows: Row[] = commit ? [{ key: "c", kind: "commit", commit }] : [];
   // A file recurs once per section it has hunks in; its whole-file notes show once.
   const fileNotesShown = new Set<string>();
   for (const section of SECTION_ORDER) {
@@ -368,11 +390,15 @@ export default function DiffBuffer() {
   const [visualAnchor, setVisualAnchor] = useState<number | null>(null);
   const [measurementEpoch, setMeasurementEpoch] = useState(0);
   const [viewport, setViewport] = useState({ top: 0, height: 600 });
+  // Folded to its subject line; kept from one commit to the next.
+  const [messageFolded, setMessageFolded] = useState(false);
 
   const files = useMemo(() => diff?.files ?? [], [diff]);
+  const commit = comparison?.kind === "commit" ? comparison : null;
   const rows = useMemo(
     () =>
       buildRows(
+        commit,
         files,
         expandedFiles,
         collapsedHunks,
@@ -381,7 +407,7 @@ export default function DiffBuffer() {
         flags,
         ignored,
       ),
-    [files, expandedFiles, collapsedHunks, collapsedSections, reviewed, flags, ignored],
+    [commit, files, expandedFiles, collapsedHunks, collapsedSections, reviewed, flags, ignored],
   );
   const rowOffsets = useMemo(() => {
     const offsets = new Float64Array(rows.length + 1);
@@ -435,7 +461,7 @@ export default function DiffBuffer() {
   // The mode line names the file (and line) under the cursor: the full path, which the
   // rows above it may have scrolled away.
   const cursorRow = rows[cursor];
-  const cursorFile = cursorRow && cursorRow.kind !== "section" ? cursorRow.file.path : null;
+  const cursorFile = rowFile(cursorRow)?.path ?? null;
   const cursorLine =
     cursorRow?.kind === "line" ? (cursorRow.line.newLine ?? cursorRow.line.oldLine) : null;
   const setDiffCursor = useUIStore((s) => s.setDiffCursor);
@@ -650,8 +676,7 @@ export default function DiffBuffer() {
   const targetScope = (): Scope | null => {
     if (visualAnchor != null) {
       const [a, b] = selectionRange();
-      const anchor = rows[cursor];
-      const file = anchor && anchor.kind !== "section" ? anchor.file : null;
+      const file = rowFile(rows[cursor]);
       if (!file) return null;
       let newLo = Infinity;
       let newHi = -Infinity;
@@ -683,7 +708,7 @@ export default function DiffBuffer() {
 
   const cursorScope = (): Scope | null => {
     const row = rows[cursor];
-    if (!row || row.kind === "section") return null;
+    if (!row || row.kind === "section" || row.kind === "commit") return null;
     if (row.kind === "file") {
       const t = fileTarget(row.file);
       return t ? { file: row.file, lo: t.lo, hi: t.hi, kind: "file", side: t.side } : null;
@@ -810,6 +835,10 @@ export default function DiffBuffer() {
   const toggleAtCursor = () => {
     const row = rows[cursor];
     if (!row) return;
+    if (row.kind === "commit") {
+      if (row.commit.body) setMessageFolded((folded) => !folded);
+      return;
+    }
     if (row.kind === "section") {
       // Fold the whole section; the header stays put, so keep the cursor on it.
       toggleSection(row.section);
@@ -842,12 +871,12 @@ export default function DiffBuffer() {
   // `o` opens it in the other window, `C-o` only shows it there (the diff keeps the
   // keyboard, so you can go on down the hunks with the file beside them).
   const openAtCursor = (options: ShowOptions = {}) => {
-    const row = rows[cursor];
-    if (!row || row.kind === "section") return;
+    const file = rowFile(rows[cursor]);
+    if (!file) return;
     const scope = cursorScope();
     const line = scope ? scope.lo : 1;
     const side = scope?.side === "old" ? "old" : "new";
-    openFileFromDiff(row.file.path, side, line, options);
+    openFileFromDiff(file.path, side, line, options);
   };
 
   const jumpTo = (predicate: (r: Row) => boolean, dir: 1 | -1) => {
@@ -1032,6 +1061,33 @@ export default function DiffBuffer() {
             inSection ? "is-section" : ""
           } ${inVisual ? "is-visual-sel" : ""}`;
           const ref = refForRow(row);
+          if (row.kind === "commit") {
+            const c = row.commit;
+            const folded = messageFolded && c.body !== "";
+            return (
+              <div
+                key={row.key}
+                ref={ref}
+                className={`diff-row diff-commit-row ${cls}`}
+                onClick={() => setCursor(idx)}
+                onDoubleClick={toggleAtCursor}
+              >
+                <span className="diff-caret">{c.body === "" ? " " : folded ? "▸" : "▾"}</span>
+                <div className="diff-commit">
+                  <div className="diff-commit-subject">{c.summary}</div>
+                  <div className="diff-commit-meta">
+                    <span className="diff-commit-oid">{c.shortOid}</span>
+                    <span>{c.authorName}</span>
+                    <span>
+                      {commitDate(c.timestamp)} ({timeAgo(c.timestamp)})
+                    </span>
+                    {c.isMerge && <span>merge, shown against its first parent</span>}
+                  </div>
+                  {!folded && c.body !== "" && <div className="diff-commit-body">{c.body}</div>}
+                </div>
+              </div>
+            );
+          }
           if (row.kind === "section") {
             const collapsed = collapsedSections.has(row.section);
             return (

@@ -874,6 +874,43 @@ kbd {
   background: rgba(var(--accent-red-rgb), 0.34);
 }
 
+/* The commit under review, above its changes: subject, author and date, then the body. */
+.diff-commit-row {
+  align-items: start;
+  padding: 6px 14px 8px;
+  white-space: normal;
+}
+
+.diff-commit {
+  flex: 1;
+  min-width: 0;
+}
+
+.diff-commit-subject {
+  color: var(--fg-1);
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.diff-commit-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 14px;
+  color: var(--fg-dim);
+  font-size: var(--fs-ui);
+}
+
+.diff-commit-oid {
+  color: var(--accent-amber);
+}
+
+.diff-commit-body {
+  margin-top: 8px;
+  color: var(--fg-0);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 /* A review note under the hunk (or file) it is about. */
 .diff-note-row {
   align-items: start;
