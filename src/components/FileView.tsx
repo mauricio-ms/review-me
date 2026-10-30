@@ -16,6 +16,7 @@ import { overviewRuler } from "../editor/overview-ruler";
 import { swiperHighlight } from "../editor/swiper";
 import { viewerKeymap } from "../editor/viewer-keymap";
 import { defineNavVim } from "../editor/vim-nav";
+import { visualLines } from "../editor/visual-lines";
 import { xrefClick } from "../editor/xref-click";
 import { changeBlocks, changeForFile } from "../lib/project-diff";
 import { sideRead } from "../lib/project-review";
@@ -200,6 +201,7 @@ export default function FileView({ win, bufferId }: { win: WindowId; bufferId: F
       diffMarks,
       flagDecorations,
       overviewRuler,
+      visualLines,
       occurrences,
       swiperHighlight,
       tracker,

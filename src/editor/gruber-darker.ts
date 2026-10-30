@@ -47,8 +47,9 @@ const gruberDarkerEditorTheme = EditorView.theme(
       {
         backgroundColor: c.bg3,
       },
+    // bg1 over bg, but see-through: an opaque line hides the selection drawn under it.
     ".cm-activeLine": {
-      backgroundColor: c.bg1,
+      backgroundColor: "rgba(255, 255, 255, 0.07)",
     },
     ".cm-gutters": {
       backgroundColor: c.bg,

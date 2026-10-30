@@ -1424,6 +1424,13 @@ kbd {
   box-shadow: inset 2px 0 0 var(--accent-amber);
 }
 
+/* Vim's `V`: whole rows, as the diff's `V` marks them. Opaque, so CodeMirror's own
+   selection under it (which stops where the text does) doesn't show through; the
+   extra class outranks the active line. */
+.project-viewer .cm-line.cm-visual-line {
+  background: color-mix(in srgb, var(--accent-violet) 16%, var(--bg-0));
+}
+
 /* Ctrl/Cmd held → symbols read as clickable (go-to-definition). */
 .project-viewer .cm-content.xref-mod {
   cursor: pointer;
