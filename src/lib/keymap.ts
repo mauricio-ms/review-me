@@ -260,7 +260,7 @@ const VIEWER_KEYS = [
     keys: ["h", "j", "k", "l"],
     label: "h j k l w b / …",
     external: true,
-    doc: "vim motions and search (the viewer is read-only)",
+    doc: "vim motions and search, the arrows too (the viewer is read-only)",
   },
 ] as const satisfies readonly KeyBinding[];
 

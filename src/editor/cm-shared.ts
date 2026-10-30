@@ -39,3 +39,25 @@ export const vimEscapeKeymap = Prec.highest(
     },
   ]),
 );
+
+/**
+ * The arrows, Home/End and PageUp/PageDown as vim's own keys (`<Down>` is its `j`, …).
+ * CodeMirror's default keymap reads keys before vim and would move the cursor itself —
+ * by a wrapped line, and dropping a visual selection the diff's arrows extend.
+ */
+export const vimNavKeymap = Prec.highest(
+  keymap.of(
+    ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"].map(
+      (key) => ({
+        key,
+        run: (view: EditorView) => {
+          if (inVimInsertMode(view)) return false;
+          const cm = getCM(view);
+          if (!cm) return false;
+          Vim.handleKey(cm, `<${key.replace("Arrow", "")}>`, "user");
+          return true;
+        },
+      }),
+    ),
+  ),
+);

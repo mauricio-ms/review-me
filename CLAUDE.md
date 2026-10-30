@@ -591,6 +591,11 @@ clears the history whenever the comparison (or its revision) changes.
   see `editor/cm-shared.ts` (`inVimInsertMode`; `AppShell`'s `isTypingTarget` uses it too).
   Don't rely on keymap precedence; read the authoritative vim state from the view. `:` is
   swallowed in the viewer (`swallowColonKeymap`) so it never opens vim's ex prompt.
+- `@uiw/react-codemirror` puts `basicSetup`'s keymaps ahead of our extensions, and every
+  keymap runs before `vim()`'s own keydown handler — so CodeMirror's default keymap took the
+  arrows (and Home/End/PageUp/PageDown) from vim, dropping a visual selection. The viewer
+  hands them to vim (`vimNavKeymap`), as `vimEscapeKeymap` does `Ctrl-[`. The cursor's line
+  must stay see-through (`gruber-darker.ts`): the selection is drawn under the lines.
 - codemirror-vim's ex commands are **global**: modal editors share `editor/vim-modal.ts`
   and take turns with `claimModalEditor` (its release only clears a still-current claim).
 - In a `@uiw/react-codemirror` modal editor (see `NoteEditorHost`): keep `basicSetup` and
