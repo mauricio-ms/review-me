@@ -2215,15 +2215,21 @@ kbd {
 }
 
 .mb-row.swiper-row {
-  grid-template-columns: var(--swiper-digits, 4ch) minmax(0, 1fr);
+  grid-template-columns: var(--swiper-label-width, 4ch) minmax(0, 1fr);
   column-gap: 12px;
 }
 
-.swiper-number {
+/* A line number, or where a row is (`Foo.java:70`); cut from the left, so the line
+   number stays. */
+.swiper-label {
   color: var(--fg-faint);
   font-size: var(--fs-ui);
   font-variant-numeric: tabular-nums;
   text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;
 }
 
 .swiper-text {
@@ -2233,6 +2239,16 @@ kbd {
   tab-size: 4;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* The diff's and the log's matches on screen (lib/swiper-list.ts), as the viewer's. */
+::highlight(swiper-match) {
+  background-color: var(--bg-4);
+}
+
+::highlight(swiper-current) {
+  background-color: var(--accent-amber);
+  color: var(--bg-deep);
 }
 
 /* ---------- help buffer (C-h b / C-h m) ---------- */

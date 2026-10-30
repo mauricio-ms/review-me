@@ -22,6 +22,8 @@ import { KEYMAP, type DiffAction } from "../lib/keymap";
 import { flagTarget, hasNote, openNoteFor } from "../lib/notes";
 import { leaveHistory } from "../lib/open-repo";
 import { openFileFromDiff } from "../lib/project";
+import type { SwiperMatcher } from "../lib/swiper";
+import { markMatches, setListSwiper, swipeList } from "../lib/swiper-list";
 import {
   addFlag,
   addIgnore,
@@ -32,9 +34,9 @@ import {
 import { dateTime, timeAgo } from "../lib/time";
 import { refineHunk, type WordSeg } from "../lib/word-diff";
 import DiffCleanState from "./DiffCleanState";
-import PathLabel from "./PathLabel";
+import PathLabel, { renameParts, splitPath } from "./PathLabel";
 import { useNotesStore } from "../state/notes";
-import { useRepoStore } from "../state/repo";
+import { useRepoStore, type Folds } from "../state/repo";
 import { useTagsStore } from "../state/tags";
 import { useUIStore } from "../state/ui";
 import { hasKeyboard, isShown, useWindowStore } from "../state/windows";
@@ -137,6 +139,75 @@ function rowFile(row: Row | undefined): ChangedFile | null {
   return row && row.kind !== "section" && row.kind !== "commit" ? row.file : null;
 }
 
+// ---------- Swiper (`C-s`) ----------
+
+/** The part of each row Swiper reads, as it is on screen (its matches light there). */
+const SEARCHED = ".diff-file-path, .diff-hunk-header, .diff-note-text, .diff-line-content";
+
+/** What Swiper searches in a row; null for the rows it skips (sections, the commit). */
+function searchText(row: Row): string | null {
+  switch (row.kind) {
+    case "file": {
+      const { oldPath, path } = row.file;
+      if (!oldPath || oldPath === path) return path;
+      // As PathLabel writes a rename.
+      const p = renameParts(oldPath, path);
+      const braces = !!(p.prefix || p.suffix);
+      return `${p.prefix}${braces ? "{" : ""}${p.from} → ${p.to}${braces ? "}" : ""}${p.suffix}`;
+    }
+    case "hunk":
+      return row.hunk.header;
+    case "line":
+      return row.line.content;
+    case "note":
+      return row.flag.note ?? "";
+    default:
+      return null;
+  }
+}
+
+const STATUS_WORD: Record<ChangedFile["status"], string> = {
+  added: "new file",
+  modified: "modified",
+  deleted: "deleted",
+  renamed: "renamed",
+};
+
+/** Where a searched row is, beside it in the minibuffer: `Foo.java:70 +`, `modified`. */
+function searchLabel(row: Row): string {
+  if (row.kind === "commit" || row.kind === "section") return "";
+  if (row.kind === "file") return STATUS_WORD[row.file.status];
+  const name = splitPath(row.file.path)[1];
+  if (row.kind === "note") return `${name} ✎`;
+  if (row.kind === "hunk") return name;
+  const { kind, newLine, oldLine } = row.line;
+  return `${name}:${newLine ?? oldLine} ${kind === "added" ? "+" : kind === "removed" ? "−" : " "}`;
+}
+
+/** `folds`, opened just enough to show `row`: its section, its file, its hunk. */
+function reveal(folds: Folds, row: Row): Folds {
+  if (row.kind === "commit" || row.kind === "section") return folds;
+  const without = <T,>(set: Set<T>, item: T) => {
+    const next = new Set(set);
+    next.delete(item);
+    return next;
+  };
+  const { expandedFiles, collapsedHunks, collapsedSections } = folds;
+  return {
+    expandedFiles:
+      row.kind === "file" || expandedFiles.has(row.file.path)
+        ? expandedFiles
+        : new Set(expandedFiles).add(row.file.path),
+    collapsedHunks:
+      row.kind === "line" && collapsedHunks.has(row.hunk.id)
+        ? without(collapsedHunks, row.hunk.id)
+        : collapsedHunks,
+    collapsedSections: collapsedSections.has(row.section)
+      ? without(collapsedSections, row.section)
+      : collapsedSections,
+  };
+}
+
 function measuredRowHeight(element: HTMLDivElement): number {
   const rectHeight = element.getBoundingClientRect().height;
   if (rectHeight <= 0) return 0;
@@ -234,6 +305,8 @@ function buildRows(
   reviewed: ReviewedTag[],
   flags: FlagTag[],
   ignored: IgnoredTag[],
+  /** Work out the word diff; a search reads the lines alone. */
+  refine = true,
 ): Row[] {
   // Bucket each file's hunks (or the whole file, when hunkless) into sections,
   // preserving file order within a section and hunk order within a file. A hunk
@@ -325,7 +398,7 @@ function buildRows(
             });
           }
           if (collapsedHunks.has(hunk.id)) continue;
-          const segments = refineHunk(hunk.lines);
+          const segments = refine ? refineHunk(hunk.lines) : [];
           hunk.lines.forEach((line, li) =>
             rows.push({
               key: `l:${section}:${hunk.id}:${li}`,
@@ -334,7 +407,7 @@ function buildRows(
               file,
               hunk,
               line,
-              segments: segments[li],
+              segments: segments[li] ?? null,
             }),
           );
         }
@@ -779,6 +852,96 @@ export default function DiffBuffer() {
   });
   useEffect(() => () => setDiffMover(null), []);
 
+  // Swiper: the matches lit on screen, and the row a search wants the cursor on — once
+  // the folds it opened (or put back) have re-rendered the rows.
+  const [swiperMatcher, setSwiperMatcher] = useState<SwiperMatcher | null>(null);
+  const [seekKey, setSeekKey] = useState<string | null>(null);
+  const restoreScroll = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    if (seekKey == null) return;
+    setSeekKey(null);
+    const idx = rows.findIndex((r) => r.key === seekKey);
+    if (idx >= 0) setCursor(idx);
+    const top = restoreScroll.current;
+    restoreScroll.current = null;
+    const element = listRef.current;
+    if (top != null && element) {
+      element.scrollTop = top;
+      setViewport({ top: element.scrollTop, height: element.clientHeight });
+    }
+  }, [rows, seekKey]);
+
+  const lit = useRef(false);
+  useEffect(() => {
+    const list = listRef.current;
+    // Cleared once, so another buffer's search keeps its marks.
+    if (!swiperMatcher || !list) {
+      if (lit.current) markMatches([], null, null);
+      lit.current = false;
+      return;
+    }
+    lit.current = true;
+    const current = rows[cursor]
+      ? (rowElements.current.get(rows[cursor].key)?.querySelector<HTMLElement>(SEARCHED) ?? null)
+      : null;
+    markMatches(list.querySelectorAll<HTMLElement>(SEARCHED), current, swiperMatcher);
+  }, [cursor, diffHighlight, rowOffsets, rows, swiperMatcher, viewport]);
+
+  // `C-s`: Swiper over every row the diff has — folded files, hunks and sections too.
+  // Landing on a row opens just the folds it needs, and moving on closes them again;
+  // `RET` keeps the last one open, `C-g` puts every fold, the cursor and the scroll back.
+  const startSwiper = () => {
+    const repo = useRepoStore.getState();
+    const folds: Folds = {
+      expandedFiles: repo.expandedFiles,
+      collapsedHunks: repo.collapsedHunks,
+      collapsedSections: repo.collapsedSections,
+    };
+    const everything = buildRows(
+      commit,
+      files,
+      new Set(files.map((f) => f.path)),
+      new Set(),
+      new Set(),
+      reviewed,
+      flags,
+      ignored,
+      false,
+    );
+    const here = rows[cursor]?.key ?? null;
+    const at = everything.findIndex((r) => r.key === here);
+    const searched: Row[] = [];
+    let start = -1;
+    everything.forEach((row, i) => {
+      if (searchText(row) == null) return;
+      if (start < 0 && i >= at) start = searched.length;
+      searched.push(row);
+    });
+    if (searched.length === 0) {
+      useUIStore.getState().showFlash("Nothing here to search");
+      return;
+    }
+    const scrollTop = listRef.current?.scrollTop ?? 0;
+    swipeList({
+      lines: searched.map((row) => searchText(row) ?? ""),
+      labels: searched.map(searchLabel),
+      start: start < 0 ? searched.length - 1 : start,
+      show: (index, matcher) => {
+        setSwiperMatcher(matcher);
+        if (index == null) return;
+        useRepoStore.getState().setFolds(reveal(folds, searched[index]));
+        setSeekKey(searched[index].key);
+      },
+      restore: () => {
+        useRepoStore.getState().setFolds(folds);
+        restoreScroll.current = scrollTop;
+        if (here) setSeekKey(here);
+      },
+    });
+  };
+  useEffect(() => setListSwiper("diff", startSwiper));
+  useEffect(() => () => setListSwiper("diff", null), []);
+
   // Opening a note consumes the selection, as marking it would.
   const noteOpen = useNotesStore((s) => s.editing != null);
   useEffect(() => {
@@ -971,6 +1134,7 @@ export default function DiffBuffer() {
     flag: doFlag,
     ignore: doIgnore,
     unmark: doUnmark,
+    swiper: startSwiper,
     "scroll-down": () => scrollByLine(1),
     // C-r must be consumed: in tauri dev (Vite) it reloads the page.
     "scroll-up": () => scrollByLine(-1),

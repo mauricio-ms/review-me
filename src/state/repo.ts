@@ -9,6 +9,13 @@ export type DiffStatus =
   | { kind: "loading" }
   | { kind: "error"; message: string };
 
+/** What is folded in the diff buffer: files open, hunks shut, sections shut. */
+export type Folds = {
+  expandedFiles: Set<string>;
+  collapsedHunks: Set<string>;
+  collapsedSections: Set<ReviewSection>;
+};
+
 type RepoState = {
   repo: RepoInfo | null;
   repoPath: string | null;
@@ -56,6 +63,8 @@ type RepoState = {
   toggleHunk: (id: string) => void;
   toggleSection: (id: ReviewSection) => void;
   setExpanded: (paths: Set<string>) => void;
+  /** Every fold at once: Swiper opens what a match needs, then puts it back. */
+  setFolds: (folds: Folds) => void;
   closeRepo: () => void;
 };
 
@@ -130,6 +139,7 @@ export const useRepoStore = create<RepoState>((set) => ({
       return { collapsedSections: next };
     }),
   setExpanded: (paths) => set({ expandedFiles: paths }),
+  setFolds: (folds) => set(folds),
   closeRepo: () =>
     set((s) => ({
       repo: null,

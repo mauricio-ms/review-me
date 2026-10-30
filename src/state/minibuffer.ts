@@ -38,11 +38,16 @@ export type MinibufferRequest =
       onAnswer: (yes: boolean) => void;
     };
 
-/** Swiper: the lines that match as you type, the buffer following the selected one. */
+/**
+ * Swiper: the lines that match as you type, the buffer following the selected one — a
+ * file's lines (`editor/swiper.ts`), or the diff's or the log's rows (`lib/swiper-list.ts`).
+ */
 export type SwiperRequest = {
   kind: "swiper";
   /** The buffer's lines, searched in order. */
   lines: readonly string[];
+  /** What each line is shown beside (`Foo.java:70`, a short oid); else its number. */
+  labels?: readonly string[];
   /** The cursor's line (0-based): selected to begin with, and where matching starts. */
   start: number;
   /** The symbol at the cursor, which `M-n` searches for. */

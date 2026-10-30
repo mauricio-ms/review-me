@@ -396,6 +396,7 @@ just the current buffer's keys; `C-h k` tells you what a key does.
 | `u` | Unmark (asks first when that deletes a note) |
 | `f` | **Flag** (`⚑`) the file / hunk / selection (flagging it again keeps its note) |
 | `i` | **Ignore** (`⊘`) the file / hunk / selection |
+| `C-s` | **Swiper** over the whole diff, folded files too (see below) |
 | `C-e` / `C-r` | Scroll one line down / up |
 | `q` | Leave a commit or branch comparison for the commits buffer |
 | `Esc` / `C-g` | Cancel a visual selection |
@@ -403,6 +404,12 @@ just the current buffer's keys; `C-h k` tells you what a key does.
 Glyphs: `A`/`M`/`D`/`R` file status, `+adds −dels` counts, a green `●` for staged changes
 (working-tree diff only — committed history has no staging state), `✓` reviewed, `⚑`
 flagged. Edited lines highlight only the characters that changed.
+
+`C-s` searches the diff as Swiper does (the keys and the matching are the viewer's, below):
+every file path, hunk header, line and note, whether it's folded or not, each shown beside
+where it is — `Foo.java:70 +`, `modified`. Landing on a match in a folded file opens just
+what it needs, and moving on folds it again; `RET` leaves the last one open, `C-g` puts every
+fold back.
 
 `Enter` opens the file at the revision the diff came from: the target branch (or the
 reviewed commit) for added/modified content, the merge base (or that commit's first
@@ -450,6 +457,7 @@ upstream or nothing unpushed, its whole history under **Recent commits**.
 | `Enter` | Review that commit against its first parent, in the diff buffer |
 | `o` | The same, in the other window (the log stays beside it) |
 | `b` | Review the whole listed range as one diff (`base...branch`) |
+| `C-s` | **Swiper** over the commits' subjects (the loaded ones), as in the viewer |
 
 `q` in the diff buffer brings you back, on the same row. Each row shows its review:
 `✓` when every change is reviewed (or ignored), `done/total` while partial, `⚑ n` flags and

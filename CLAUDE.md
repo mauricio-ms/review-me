@@ -471,6 +471,16 @@ in-order words, `!` negation, smart case, Emacs regexp syntax (`(` literal, `\(`
 with a literal fallback. The selection is held as a *line*, so narrowing keeps it or moves
 on to the next match (`nearestHit`).
 
+The diff buffer and the log have `C-s` too (`lib/swiper-list.ts`'s `swipeList`; each
+registers its starter with `setListSwiper`, which `M-x swiper`'s `swiperHere` dispatches
+to). The diff searches `buildRows` with **everything unfolded** — so folded files, hunks
+and sections are found — and shows a hit by `setFolds(reveal(original, row))`, always from
+the folds it started with, so moving on folds the last one again; the cursor follows by
+row *key* (`seekKey`) once the rows re-render. The log searches the loaded commits'
+subjects. Their matches on screen are CSS custom highlights (`markMatches`), not markup;
+**delete a highlight name before setting it** — WebKitGTK repaints on the name being added,
+not on it being replaced.
+
 ### Cross-references
 
 `xref.rs` parses every `.java` file once into a cached index, keyed by

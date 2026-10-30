@@ -16,6 +16,8 @@ import { useModalFocus } from "./useModalFocus";
 
 /** How many matching lines show at once, as ivy's `ivy-height`. */
 const HEIGHT = 10;
+/** The widest the label column gets; a longer label loses its start. */
+const LABEL_MAX = 36;
 
 /** The last search accepted, which `C-s` in an empty search brings back (`C-s C-s`). */
 let lastQuery = "";
@@ -41,9 +43,9 @@ function marked(text: string, spans: Span[]): ReactNode {
 
 /**
  * Swiper in the minibuffer: `N/M Swiper:` and the input, over a window of the lines that
- * match — numbered, matches marked — following the selection as ivy's does. The buffer
- * searched follows the selected line (`request.onMove`); leaving any other way than
- * `RET` on a line is a cancel, which puts it back.
+ * match — numbered or labelled, matches marked — following the selection as ivy's does.
+ * The buffer searched follows the selected line (`request.onMove`); leaving any other way
+ * than `RET` on a line is a cancel, which puts it back.
  */
 export default function SwiperPrompt({ request }: { request: SwiperRequest }) {
   const closeMinibuffer = useMinibufferStore((s) => s.close);
@@ -119,7 +121,12 @@ export default function SwiperPrompt({ request }: { request: SwiperRequest }) {
   // The selected line kept mid-window, as ivy does, until the list runs out.
   const first = Math.max(0, Math.min(selected - Math.floor(HEIGHT / 2), hits.length - HEIGHT));
   const shown = hits.slice(first, first + HEIGHT);
-  const digits = String(request.lines.length).length;
+  const { labels } = request;
+  const label = (index: number) => labels?.[index] ?? String(index + 1);
+  // As wide as the longest label (within reason), so the lines line up.
+  const width = labels
+    ? Math.min(LABEL_MAX, Math.max(0, ...labels.map((l) => l.length)))
+    : String(request.lines.length).length;
 
   return (
     <div
@@ -151,7 +158,7 @@ export default function SwiperPrompt({ request }: { request: SwiperRequest }) {
         className="mb-list swiper-list"
         role="listbox"
         aria-label="Matching lines"
-        style={{ "--swiper-digits": `${digits}ch` } as CSSProperties}
+        style={{ "--swiper-label-width": `${width}ch` } as CSSProperties}
       >
         {hits.length === 0 ? (
           <div className="mb-empty">[No match]</div>
@@ -164,7 +171,9 @@ export default function SwiperPrompt({ request }: { request: SwiperRequest }) {
               className={`mb-row swiper-row${h === hit ? " is-selected" : ""}`}
               onClick={() => accept(h)}
             >
-              <span className="swiper-number">{h.index + 1}</span>
+              <span className="swiper-label">
+                <bdi>{label(h.index)}</bdi>
+              </span>
               <span className="swiper-text">{marked(request.lines[h.index], h.spans)}</span>
             </div>
           ))

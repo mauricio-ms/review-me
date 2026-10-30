@@ -451,11 +451,16 @@ export function useCommands(close: CommandClose): {
       id: "swiper",
       name: "swiper",
       aliases: ["search", "isearch"],
-      label: openPath
-        ? "search the file: the lines that match as you type"
-        : "search a file (open one first)",
-      buffer: "project",
-      enabled: !!openPath,
+      label:
+        activeBuffer === "diff"
+          ? "search the diff, folded files too"
+          : activeBuffer === "log"
+            ? "search the commits' subjects"
+            : openPath
+              ? "search the file: the lines that match as you type"
+              : "search a file (open one first)",
+      enabled:
+        !!repo && (activeBuffer === "diff" || activeBuffer === "log" || !!openPath),
       run: handleSwiper,
     },
     {

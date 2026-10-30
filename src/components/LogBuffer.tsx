@@ -5,6 +5,8 @@ import { dispatchKey, type KeyHandler } from "../lib/key-dispatch";
 import { KEYMAP, type LogAction } from "../lib/keymap";
 import { loadMoreLog, setLogHandle } from "../lib/log";
 import { enterCommit, enterLogRange } from "../lib/open-repo";
+import type { SwiperMatcher } from "../lib/swiper";
+import { markMatches, setListSwiper, swipeList } from "../lib/swiper-list";
 import { timeAgo } from "../lib/time";
 import { useLogStore } from "../state/log";
 import { useRepoStore } from "../state/repo";
@@ -114,6 +116,7 @@ export default function LogBuffer() {
   const focusRequest = useUIStore((s) => s.focusRequest);
 
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
   const rowRefs = useRef(new Map<string, HTMLDivElement>());
   // Tracked by oid, not index, so a reload (the branch moved, a page arrived) keeps
   // the cursor on the same commit.
@@ -147,6 +150,49 @@ export default function LogBuffer() {
       void loadMoreLog();
     }
   }, [commits.length, complete, cursor]);
+
+  // Swiper (`C-s`) over the subjects of the commits loaded so far, its matches lit.
+  const [swiperMatcher, setSwiperMatcher] = useState<SwiperMatcher | null>(null);
+  const lit = useRef(false);
+  useEffect(() => {
+    // Cleared once, so another buffer's search keeps its marks.
+    if (!swiperMatcher) {
+      if (lit.current) markMatches([], null, null);
+      lit.current = false;
+      return;
+    }
+    lit.current = true;
+    const summary = (oid: string | undefined) =>
+      (oid ? rowRefs.current.get(oid)?.querySelector<HTMLElement>(".log-summary") : null) ??
+      null;
+    const all = commits.map((c) => summary(c.oid)).filter((el): el is HTMLElement => !!el);
+    markMatches(all, summary(commits[cursor]?.oid), swiperMatcher);
+  }, [commits, cursor, swiperMatcher]);
+
+  const startSwiper = () => {
+    if (commits.length === 0) {
+      useUIStore.getState().showFlash("Nothing here to search");
+      return;
+    }
+    const listed = commits;
+    const from = cursorOid;
+    const scrollTop = listRef.current?.scrollTop ?? 0;
+    swipeList({
+      lines: listed.map((c) => c.summary),
+      labels: listed.map((c) => c.shortOid),
+      start: cursor,
+      show: (index, matcher) => {
+        setSwiperMatcher(matcher);
+        if (index != null) setCursorOid(listed[index].oid);
+      },
+      restore: () => {
+        setCursorOid(from);
+        if (listRef.current) listRef.current.scrollTop = scrollTop;
+      },
+    });
+  };
+  useEffect(() => setListSwiper("log", startSwiper));
+  useEffect(() => () => setListSwiper("log", null), []);
 
   const moveTo = (index: number) => {
     const commit = commits[Math.min(Math.max(0, index), commits.length - 1)];
@@ -197,6 +243,7 @@ export default function LogBuffer() {
     // magit's way: the log stays, the commit opens beside it.
     "open-other": () => enter(commits[cursor], { other: true }),
     range: enterRange,
+    swiper: startSwiper,
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -238,7 +285,7 @@ export default function LogBuffer() {
         {shownError && <span className="diff-header-error">{shownError}</span>}
       </div>
 
-      <div className="log-list" onScroll={onScroll}>
+      <div className="log-list" ref={listRef} onScroll={onScroll}>
         <div className="log-status">
           <div className="log-status-line">
             <span className="log-status-label">Head:</span>

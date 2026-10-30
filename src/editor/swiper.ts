@@ -10,8 +10,10 @@ import {
 import { currentPlace, recordJump } from "../lib/jumps";
 import { activeView } from "../lib/project-view";
 import type { SwiperHit, SwiperMatcher } from "../lib/swiper";
+import { listSwiper } from "../lib/swiper-list";
 import { useMinibufferStore } from "../state/minibuffer";
 import { useUIStore } from "../state/ui";
+import { activeBuffer, useWindowStore } from "../state/windows";
 
 /** What a running search shows in the file: its matches, and the selected line. */
 type Shown = { matcher: SwiperMatcher | null; line: number | null };
@@ -137,9 +139,15 @@ export function swiper(view: EditorView): void {
   });
 }
 
-/** `C-s` / `M-x swiper`: Swiper over the file in the selected window. */
+/**
+ * `M-x swiper` (and the viewer's `C-s`): Swiper over whatever has the keyboard — the
+ * diff's rows, the log's commits (`lib/swiper-list.ts`), or the selected window's file.
+ */
 export function swiperHere(): void {
-  const view = activeView();
-  if (view) swiper(view);
-  else useUIStore.getState().showFlash("No file here to search");
+  const buffer = activeBuffer(useWindowStore.getState());
+  const list = buffer === "diff" || buffer === "log" ? listSwiper(buffer) : null;
+  const view = buffer === "project" ? activeView() : null;
+  if (list) list();
+  else if (view) swiper(view);
+  else useUIStore.getState().showFlash("Nothing here to search");
 }

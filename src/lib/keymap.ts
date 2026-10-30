@@ -160,6 +160,12 @@ const DIFF_KEYS = [
   { keys: ["f"], action: "flag", doc: "flag" },
   { keys: ["i"], action: "ignore", doc: "ignore" },
   { keys: ["u"], action: "unmark", doc: "unmark" },
+  {
+    keys: ["C-s"],
+    action: "swiper",
+    command: "swiper",
+    doc: "search the diff (Swiper), folded files too: they open as you land on them",
+  },
   { keys: ["C-e"], action: "scroll-down", doc: "scroll one line down" },
   { keys: ["C-r"], action: "scroll-up", doc: "scroll one line up" },
   {
@@ -177,6 +183,12 @@ const LOG_KEYS = [
   { keys: ["RET"], action: "open", doc: "review this commit" },
   { keys: ["o"], action: "open-other", doc: "review this commit in the other window" },
   { keys: ["b"], action: "range", doc: "review the whole listed range as one diff" },
+  {
+    keys: ["C-s"],
+    action: "swiper",
+    command: "swiper",
+    doc: "search the commits' subjects (Swiper)",
+  },
 ] as const satisfies readonly KeyBinding[];
 
 const TREE_KEYS = [
