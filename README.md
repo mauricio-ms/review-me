@@ -542,9 +542,18 @@ Rest the cursor on a symbol and its other occurrences in the file light up. In J
 come from the cross-reference index, so a field and a local of the same name stay apart;
 in other files the word is matched by name, leaving out keywords, comments and strings.
 
+`C-s` searches the file the way Swiper does: the minibuffer lists the lines that match as
+you type, numbered, and the file follows the selected one, with every match on screen lit.
+Words separated by a space must all match, in order; words after a `!` must not match; it
+ignores case until you type a capital. A word is a regexp written as in Emacs, so `(` and
+`|` match themselves. `C-s` / `C-r` (or `C-n` / `C-p`) move through the matches, `RET`
+stays there (`M-,` comes back), and `C-g` puts you back where you were. `C-s` on an empty
+search brings back the last one, and `M-n` searches for the symbol at the cursor.
+
 | Key | Action |
 | --- | --- |
 | `j`/`k`, `gg`/`G`, `w`/`b`, `/search` | Standard vim motions |
+| `C-s` | **Swiper**: search the file as you type (`M-x swiper` too) |
 | `M-.` / `M-?` | Go to definition / find references |
 | `C-x 4 .` | Go to definition in the other window |
 | `M-g g` | Go to line |

@@ -35,7 +35,8 @@ export function currentPlace(): Place | null {
 }
 
 /**
- * Remember where the selected window is, so `M-,` can come back to it.
+ * Remember where the selected window is — or `place`, where a search that has already
+ * moved the cursor started (Swiper) — so `M-,` can come back to it.
  *
  * Called from the navigation gestures themselves (`navigateTo`, opening from the
  * finder, the tree or the diff, `C-x b`, …) rather than from `visitFile` or
@@ -45,7 +46,6 @@ export function currentPlace(): Place | null {
  * This module deliberately depends only on the stores and the view handles: `lib/xref`
  * and `lib/project` both need it, and putting it in either would make them circular.
  */
-export function recordJump(): void {
-  const place = currentPlace();
+export function recordJump(place = currentPlace()): void {
   if (place) useHistoryStore.getState().record(place);
 }

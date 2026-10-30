@@ -23,7 +23,8 @@ const HINT = "C-c C-c save & close · C-c C-k discard · :w save · :wq / :q! fr
 // whenever `basicSetup` changes, and an inline object changes on every keystroke.
 // No autocompletion: Markdown offers HTML completions, and while one is pending its
 // Escape binding (close completion) eats the <Esc> meant to leave insert mode. No
-// bracket closing either — backticks in prose shouldn't pair themselves.
+// bracket closing either — backticks in prose shouldn't pair themselves. No search
+// keymap, so `C-f` opens no find panel (vim's `/` searches).
 const BASIC_SETUP = {
   lineNumbers: false,
   foldGutter: false,
@@ -31,6 +32,7 @@ const BASIC_SETUP = {
   highlightSelectionMatches: false,
   autocompletion: false,
   closeBrackets: false,
+  searchKeymap: false,
 };
 
 function errorMessage(error: unknown): string {

@@ -272,6 +272,7 @@ export default function CommitReviewedHost() {
                 foldGutter: false,
                 highlightActiveLine: true,
                 highlightSelectionMatches: false,
+                searchKeymap: false,
               }}
             />
           </div>

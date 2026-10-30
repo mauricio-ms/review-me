@@ -231,6 +231,12 @@ const VIEWER_KEYS = [
   { keys: ["M-."], action: "definition", command: "goto-def", doc: "go to definition" },
   { keys: ["M-?"], action: "references", command: "find-refs", doc: "find references" },
   { keys: ["M-g g"], action: "goto-line", doc: "go to line" },
+  {
+    keys: ["C-s"],
+    action: "swiper",
+    command: "swiper",
+    doc: "search the file (Swiper): the lines that match as you type, the file following",
+  },
   { keys: ["C-<mouse-1>"], label: "C-click", external: true, doc: "go to definition" },
   {
     keys: ["q"],
@@ -257,8 +263,13 @@ const HELP_KEYS = [
 
 /** `M-x`, `C-x b`, and every prompt read at the bottom of the window. */
 const MINIBUFFER_KEYS = [
-  { keys: ["<down>", "C-n"], action: "next", doc: "next candidate" },
-  { keys: ["<up>", "C-p"], action: "prev", doc: "previous candidate" },
+  {
+    keys: ["<down>", "C-n", "C-s"],
+    action: "next",
+    doc: "next candidate (C-s in an empty Swiper search: the last search again)",
+  },
+  { keys: ["<up>", "C-p", "C-r"], action: "prev", doc: "previous candidate" },
+  { keys: ["M-n"], action: "yank-symbol", doc: "Swiper: search for the symbol at the cursor" },
   { keys: ["TAB"], action: "complete", doc: "complete the candidate's name" },
   { keys: ["RET"], action: "accept", doc: "run, open, or accept" },
   { keys: ["y"], action: "yes", doc: "yes, to a question that asks (y or n)" },

@@ -131,6 +131,8 @@ export default function NeoPicker<T>({
       if (row && !isRowDisabled?.(row)) onActivate(row, selected);
     },
     quit: onClose,
+    // Swiper's alone.
+    "yank-symbol": () => false,
     // A picker asks no questions: `y` and `n` are typed.
     yes: () => false,
     no: () => false,

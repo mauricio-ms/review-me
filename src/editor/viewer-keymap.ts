@@ -10,6 +10,7 @@ import { setProjectCursor } from "../lib/project-view";
 import { findUsages, gotoDefinition } from "../lib/xref";
 import { useMinibufferStore } from "../state/minibuffer";
 import { inVimInsertMode } from "./cm-shared";
+import { swiperHere } from "./swiper";
 
 /** Run an action unless vim is mid-insert, where the key must stay literal. */
 function normalOnly(action: ViewerHandler) {
@@ -45,6 +46,7 @@ export const VIEWER_HANDLERS: Record<ViewerAction, ViewerHandler> = {
   definition: () => void gotoDefinition(),
   references: () => void findUsages(),
   "goto-line": promptGotoLine,
+  swiper: swiperHere,
   "next-change": (count) => gotoChange(1, count),
   "prev-change": (count) => gotoChange(-1, count),
   "next-file": (count) => gotoChangedFile(1, count),
@@ -82,7 +84,7 @@ const bindings: CmKeyBinding[] = KEYMAP.viewer.flatMap((binding) =>
 /**
  * The viewer's own keys (`keymap.ts`'s `viewer` scope): emacs-xref navigation —
  * `M-.` definition · `M-?` references (`M-,` back is global: history spans every
- * buffer) — and `M-g g` go to line.
+ * buffer) — `M-g g` go to line, and `C-s` Swiper.
  *
  * Alt chords rather than vim's `C-o`/`C-i` on purpose. codemirror-vim binds those to
  * its own jump list, whose marks are anchored into the document — and each buffer has

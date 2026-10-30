@@ -13,6 +13,7 @@ import { flagDecorations, setFlagLines } from "../editor/flag-decorations";
 import { gruberDarkerTheme } from "../editor/gruber-darker";
 import { occurrenceHighlight } from "../editor/occurrences";
 import { overviewRuler } from "../editor/overview-ruler";
+import { swiperHighlight } from "../editor/swiper";
 import { viewerKeymap } from "../editor/viewer-keymap";
 import { defineNavVim } from "../editor/vim-nav";
 import { xrefClick } from "../editor/xref-click";
@@ -35,11 +36,14 @@ import { useWindowStore, type FileBufferId, type WindowId } from "../state/windo
 import PathLabel from "./PathLabel";
 
 // Identity-stable: the CodeMirror wrapper reconfigures whenever this object changes.
+// No search keymap: its `C-f` panel would shadow vim's page down, and `C-s` (Swiper)
+// is the search.
 const BASIC_SETUP = {
   lineNumbers: true,
   foldGutter: false,
   highlightActiveLine: true,
   highlightSelectionMatches: true,
+  searchKeymap: false,
 };
 
 const VIM_MODE_MAP: Record<string, VimMode> = {
@@ -197,6 +201,7 @@ export default function FileView({ win, bufferId }: { win: WindowId; bufferId: F
       flagDecorations,
       overviewRuler,
       occurrences,
+      swiperHighlight,
       tracker,
       EditorState.readOnly.of(true),
       EditorView.lineWrapping,

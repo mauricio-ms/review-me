@@ -118,7 +118,8 @@ window selects it, and a Ctrl+click selects its window before resolving.
 The frame's last line is **`Minibuffer.tsx`**: the echo area (`useUIStore.flash`, and
 `keyEcho` for a half-typed `C-x-`) while idle, the minibuffer while something is read
 (`state/minibuffer.ts`: `command` for `M-x`, `buffer` for `C-x b`, `text` for a prompt,
-`confirm` for a `y` / `n` question — Emacs's `y-or-n-p`).
+`confirm` for a `y` / `n` question — Emacs's `y-or-n-p` — and `swiper`, which
+`SwiperPrompt.tsx` reads).
 It sits under the mode line (`BufferStatusBar`) and grows upward.
 
 **Commands and keys are Emacs-style; there is no `:` command line and no Space palette**
@@ -458,6 +459,17 @@ the comparison changes). The changed-files view (`filter === "changed"`) always 
 removed lines (`ShownBlock.showRemoved`); the full diff — green new lines, word marks —
 still follows `M-x hunk`/`M-x hunks`. Block widgets must come from a `StateField`, never a view
 plugin — CodeMirror rejects them there.
+
+**`C-s` is Swiper** (`editor/swiper.ts`; `M-x swiper`), and CodeMirror's own search keymap
+is off in every editor, so `C-f` is vim's page down again rather than a find panel. The
+minibuffer lists the lines that match, in a fixed ivy-height window; the file follows the
+selection (cursor on the first match, recentered only when off screen) and lights every
+match in view from a view plugin over `visibleRanges`; `RET` records the jump from where
+the search *started* (`recordJump(place)`, since the cursor has already moved), `C-g` puts
+the selection and the scroll back. Matching is `lib/swiper.ts`, ivy's `ivy--regex-plus`:
+in-order words, `!` negation, smart case, Emacs regexp syntax (`(` literal, `\(` a group)
+with a literal fallback. The selection is held as a *line*, so narrowing keeps it or moves
+on to the next match (`nearestHit`).
 
 ### Cross-references
 

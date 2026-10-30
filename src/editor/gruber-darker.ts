@@ -81,6 +81,18 @@ const gruberDarkerEditorTheme = EditorView.theme(
       backgroundColor: c.niagara2,
       boxShadow: `inset 0 -1px ${c.niagara1}`,
     },
+    // Swiper: every match in view, the selected line, and the matches on it.
+    ".cm-line.cm-swiper-line": {
+      backgroundColor: c.bg2,
+    },
+    ".cm-swiper-match": {
+      backgroundColor: c.bg4,
+      boxShadow: `inset 0 -1px ${c.brown}`,
+    },
+    ".cm-swiper-current, .cm-swiper-current *": {
+      backgroundColor: c.yellow,
+      color: c.black,
+    },
     ".cm-panels": {
       backgroundColor: c.bgMinus1,
       color: c.fg,

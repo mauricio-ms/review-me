@@ -58,6 +58,7 @@ export default function XrefHost() {
     complete: () => false,
     accept: () => choose(selected),
     quit: close,
+    "yank-symbol": () => false,
     yes: () => false,
     no: () => false,
   };

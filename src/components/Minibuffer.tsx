@@ -14,7 +14,11 @@ import { commandKeys, KEYMAP, type MinibufferAction } from "../lib/keymap";
 import { showLog } from "../lib/log";
 import { showProject } from "../lib/windows";
 import { useFilesStore } from "../state/files";
-import { useMinibufferStore, type MinibufferRequest } from "../state/minibuffer";
+import {
+  useMinibufferStore,
+  type MinibufferRequest,
+  type SwiperRequest,
+} from "../state/minibuffer";
 import { useRepoStore } from "../state/repo";
 import { useUIStore, type PickerKind } from "../state/ui";
 import {
@@ -25,13 +29,15 @@ import {
   type BufferKey,
 } from "../state/windows";
 import { useXrefStore } from "../state/xref";
+import SwiperPrompt from "./SwiperPrompt";
 import { type CommandClose, useCommands } from "./useCommands";
 import { useModalFocus } from "./useModalFocus";
 
 /**
  * The bottom line of the window, Emacs-style: the echo area (messages, a half-typed
  * `C-x-`) while idle, the minibuffer while something is being read — a command
- * (`M-x`), a buffer (`C-x b`), or a line of text. It sits under the mode line and
+ * (`M-x`), a buffer (`C-x b`), a line of text, or a Swiper search (`SwiperPrompt`,
+ * whose candidates are a buffer's lines). It sits under the mode line and
  * grows upward with its candidates, pushing the buffers up rather than covering them.
  */
 /** Pickers that read in the minibuffer's place (the rest are centered dialogs). */
@@ -50,6 +56,7 @@ export default function Minibuffer() {
   // A docked picker (NeoPicker, xref) is the minibuffer while it's open.
   const pickerDocked = useUIStore((s) => DOCKED_PICKERS.has(s.picker));
   const xrefOpen = useXrefStore((s) => s.open);
+  if (request?.kind === "swiper") return <SwiperPrompt key={session} request={request} />;
   if (request) return <Prompt key={session} request={request} />;
   if (pickerDocked || xrefOpen) return null;
   return <EchoArea />;
@@ -115,7 +122,7 @@ function nameWidth(candidates: Candidate[] | null): number {
   return Math.min(48, Math.max(16, longest + 1));
 }
 
-function Prompt({ request }: { request: MinibufferRequest }) {
+function Prompt({ request }: { request: Exclude<MinibufferRequest, SwiperRequest> }) {
   const closeMinibuffer = useMinibufferStore((s) => s.close);
   const requestFocus = useUIStore((s) => s.requestFocus);
   const showFlash = useUIStore((s) => s.showFlash);
@@ -305,6 +312,8 @@ function Prompt({ request }: { request: MinibufferRequest }) {
     },
     accept,
     quit: cancel,
+    // Swiper's alone.
+    "yank-symbol": () => false,
     // Typed as text anywhere but a question.
     yes: answer(true),
     no: answer(false),

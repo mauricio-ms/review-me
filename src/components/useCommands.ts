@@ -1,5 +1,6 @@
 import { useCallback } from "react";
 
+import { swiperHere } from "../editor/swiper";
 import {
   killCurrentBuffer,
   openHelp,
@@ -59,6 +60,7 @@ export type CommandId =
   | "export-notes"
   | "goto-def"
   | "find-refs"
+  | "swiper"
   | "back"
   | "forward"
   | "changed"
@@ -286,6 +288,11 @@ export function useCommands(close: CommandClose): {
     void findUsages();
   }, [close]);
 
+  const handleSwiper = useCallback(() => {
+    close({ restoreFocus: false });
+    swiperHere();
+  }, [close]);
+
   const handleBack = useCallback(() => {
     close({ restoreFocus: false });
     goBack();
@@ -439,6 +446,17 @@ export function useCommands(close: CommandClose): {
       buffer: "project",
       enabled: !!openPath,
       run: handleFindRefs,
+    },
+    {
+      id: "swiper",
+      name: "swiper",
+      aliases: ["search", "isearch"],
+      label: openPath
+        ? "search the file: the lines that match as you type"
+        : "search a file (open one first)",
+      buffer: "project",
+      enabled: !!openPath,
+      run: handleSwiper,
     },
     {
       id: "back",

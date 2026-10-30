@@ -2206,6 +2206,35 @@ kbd {
   color: var(--fg-2);
 }
 
+/* Swiper: a fixed window of matching lines, so the buffer above doesn't jump as the
+   search narrows — the line number, then the line as it reads in the file. */
+.mb-list.swiper-list {
+  height: calc(10 * (1.5em + 4px));
+  max-height: none;
+  overflow: hidden;
+}
+
+.mb-row.swiper-row {
+  grid-template-columns: var(--swiper-digits, 4ch) minmax(0, 1fr);
+  column-gap: 12px;
+}
+
+.swiper-number {
+  color: var(--fg-faint);
+  font-size: var(--fs-ui);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.swiper-text {
+  min-width: 0;
+  color: var(--fg-1);
+  white-space: pre;
+  tab-size: 4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* ---------- help buffer (C-h b / C-h m) ---------- */
 
 .help-buffer {

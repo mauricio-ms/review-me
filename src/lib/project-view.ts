@@ -20,7 +20,7 @@ export function registerFileView(
 }
 
 /** The view of the file in the selected window, if it shows one. */
-function activeView(): EditorView | null {
+export function activeView(): EditorView | null {
   const s = useWindowStore.getState();
   const entry = views.get(s.selected);
   return entry && entry.buffer === s.shown[s.selected] ? entry.view : null;
