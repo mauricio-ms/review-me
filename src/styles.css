@@ -1815,6 +1815,15 @@ kbd {
   cursor: default;
 }
 
+/* A group's title above its candidates (the finder's changed / unchanged files). */
+.neo-group {
+  padding: 6px 12px 2px;
+  font-size: var(--fs-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--fg-dim);
+}
+
 .neo-icon {
   color: var(--accent-teal);
   text-align: center;

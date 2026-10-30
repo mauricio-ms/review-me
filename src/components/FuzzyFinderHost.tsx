@@ -39,7 +39,8 @@ export default function FuzzyFinderHost() {
   const repoPath = useRepoStore((s) => s.repoPath);
   // The finder searches the revision project mode is showing, not always the disk.
   const source = useProjectStore((s) => s.source);
-  // ...and, like the tree, only the comparison's changed files when it lists those.
+  // ...and, when the tree lists only the comparison's changed files, puts those first —
+  // then every other file, so one the change didn't touch can still be found.
   const changedOnly = useProjectStore((s) => s.filter === "changed");
   const changedFiles = useRepoStore((s) => s.diff?.files ?? EMPTY_FILES);
   const changedByPath = useMemo(
@@ -59,15 +60,22 @@ export default function FuzzyFinderHost() {
     if (!open || !repoPath) return;
     let cancelled = false;
     const handle = window.setTimeout(() => {
-      void fuzzyFiles(repoPath, source, query, LIMIT, only).then((matches) => {
-        if (!cancelled) setRows(matches);
+      // Every file, less the changed ones listed above it: asking for as many more as
+      // there are changed files leaves LIMIT once they're taken out.
+      void Promise.all([
+        only ? fuzzyFiles(repoPath, source, query, LIMIT, only) : [],
+        fuzzyFiles(repoPath, source, query, LIMIT + (only?.length ?? 0), null),
+      ]).then(([changed, all]) => {
+        if (cancelled) return;
+        const rest = only ? all.filter((m) => !changedByPath.has(m.path)) : all;
+        setRows([...changed, ...rest.slice(0, LIMIT)]);
       });
     }, 70);
     return () => {
       cancelled = true;
       window.clearTimeout(handle);
     };
-  }, [only, open, query, repoPath, source]);
+  }, [changedByPath, only, open, query, repoPath, source]);
 
   // Reset when reopened.
   useEffect(() => {
@@ -100,7 +108,7 @@ export default function FuzzyFinderHost() {
   return (
     <NeoPicker<FileMatch>
       open={open}
-      title={`${only ? "Find changed file" : "Find file"}${other ? " in other window" : ""}`}
+      title={`Find file${other ? " in other window" : ""}`}
       className="fuzzy-finder"
       query={query}
       onQueryChange={setQuery}
@@ -108,11 +116,12 @@ export default function FuzzyFinderHost() {
       rows={rows}
       rowKey={(row) => row.path}
       rowClassName={() => "fz-row"}
+      group={only ? (row) => (changedByPath.has(row.path) ? "changed" : "unchanged") : undefined}
       onActivate={(row) => openSelected(row)}
       onClose={close}
       renderCount={(s, t) => (t === 0 ? "0" : `${s + 1}/${t}`)}
       footer="RET open · C-g quit"
-      emptyText={only && only.length === 0 ? "nothing changed here" : "no matching files"}
+      emptyText="no matching files"
       renderRow={(row) => {
         // The file name first — it's what you're matching — then its folders, shortened
         // from the left when they don't fit, so the name is never what gets cut.

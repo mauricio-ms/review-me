@@ -371,7 +371,7 @@ just the current buffer's keys; `C-h k` tells you what a key does.
 | `export` | Write the notes on the commits buffer's commits to one Markdown file |
 | `clear` | Clear this comparison's review, flag and ignore marks |
 | `diffmode` | (diff) Toggle word-diff ↔ whole-line highlighting |
-| `changed` | Project tree and finder: only the changed files ↔ all files (`c` in the tree) |
+| `changed` | Project tree: only the changed files ↔ all files (`c` in the tree); the finder lists changed files first |
 | `hunk` | (project) Show/hide the diff of the change at the cursor or selection |
 | `hunks` | (project) Show/hide the diff of every change, in every file |
 | `flag` | (project) Flag the current selection |
@@ -500,9 +500,10 @@ generated from the tag store and never read back: edit notes in the app.
 comparison on screen changed**: the commit's files while reviewing a commit, every file the
 branch touched in a branch comparison (`b` in the commits buffer), the uncommitted ones in
 the working-tree diff. The choice sticks as you move between comparisons, so it keeps
-following what's under review; the fuzzy finder (`C-x C-f`) follows it too. Changed files
-carry their status letter and a `✓` (fully reviewed) or `⚑` (flagged), and a deletion
-opens from the old side, the only revision that still has it.
+following what's under review. The fuzzy finder (`C-x C-f`) then lists the changed files
+first and every other file after them, so a file the change didn't touch is still found.
+Changed files carry their status letter and a `✓` (fully reviewed) or `⚑` (flagged), and a
+deletion opens from the old side, the only revision that still has it.
 
 A folder that holds nothing but one other folder shares its row with it, so a Java package
 reads `java/com/example/library` instead of four nested rows. Drag the tree's edge (or

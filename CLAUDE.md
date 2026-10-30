@@ -436,11 +436,13 @@ window shows something else, another window is selected, or project mode ends), 
 the covered window's own view is unmounted.
 
 `useProjectStore.filter` (`all` | `changed`, `c` in the tree / `M-x changed`) narrows the
-tree and the fuzzy finder to **the applied comparison's files** (`useRepoStore.diff`): a
-commit's, a branch's, or the uncommitted ones. It is a standing preference — `setSource`
-and `reset` leave it alone — so it keeps following whatever is under review. The changed
-tree is synthesized from those paths (`buildChanged`), never listed from disk; the finder
-passes them to `fuzzy_files` as `only`. Changed files open through `openFileFromDiff`,
+tree to **the applied comparison's files** (`useRepoStore.diff`): a commit's, a branch's,
+or the uncommitted ones. It is a standing preference — `setSource` and `reset` leave it
+alone — so it keeps following whatever is under review. The changed tree is synthesized
+from those paths (`buildChanged`), never listed from disk. The finder doesn't narrow — any
+file can still be found — but lists the changed files first, as a `changed` group (passed
+to `fuzzy_files` as `only`), over an `unchanged` one (NeoPicker's `group`). Changed files
+open through `openFileFromDiff`,
 so a deletion reads from `baseSource`. Xref still indexes the whole revision —
 definitions mostly live in files the change didn't touch.
 

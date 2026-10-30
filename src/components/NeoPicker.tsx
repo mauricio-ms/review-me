@@ -1,4 +1,5 @@
 import {
+  Fragment,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
   useEffect,
@@ -39,6 +40,11 @@ export interface NeoPickerProps<T> {
   renderRow: (row: T, selected: boolean) => ReactNode;
   rowClassName?: (row: T) => string;
   isRowDisabled?: (row: T) => boolean;
+  /**
+   * The group a row belongs to, as vertico titles them: a header goes above each run
+   * of rows in one group. Headers aren't candidates, so selection never lands on one.
+   */
+  group?: (row: T) => string;
   onActivate: (row: T, idx: number) => void;
   /**
    * Row to select when the row set changes (typing, navigating, refetch).
@@ -77,6 +83,7 @@ export default function NeoPicker<T>({
   renderRow,
   rowClassName,
   isRowDisabled,
+  group,
   onActivate,
   initialSelected = 0,
   onClose,
@@ -180,34 +187,44 @@ export default function NeoPicker<T>({
           rows.map((row, idx) => {
             const disabled = isRowDisabled?.(row) ?? false;
             const extra = rowClassName?.(row) ?? "";
+            const title = group?.(row);
+            const header = title !== undefined && (idx === 0 || group?.(rows[idx - 1]) !== title);
             return (
-              <div
-                key={rowKey(row, idx)}
-                role="option"
-                aria-selected={idx === selected}
-                ref={(el) => {
-                  if (el && idx === selected) {
-                    window.requestAnimationFrame(() => {
-                      el.scrollIntoView({ block: "nearest" });
-                    });
-                  }
-                }}
-                className={`neo-row${extra ? ` ${extra}` : ""}${
-                  idx === selected ? " is-selected" : ""
-                }${disabled ? " is-disabled" : ""}`}
-                onPointerMove={(e) => {
-                  const next = { x: e.clientX, y: e.clientY };
-                  const prev = pointerRef.current;
-                  pointerRef.current = next;
-                  if (prev && prev.x === next.x && prev.y === next.y) return;
-                  if (!disabled) setSelected(idx);
-                }}
-                onClick={() => {
-                  if (!disabled) onActivate(row, idx);
-                }}
-              >
-                {renderRow(row, idx === selected)}
-              </div>
+              <Fragment key={rowKey(row, idx)}>
+                {header && (
+                  <div className="neo-group" role="presentation">
+                    {title}
+                  </div>
+                )}
+                <div
+                  role="option"
+                  aria-selected={idx === selected}
+                  ref={(el) => {
+                    if (el && idx === selected) {
+                      window.requestAnimationFrame(() => {
+                        el.scrollIntoView({ block: "nearest" });
+                        // Coming up to a group's first row, its header shows too.
+                        if (header) el.previousElementSibling?.scrollIntoView({ block: "nearest" });
+                      });
+                    }
+                  }}
+                  className={`neo-row${extra ? ` ${extra}` : ""}${
+                    idx === selected ? " is-selected" : ""
+                  }${disabled ? " is-disabled" : ""}`}
+                  onPointerMove={(e) => {
+                    const next = { x: e.clientX, y: e.clientY };
+                    const prev = pointerRef.current;
+                    pointerRef.current = next;
+                    if (prev && prev.x === next.x && prev.y === next.y) return;
+                    if (!disabled) setSelected(idx);
+                  }}
+                  onClick={() => {
+                    if (!disabled) onActivate(row, idx);
+                  }}
+                >
+                  {renderRow(row, idx === selected)}
+                </div>
+              </Fragment>
             );
           })
         )}
