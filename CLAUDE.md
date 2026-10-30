@@ -337,8 +337,9 @@ precedence **flagged > ignored > reviewed > to-review** (`sectionForHunk`/
 scope. **Project mode reviews whole files only** (`lib/project-review.ts`): `r` `f` `i`
 `u` in the tree and `r` / `u` in the viewer act on the file — `reviewWholeFile` /
 `ignoreWholeFile` mark it unit by unit, a flag spans `fileTarget`, `unmarkWholeFile` takes
-every mark on either side — while the viewer's `!` (and `M-x flag`) flags lines and `u` on
-a visual selection unmarks lines. Lines are marked only on the side the buffer reads
+every mark on either side — while the viewer's `!` (and `M-x flag`, `M-x note`) flags lines and `u` on
+a visual selection unmarks lines; taking the selection ends vim's visual mode
+(`endVisualSelection`). Lines are marked only on the side the buffer reads
 (`sideRead`: the new side, or the old one for a deleted file); the flag tint follows the
 same rule. **`u` asks first (`confirm`) whenever it would delete a note**, in every buffer,
 and `addFlag` passes an existing same-range flag's note on, because `add_flag` replaces a
@@ -361,7 +362,9 @@ also skips untracked paths under it for repos marked before that existed.
 A **note** is a flag's `note`: a fix left for later, written while reviewing a commit.
 There is no separate store — notes ride on flags, so they get anchoring, the Flagged
 section and `u` for free. `M-x note` (`lib/notes.ts`) reads the diff buffer's cursor or
-selection through `lib/diff-view.ts` (the diff-buffer twin of `project-view.ts`) and opens
+selection through `lib/diff-view.ts` (the diff-buffer twin of `project-view.ts`) — in the
+project buffer, the selected window's visual selection or cursor line, on the side it
+reads (`project-review.ts`'s `viewerNoteTarget`) — and opens
 `NoteEditorHost` on the flag found there (`flagAt`: same range, else overlapping), or on
 bare lines that its first save flags (`review-actions.ts`'s `saveNote`). Existing notes
 are edited in place by `set_flag_note` (same id/anchor/`createdAt`; blank clears). Notes

@@ -1,4 +1,4 @@
-import { Vim } from "@replit/codemirror-vim";
+import { Vim, type CodeMirrorV } from "@replit/codemirror-vim";
 
 import { KEYMAP, type ViewerAction } from "../lib/keymap";
 import { VIEWER_HANDLERS } from "./viewer-keymap";
@@ -37,9 +37,10 @@ export function defineNavVim(): void {
       const visual = context === "visual";
       const name = `reviewMe:${action}:${context}`;
       v.defineAction(name, (cm, args) => {
-        // The handler reads the selection before anything else, so it can end here.
+        // The handler reads the selection before anything else, so it can end here —
+        // unless taking it ended it already (`project-view.ts`'s `endVisualSelection`).
         VIEWER_HANDLERS[action](args.repeat ?? 1, visual);
-        if (visual) v.exitVisualMode(cm);
+        if (visual && (cm as CodeMirrorV).state.vim?.visualMode) v.exitVisualMode(cm);
       });
       for (const keys of binding.keys) {
         v.mapCommand(keys.replace(/ /g, ""), "action", name, {}, { context });

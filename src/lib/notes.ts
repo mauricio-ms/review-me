@@ -3,8 +3,10 @@ import { useRepoStore } from "../state/repo";
 import { useTagsStore } from "../state/tags";
 import type { FlagTag } from "../types/tags";
 import { useUIStore } from "../state/ui";
+import { activeBuffer, useWindowStore } from "../state/windows";
 import { diffTarget, type DiffTarget } from "./diff-view";
 import { logBase, logRef } from "./log";
+import { viewerNoteTarget } from "./project-review";
 import { exportNotes as exportNotesFor } from "./tauri";
 
 /**
@@ -63,12 +65,14 @@ export function openNoteFor(flag: FlagTag): void {
 }
 
 /**
- * Open the note editor for the cursor's lines (`M-x note`): on the flag already there,
- * else on the lines themselves — the first save flags them.
+ * Open the note editor for the cursor's lines (`M-x note`) — the diff buffer's, or the
+ * selected window's file's, where a visual selection is the lines: on the flag already
+ * there, else on the lines themselves — the first save flags them.
  */
 export function openNoteEditor(): boolean {
   if (!notesAvailable()) return false;
-  const target = diffTarget();
+  const target =
+    activeBuffer(useWindowStore.getState()) === "project" ? viewerNoteTarget() : diffTarget();
   if (!target) return false;
   const flag = flagAt(useTagsStore.getState().flags, target);
   useNotesStore.getState().open(

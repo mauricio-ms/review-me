@@ -5,8 +5,9 @@ import { sameSource, type ProjectSource } from "../types/repo";
 import type { AnchorSide } from "../types/tags";
 import { currentFile } from "./buffers";
 import { fileTarget, hunkTarget } from "./coverage";
+import type { DiffTarget } from "./diff-view";
 import { ambientSource, baseSource } from "./project";
-import { projectSelectionRange } from "./project-view";
+import { endVisualSelection, projectSelectionRange } from "./project-view";
 import {
   addFlag,
   ignoreWholeFile,
@@ -99,11 +100,13 @@ export async function unmarkFile(path: string): Promise<void> {
 /**
  * The lines selected in the selected window's file (else the cursor's), on the side of
  * the comparison they count — or null, having said why. The new side, or the old one
- * for a deleted file: elsewhere the comparison is reviewed on its new side.
+ * for a deleted file: elsewhere the comparison is reviewed on its new side. Taking the
+ * selection ends vim's visual mode.
  */
 function viewerLines(): { path: string; side: AnchorSide; lo: number; hi: number } | null {
   const file = currentFile();
   const range = projectSelectionRange();
+  endVisualSelection();
   if (!file || !range) {
     flash("No file here");
     return null;
@@ -116,6 +119,12 @@ function viewerLines(): { path: string; side: AnchorSide; lo: number; hi: number
     `Marks go on the revision under review, not ${file.sourceLabel ?? "this one"}`,
   );
   return null;
+}
+
+/** `M-x note` in a file: the lines a note would go on — the selection, else the cursor's. */
+export function viewerNoteTarget(): DiffTarget | null {
+  const at = viewerLines();
+  return at && { file: at.path, lo: at.lo, hi: at.hi, kind: "range", side: at.side };
 }
 
 /** `r` in a file: the whole file reviewed. */

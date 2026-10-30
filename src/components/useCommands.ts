@@ -403,13 +403,19 @@ export function useCommands(close: CommandClose): {
       name: "note",
       aliases: ["annotate", "comment", "todo"],
       label:
-        comparison.kind === "commit"
-          ? "note on the lines at the cursor (a fix for later)"
-          : "note (while reviewing a commit)",
-      buffer: "diff",
+        comparison.kind !== "commit"
+          ? "note (while reviewing a commit)"
+          : activeBuffer === "project"
+            ? openPath
+              ? "note on the selected lines, else the cursor's (a fix for later)"
+              : "note (open a file first)"
+            : "note on the lines at the cursor (a fix for later)",
       // `M-x note` only, no key — in keeping with `show` and `export`.
       // A note is exported per commit, so it only exists while reviewing one.
-      enabled: !!repo && comparison.kind === "commit",
+      enabled:
+        !!repo &&
+        comparison.kind === "commit" &&
+        (activeBuffer === "diff" || (activeBuffer === "project" && !!openPath)),
       run: handleNote,
     },
     {

@@ -1,4 +1,5 @@
 import { EditorView } from "@codemirror/view";
+import { getCM, Vim, type CodeMirrorV } from "@replit/codemirror-vim";
 
 import {
   useWindowStore,
@@ -36,6 +37,16 @@ export function projectSelectionRange(): { lo: number; hi: number } | null {
     lo: state.doc.lineAt(sel.from).number,
     hi: state.doc.lineAt(sel.to).number,
   };
+}
+
+/**
+ * End vim's visual mode in the selected window's file once a command has taken the
+ * selection (`M-x flag`, `M-x note`), as the viewer's `!` and `u` do.
+ */
+export function endVisualSelection(): void {
+  const view = activeView();
+  const cm = view ? (getCM(view) as CodeMirrorV | null) : null;
+  if (cm?.state.vim?.visualMode) Vim.exitVisualMode(cm);
 }
 
 /** Cursor position as 1-based line + 0-based column. */
