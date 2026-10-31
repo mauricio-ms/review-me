@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { fileIcon } from "../lib/file-icons";
 import { openRepoByPath } from "../lib/open-repo";
 import { forgetRepo, listRecentRepos } from "../lib/tauri";
+import { useRecentStore } from "../state/recent";
 import { useUIStore } from "../state/ui";
 import type { RememberedRepo } from "../types/repo";
 import NeoPicker from "./NeoPicker";
@@ -13,13 +14,16 @@ const REPO_COLOR = "#f14e32";
 /** The last row, as Emacs's project switcher ends with "… (choose a dir)". */
 const ANOTHER: RememberedRepo = { path: "", name: "another directory…", lastOpenedAt: -1 };
 
+const EMPTY_REPOS: RememberedRepo[] = [];
+
 export default function RecentReposHost() {
   const open = useUIStore((s) => s.picker === "recentRepos");
   const closePicker = useUIStore((s) => s.closePicker);
   const openPicker = useUIStore((s) => s.openPicker);
   const requestFocus = useUIStore((s) => s.requestFocus);
 
-  const [repos, setRepos] = useState<RememberedRepo[]>([]);
+  const repos = useRecentStore((s) => s.repos) ?? EMPTY_REPOS;
+  const setRepos = useRecentStore((s) => s.setRepos);
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -30,7 +34,7 @@ export default function RecentReposHost() {
     } catch (e) {
       setError(String(e));
     }
-  }, []);
+  }, [setRepos]);
 
   useEffect(() => {
     if (open) {
@@ -68,7 +72,7 @@ export default function RecentReposHost() {
     } catch (e) {
       setError(String(e));
     }
-  }, []);
+  }, [setRepos]);
 
   if (!open) return null;
 

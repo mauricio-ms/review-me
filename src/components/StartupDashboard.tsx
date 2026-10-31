@@ -6,6 +6,7 @@ import { openRepoByPath } from "../lib/open-repo";
 import { listRecentRepos } from "../lib/tauri";
 import { timeAgo } from "../lib/time";
 import { versionLine } from "../lib/version";
+import { useRecentStore } from "../state/recent";
 import { useUIStore } from "../state/ui";
 import type { RememberedRepo } from "../types/repo";
 
@@ -86,7 +87,10 @@ const RECENT_SHOWN = 9;
  */
 export default function StartupDashboard() {
   const focusRequest = useUIStore((s) => s.focusRequest);
-  const [repos, setRepos] = useState<RememberedRepo[] | null>(null);
+  // Shared with `C-x p p`, which can forget one while this screen shows behind it.
+  const remembered = useRecentStore((s) => s.repos);
+  const setRepos = useRecentStore((s) => s.setRepos);
+  const repos = remembered?.slice(0, RECENT_SHOWN) ?? null;
   const [cursor, setCursor] = useState(0);
   const [opening, setOpening] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -95,16 +99,14 @@ export default function StartupDashboard() {
   useEffect(() => {
     let cancelled = false;
     listRecentRepos()
-      .then((all) => {
-        if (!cancelled) setRepos(all.slice(0, RECENT_SHOWN));
-      })
+      .then(setRepos)
       .catch((e) => {
         if (!cancelled) setError(String(e));
       });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [setRepos]);
 
   useEffect(() => {
     rootRef.current?.focus({ preventScroll: true });
@@ -123,10 +125,12 @@ export default function StartupDashboard() {
   };
 
   const count = repos?.length ?? 0;
+  // Forgetting the last rows can leave the cursor past the end.
+  const at = Math.min(cursor, Math.max(0, count - 1));
   const handlers: Record<StartAction, KeyHandler> = {
-    down: () => setCursor((c) => Math.min(c + 1, Math.max(0, count - 1))),
-    up: () => setCursor((c) => Math.max(0, c - 1)),
-    open: () => void open(repos?.[cursor]),
+    down: () => setCursor(Math.min(at + 1, Math.max(0, count - 1))),
+    up: () => setCursor(Math.max(0, at - 1)),
+    open: () => void open(repos?.[at]),
     "open-nth": (keys) => {
       const repo = repos?.[Number(keys) - 1];
       if (!repo) return false;
@@ -162,7 +166,7 @@ export default function StartupDashboard() {
           {repos?.map((repo, index) => (
             <div
               key={repo.path}
-              className={`startup-repo${index === cursor ? " is-selected" : ""}`}
+              className={`startup-repo${index === at ? " is-selected" : ""}`}
               onClick={() => {
                 setCursor(index);
                 void open(repo);

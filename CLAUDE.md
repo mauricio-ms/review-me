@@ -178,7 +178,7 @@ modal (`asset-picker`): the clear confirmation, the commit dialog, the note edit
 are gated by `useUIStore.picker` or a dedicated store and use `useModalFocus` (which is
 what turns the global keys off while they're up).
 
-**State** is Zustand in `src/state/` (`ui`, `windows`, `files`, `minibuffer`, `repo`, `tags`, `log`, `notes`, `project`, `xref`, `history`). Cross-cutting
+**State** is Zustand in `src/state/` (`ui`, `windows`, `files`, `minibuffer`, `repo`, `recent`, `tags`, `log`, `notes`, `project`, `xref`, `history`). Cross-cutting
 conventions that will bite if ignored:
 - **Wire format:** Rust structs are `#[serde(rename_all = "camelCase")]`; `AppError`
   serializes to a string. serde emits `null` for `Option::None`, so TS types use `| null`
