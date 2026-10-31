@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { fileReviewState } from "../lib/coverage";
 import { showDiff, useCurrentFile, type ShowOptions } from "../lib/buffers";
@@ -13,16 +13,17 @@ import {
   previewFile,
   projectChoice,
   sideChoice,
+  toggleChangedOnly,
   toggleDir,
 } from "../lib/project";
 import { flagFile, ignoreFile, reviewFile, unmarkFile } from "../lib/project-review";
-import { TREE_WIDTH_MIN, useProjectStore } from "../state/project";
+import { foldersAbove, TREE_WIDTH_MIN, useProjectStore } from "../state/project";
 import { useRepoStore } from "../state/repo";
 import { useTagsStore } from "../state/tags";
 import { useUIStore } from "../state/ui";
 import { useWindowStore } from "../state/windows";
 import type { ChangedFile } from "../types/diff";
-import type { TreeEntry } from "../types/repo";
+import type { ProjectSource, TreeEntry } from "../types/repo";
 
 
 const EMPTY_FILES: ChangedFile[] = [];
@@ -60,6 +61,9 @@ const STATUS_GLYPH: Record<ChangedFile["status"], string> = {
   renamed: "R",
 };
 
+/** A revision as a cache key. */
+const sourceKey = (source: ProjectSource) => (source.kind === "commit" ? source.oid : "worktree");
+
 function buildVisible(
   dirs: Record<string, TreeEntry[]>,
   expanded: Set<string>,
@@ -78,16 +82,18 @@ function buildVisible(
 /**
  * The file tree, fixed at the left of project mode (`inProjectMode`: the main window
  * shows a file, or you're in the tree) and hidden everywhere else: the revision under
- * review, or only the files its comparison changed (`c`). The file under the cursor — moved
- * to, or clicked — is previewed in the selected window while the tree keeps the keyboard;
- * opening one (`RET`, a double-click, or going into the preview) shows it there for good.
- * `C-x o` moves between the tree and the windows.
+ * review, or only the files its comparison changed (`c`) — the same folders open in both.
+ * The file under the cursor — moved to, or clicked — is previewed in the selected window
+ * while the tree keeps the keyboard; opening one (`RET`, a double-click, or going into the
+ * preview) shows it there for good. `C-x o` moves between the tree and the windows.
  */
 export default function ProjectTree({ hidden }: { hidden: boolean }) {
   const dirs = useProjectStore((s) => s.dirs);
   const expanded = useProjectStore((s) => s.expanded);
   const filter = useProjectStore((s) => s.filter);
-  const toggleFilter = useProjectStore((s) => s.toggleFilter);
+  const source = useProjectStore((s) => s.source);
+  const treeCursor = useProjectStore((s) => s.treeCursor);
+  const setTreeCursor = useProjectStore((s) => s.setTreeCursor);
   const diff = useRepoStore((s) => s.diff);
   const changedFiles = diff?.files ?? EMPTY_FILES;
   const storedTreeWidth = useProjectStore((s) => s.treeWidth);
@@ -142,59 +148,99 @@ export default function ProjectTree({ hidden }: { hidden: boolean }) {
     handle.addEventListener("pointercancel", up);
   };
 
-  const [cursor, setCursor] = useState(0);
-  // Folders folded in the changed-files view — open by default, so every changed file
-  // shows at once. Folds belong to one comparison.
-  const [collapsedChanged, setCollapsedChanged] = useState<Set<string>>(() => new Set());
   const changedOnly = filter === "changed";
 
-  useEffect(() => {
-    setCollapsedChanged(new Set());
-  }, [comparisonEpoch]);
+  // The changed view's folders open as they first appear, so every changed file shows at
+  // once; after that they're the reviewer's to fold. Which have appeared is per comparison.
+  const seeded = useRef({ epoch: -1, folders: new Set<string>() });
+  useLayoutEffect(() => {
+    if (!changedOnly) return;
+    if (seeded.current.epoch !== comparisonEpoch) {
+      seeded.current = { epoch: comparisonEpoch, folders: new Set() };
+    }
+    const { folders } = seeded.current;
+    const fresh = [...new Set(changedFiles.flatMap((f) => foldersAbove(f.path)))].filter(
+      (dir) => !folders.has(dir),
+    );
+    if (fresh.length === 0) return;
+    for (const dir of fresh) folders.add(dir);
+    useProjectStore.getState().openFolders(fresh);
+  }, [changedOnly, changedFiles, comparisonEpoch]);
 
   const nodes = useMemo(
     () =>
       changedOnly
-        ? buildChanged(changedFiles, collapsedChanged)
+        ? buildChanged(changedFiles, (path) => expanded.has(path))
         : buildVisible(dirs, expanded),
-    [changedOnly, changedFiles, collapsedChanged, dirs, expanded],
+    [changedOnly, changedFiles, dirs, expanded],
   );
 
-  const isOpenDir = (path: string) =>
-    changedOnly ? !collapsedChanged.has(path) : expanded.has(path);
+  // The cursor's row — or, while that isn't shown (folded away, or not listed yet), the
+  // nearest folder above it that is.
+  const cursor = useMemo(() => {
+    for (let path = treeCursor; path; ) {
+      const idx = nodes.findIndex((n) => n.entry.path === path);
+      if (idx >= 0) return idx;
+      const cut = path.lastIndexOf("/");
+      path = cut > 0 ? path.slice(0, cut) : null;
+    }
+    return 0;
+  }, [nodes, treeCursor]);
+  const setCursor = (idx: number) => setTreeCursor(nodes[idx]?.entry.path ?? null);
 
   const toggleFolder = (path: string) => {
     if (!changedOnly) {
       void toggleDir(path);
       return;
     }
-    setCollapsedChanged((current) => {
-      const next = new Set(current);
-      if (next.has(path)) next.delete(path);
-      else next.add(path);
-      return next;
-    });
+    // The changed view lists nothing from disk: its folders just open and close.
+    const ps = useProjectStore.getState();
+    if (ps.expanded.has(path)) ps.closeFolder(path);
+    else ps.openFolders([path]);
   };
 
-  // Switching views keeps the cursor on the open file when the new list has it.
+  // The full tree reads what it reaches — the root, then every open folder not listed yet,
+  // a level at a time — so folders opened in the changed view, or kept open across a
+  // change of revision, fill in.
+  const unlisted = useMemo(() => {
+    if (changedOnly) return [];
+    if (!dirs[""]) return [""];
+    return nodes
+      .filter((n) => n.entry.isDir && expanded.has(n.entry.path) && !dirs[n.entry.path])
+      .map((n) => n.entry.path);
+  }, [changedOnly, dirs, expanded, nodes]);
+  const listing = useRef(new Set<string>());
   useEffect(() => {
-    const at = openPath ? nodes.findIndex((n) => n.entry.path === openPath) : -1;
-    setCursor(Math.max(0, at));
-    // Only on a switch: `nodes` also changes on every fold, where the cursor stays put.
-  }, [changedOnly]);
-
-  // Load the repo root the first time the full tree is shown.
-  useEffect(() => {
-    if (!hidden && !changedOnly && !dirs[""]) void loadDir("");
-  }, [changedOnly, dirs, hidden]);
-
-  useEffect(() => {
-    setCursor((c) => Math.min(Math.max(0, c), Math.max(0, nodes.length - 1)));
-  }, [nodes.length]);
+    if (hidden) return;
+    for (const path of unlisted) {
+      const key = `${sourceKey(source)}:${path}`;
+      if (listing.current.has(key)) continue;
+      listing.current.add(key);
+      // A folder that can't be read stays empty; the next listing to arrive retries it.
+      void loadDir(path)
+        .catch(() => {})
+        .finally(() => listing.current.delete(key));
+    }
+  }, [hidden, source, unlisted]);
 
   useEffect(() => {
     if (focused) treeRef.current?.focus({ preventScroll: true });
   }, [focused, focusRequest]);
+
+  // Keep the cursor's row in view, clear of the mode line stuck at the top.
+  useEffect(() => {
+    const tree = treeRef.current;
+    const row = tree?.querySelector<HTMLElement>(".tree-row.is-selected");
+    if (!tree || !row || hidden) return;
+    const mode = tree.querySelector<HTMLElement>(".project-tree-mode");
+    const head = mode ? mode.offsetHeight + parseFloat(getComputedStyle(mode).marginBottom) : 0;
+    const box = tree.getBoundingClientRect();
+    const at = row.getBoundingClientRect();
+    const top = box.top + head;
+    const bottom = box.top + tree.clientHeight;
+    if (at.top < top) tree.scrollTop -= top - at.top;
+    else if (at.bottom > bottom) tree.scrollTop += at.bottom - bottom;
+  }, [cursor, hidden, nodes]);
 
   // Show the file at the cursor where opening it would — now, or once the cursor has
   // rested on it. On a folder, the last file previewed stays.
@@ -231,7 +277,7 @@ export default function ProjectTree({ hidden }: { hidden: boolean }) {
 
   const collapseOrParent = (node: Node | undefined) => {
     if (!node) return;
-    if (node.entry.isDir && isOpenDir(node.entry.path)) {
+    if (node.entry.isDir && expanded.has(node.entry.path)) {
       toggleFolder(node.entry.path);
       return;
     }
@@ -272,7 +318,7 @@ export default function ProjectTree({ hidden }: { hidden: boolean }) {
     "open-other": () => activate(nodes[cursor], { other: true }),
     close: () => collapseOrParent(nodes[cursor]),
     // The whole revision ↔ only what the comparison on screen changed.
-    filter: toggleFilter,
+    filter: toggleChangedOnly,
     review: markFile(reviewFile),
     flag: markFile(flagFile),
     ignore: markFile(ignoreFile),
@@ -309,7 +355,7 @@ export default function ProjectTree({ hidden }: { hidden: boolean }) {
             const icon = fileIcon(
               node.entry.name,
               node.entry.isDir,
-              isOpenDir(node.entry.path),
+              expanded.has(node.entry.path),
             );
             const change = node.change;
             const review = change

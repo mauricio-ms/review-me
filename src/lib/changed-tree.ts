@@ -13,10 +13,13 @@ function byName(a: string, b: string): number {
 
 /**
  * The changed-files view: a tree synthesized from the comparison's own paths (it has
- * every file it needs, so nothing is listed from disk), folders first and open unless
- * the reviewer folded them.
+ * every file it needs, so nothing is listed from disk), folders first, each listed inside
+ * when `isOpen` says it's open.
  */
-export function buildChanged(files: ChangedFile[], collapsed: Set<string>): TreeNode[] {
+export function buildChanged(
+  files: ChangedFile[],
+  isOpen: (path: string) => boolean,
+): TreeNode[] {
   type Dir = { dirs: Map<string, Dir>; files: ChangedFile[] };
   const root: Dir = { dirs: new Map(), files: [] };
   for (const file of files) {
@@ -47,7 +50,7 @@ export function buildChanged(files: ChangedFile[], collapsed: Set<string>): Tree
         child = inner;
       }
       out.push({ entry: { name: label, path, isDir: true }, depth });
-      if (!collapsed.has(path)) walk(child, path, depth + 1);
+      if (isOpen(path)) walk(child, path, depth + 1);
     }
     for (const file of [...dir.files].sort((a, b) => byName(name(a.path), name(b.path)))) {
       out.push({
@@ -66,5 +69,5 @@ export function buildChanged(files: ChangedFile[], collapsed: Set<string>): Tree
  * first, by name — which is the order `] f` / `[ f` walk them in a file.
  */
 export function changedFileOrder(files: ChangedFile[]): ChangedFile[] {
-  return buildChanged(files, new Set()).flatMap((node) => (node.change ? [node.change] : []));
+  return buildChanged(files, () => true).flatMap((node) => (node.change ? [node.change] : []));
 }

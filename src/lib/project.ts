@@ -1,20 +1,29 @@
-import { fileBuffer, newFileBufferId, useFilesStore, type FileBuffer } from "../state/files";
-import { useProjectStore } from "../state/project";
+import {
+  bufferOnScreen,
+  fileBuffer,
+  newFileBufferId,
+  useFilesStore,
+  type FileBuffer,
+} from "../state/files";
+import { foldersAbove, useProjectStore } from "../state/project";
 import { useRepoStore } from "../state/repo";
 import { useUIStore } from "../state/ui";
 import {
   inProjectMode,
+  isFileKey,
+  onScreen,
+  selectedBuffer,
   useWindowStore,
   type FileBufferId,
   type WindowId,
 } from "../state/windows";
-import { shortOid, type Comparison } from "../types/diff";
+import { shortOid, type ChangedFile, type Comparison } from "../types/diff";
 import { sameSource, WORKTREE_SOURCE, type ProjectSource } from "../types/repo";
 import { findFileBuffer, killFileBuffers, type ShowOptions } from "./buffers";
 import { recordJump } from "./jumps";
 import { armRepeat } from "./key-dispatch";
 import { forgetPositions, placeCursor } from "./project-view";
-import { display, focusTree, otherWindowFor, targetWindow } from "./windows";
+import { display, focusTree, otherWindowFor, showProject, targetWindow } from "./windows";
 import { listRepoDir, readFile } from "./tauri";
 
 /** The repo + revision every project read below goes through. */
@@ -127,6 +136,8 @@ export async function loadDir(path: string): Promise<void> {
   const c = ctx();
   if (!c) return;
   const listing = await listRepoDir(c.repo, c.source, path);
+  // A listing of a revision the tree has moved off since belongs to none it shows.
+  if (!sameSource(useProjectStore.getState().source, c.source)) return;
   useProjectStore.getState().setDir(path, listing.entries);
 }
 
@@ -138,11 +149,73 @@ export async function ensureDir(path: string): Promise<void> {
 export async function toggleDir(path: string): Promise<void> {
   const ps = useProjectStore.getState();
   if (ps.expanded.has(path)) {
-    ps.setExpanded(path, false);
+    ps.closeFolder(path);
   } else {
     await ensureDir(path);
-    ps.setExpanded(path, true);
+    ps.openFolders([path]);
   }
+}
+
+/** The file on screen in the selected window — a preview counts. */
+function fileOnScreen(): FileBuffer | null {
+  const ws = useWindowStore.getState();
+  const key = onScreen(ws, ws.selected);
+  return key && isFileKey(key) ? (bufferOnScreen(useFilesStore.getState(), key) ?? null) : null;
+}
+
+/** `path`'s change in the comparison on screen — what the changed-files view lists. */
+function changeAt(path: string | undefined): ChangedFile | undefined {
+  return path == null ? undefined : useRepoStore.getState().diff?.files.find((f) => f.path === path);
+}
+
+/** Put the tree's cursor on `path`, opening the folders it's in. */
+function revealInTree(path: string): void {
+  const ps = useProjectStore.getState();
+  ps.openFolders(foldersAbove(path));
+  ps.setTreeCursor(path);
+}
+
+/**
+ * `c` in the tree, `M-x changed`: all files ↔ only what the comparison changed. Both
+ * views open the same folders, and the file on screen stays under the cursor — its
+ * folders opened if this view had them closed.
+ */
+export function toggleChangedOnly(): void {
+  useProjectStore.getState().toggleFilter();
+  const path = fileOnScreen()?.path;
+  if (!path) return;
+  if (useProjectStore.getState().filter === "all" || changeAt(path)) revealInTree(path);
+}
+
+/**
+ * `C-x C-j` (Emacs's dired-jump): the current file in the tree — its folders opened, the
+ * cursor on it, the tree with the keyboard. In the diff, that's the file under the
+ * cursor, which project mode then previews as the tree's cursor would; elsewhere, the
+ * file in the selected window. One the changed-files view doesn't list is found among
+ * all files.
+ */
+export function revealFile(): void {
+  const ui = useUIStore.getState();
+  const ws = useWindowStore.getState();
+  const inDiff = !ws.treeFocused && selectedBuffer(ws) === "diff";
+  const change = inDiff ? changeAt(ui.diffCursor?.path) : undefined;
+  const path = inDiff ? change?.path : fileOnScreen()?.path;
+  if (!path) {
+    ui.showFlash("No file here");
+    return;
+  }
+  const ps = useProjectStore.getState();
+  if (ps.filter === "changed" && !changeAt(path)) {
+    ps.toggleFilter();
+    ui.showFlash(`${path.slice(path.lastIndexOf("/") + 1)} isn't changed — showing all files`);
+  }
+  if (!inProjectMode(ws)) {
+    recordJump();
+    showProject();
+  }
+  revealInTree(path);
+  focusTree();
+  if (change) void previewFile(change.path, sideChoice(change.status === "deleted" ? "old" : "new"));
 }
 
 /** A file's text at a revision — or, when it can't be read, a note saying why. */

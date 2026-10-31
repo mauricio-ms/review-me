@@ -13,7 +13,7 @@ import { contextScope, startDescribeKey } from "../lib/key-dispatch";
 import { showLog } from "../lib/log";
 import { exportNotes, openNoteEditor } from "../lib/notes";
 import { applyComparison, refreshDiff } from "../lib/open-repo";
-import { resizeTree, toggleTree } from "../lib/project";
+import { resizeTree, revealFile, toggleChangedOnly, toggleTree } from "../lib/project";
 import { toggleChangesAtCursor } from "../lib/project-diff";
 import { flagHere } from "../lib/project-review";
 import { adjustTextScale } from "../lib/text-scale";
@@ -100,6 +100,7 @@ export type CommandId =
   | "shrink-tree"
   | "enlarge-tree"
   | "toggle-tree"
+  | "reveal"
   | "text-scale-increase"
   | "text-scale-decrease"
   | "text-scale-reset"
@@ -144,7 +145,6 @@ export function useCommands(close: CommandClose): {
   const comparingHistory = readsCommittedHistory(comparison);
   const openPath = useCurrentFile()?.path ?? null;
   const projectFilter = useProjectStore((s) => s.filter);
-  const toggleProjectFilter = useProjectStore((s) => s.toggleFilter);
   const inlineDiff = useProjectStore((s) => s.inlineDiff);
   const toggleInlineDiff = useProjectStore((s) => s.toggleInlineDiff);
   // Selecting lengths, not the arrays: the labels only need how far there is to go,
@@ -241,9 +241,9 @@ export function useCommands(close: CommandClose): {
   }, [close, toggleDiffHighlight]);
 
   const handleToggleProjectFilter = useCallback(() => {
-    toggleProjectFilter();
+    toggleChangedOnly();
     close();
-  }, [close, toggleProjectFilter]);
+  }, [close]);
 
   const handleToggleChangeAtCursor = useCallback(() => {
     close();
@@ -819,6 +819,20 @@ export function useCommands(close: CommandClose): {
       run: () => {
         close({ restoreFocus: false });
         toggleTree();
+      },
+    },
+    {
+      id: "reveal",
+      name: "reveal",
+      aliases: ["dired-jump", "find-in-tree", "locate"],
+      label:
+        activeBuffer === "diff"
+          ? "the file at the cursor in the file tree"
+          : "the current file in the file tree",
+      enabled: !!repo,
+      run: () => {
+        close({ restoreFocus: false });
+        revealFile();
       },
     },
     {

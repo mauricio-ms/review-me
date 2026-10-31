@@ -104,6 +104,11 @@ const GLOBAL_KEYS = [
   },
   { keys: ["C-x }"], command: "enlarge-tree", doc: "wider file tree" },
   { keys: ["C-x t t"], command: "toggle-tree", doc: "hide the file tree, or show it again" },
+  {
+    keys: ["C-x C-j"],
+    command: "reveal",
+    doc: "the current file in the file tree (in the diff, the one at the cursor)",
+  },
   { keys: ["C-x g"], command: "log", doc: "the commits buffer" },
   { keys: ["C-x p p"], command: "recent", doc: "recent repositories" },
   { keys: ["C-x p k"], command: "close", doc: "close the repository" },

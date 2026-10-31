@@ -391,7 +391,7 @@ it at the target commit in branch mode (so a moved branch re-points it on refres
 reviewed commit in commit mode, and at the worktree otherwise (`lib/project.ts`'s
 `ambientSource`); after that it follows the revision of the file in the selected window
 (`Frame`'s effect) — a deletion opened at the old side puts the tree there too, as it
-always has. Changing it drops cached listings.
+always has. Changing it drops cached listings, not which folders are open.
 
 Opening a file never replaces another: **`visitFile(path, choice, at?)`** (Emacs's
 find-file) shows the buffer already open for `(revision, path)` in `targetWindow()`, or
@@ -418,6 +418,20 @@ remembered, clamped so the windows keep 320px) and `treeHidden` (`M-x toggle-tre
 brings it back) are layout state, not per-revision. In the project buffer `C-x o` moves
 between the tree and the viewer (and on through any other windows); the tree opens files in
 the selected window, and its `q` goes back to the diff.
+
+**Both views of the tree share one fold state.** `useProjectStore.expanded` is the set of
+open folders for all files and changed alike, kept across revisions and comparisons (only
+`reset` — closing or opening a repo — clears it); `openFolders` opens every folder above a
+path too, because the two views group folder chains differently (`java/com/acme` is one row
+in the changed view and three in the full one). The changed view opens its folders as they
+first appear in a comparison (`ProjectTree`'s seeding), after which they fold like any
+other; the full view lists every open folder it reaches (`unlisted`), a level at a time.
+The cursor is a path (`treeCursor`), so rows arriving or folding around it don't move it,
+and while its row isn't shown it sits on the nearest folder above. `c` / `M-x changed`
+(`toggleChangedOnly`) and `C-x C-j` / `M-x reveal` (`revealFile`, Emacs's dired-jump) put
+it on the file on screen, opening its folders; `reveal` takes the diff cursor's file from
+the diff (entering project mode, previewing it) and switches to all files for a file the
+changed view doesn't list.
 
 **The tree previews; it doesn't open.** Moving its cursor onto a file (after a 60ms rest,
 so holding `j` reads nothing) or clicking one calls `lib/project.ts`'s `previewFile`, and

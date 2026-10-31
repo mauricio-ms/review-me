@@ -37,11 +37,27 @@ function saveTreeWidth(width: number): void {
   }
 }
 
+/** The folders above a repo-relative path, outermost first: `a/b/c.ts` → `a`, `a/b`. */
+export function foldersAbove(path: string): string[] {
+  const parts = path.split("/").slice(0, -1);
+  return parts.map((_, i) => parts.slice(0, i + 1).join("/"));
+}
+
 type ProjectState = {
   /** Lazily-loaded directory listings, keyed by repo-relative dir path ("" = root). */
   dirs: Record<string, TreeEntry[]>;
-  /** Repo-relative dir paths currently expanded in the tree. */
+  /**
+   * The folders open in the tree, by repo-relative path: one set for both views (all
+   * files, changed), so switching between them keeps what's open. It outlives a change of
+   * revision too — a folder that revision lacks just isn't listed.
+   */
   expanded: Set<string>;
+  /**
+   * The path the tree's cursor is on. Kept as a path, so the cursor stays on its row as
+   * folders open and listings arrive; while that row isn't shown, the cursor sits on the
+   * nearest folder that is.
+   */
+  treeCursor: string | null;
   /**
    * The revision the tree and the finder list, and files open from them: the
    * comparison's new side (`ambientSource`). A file buffer carries its own revision —
@@ -71,11 +87,17 @@ type ProjectState = {
   treeHidden: boolean;
 
   setDir: (path: string, entries: TreeEntry[]) => void;
-  setExpanded: (path: string, open: boolean) => void;
+  /**
+   * Open folders — each with every folder above it, so either view finds the whole way
+   * down open, however it groups folder chains.
+   */
+  openFolders: (paths: string[]) => void;
+  closeFolder: (path: string) => void;
+  setTreeCursor: (path: string | null) => void;
   /**
    * Point the tree at a different revision. Cached listings belong to the old one, so
-   * they're dropped; re-pointing at the same revision is a no-op that keeps the
-   * reviewer's place.
+   * they're dropped (the open folders and the cursor stay); re-pointing at the same
+   * revision is a no-op.
    */
   setSource: (source: ProjectSource, label: string | null) => void;
   toggleFilter: () => void;
@@ -94,6 +116,7 @@ type ProjectState = {
 export const useProjectStore = create<ProjectState>((set) => ({
   dirs: {},
   expanded: new Set(),
+  treeCursor: null,
   source: WORKTREE_SOURCE,
   sourceLabel: null,
   filter: "all",
@@ -104,23 +127,25 @@ export const useProjectStore = create<ProjectState>((set) => ({
 
   setDir: (path, entries) =>
     set((s) => ({ dirs: { ...s.dirs, [path]: entries } })),
-  setExpanded: (path, open) =>
+  openFolders: (paths) =>
     set((s) => {
+      const wanted = paths.flatMap((path) => [...foldersAbove(path), path]);
+      if (wanted.every((path) => s.expanded.has(path))) return {};
+      return { expanded: new Set([...s.expanded, ...wanted]) };
+    }),
+  closeFolder: (path) =>
+    set((s) => {
+      if (!s.expanded.has(path)) return {};
       const next = new Set(s.expanded);
-      if (open) next.add(path);
-      else next.delete(path);
+      next.delete(path);
       return { expanded: next };
     }),
+  setTreeCursor: (path) => set({ treeCursor: path }),
   setSource: (source, label) =>
     set((s) =>
       sameSource(s.source, source) && s.sourceLabel === label
         ? {}
-        : {
-            source,
-            sourceLabel: label,
-            dirs: {},
-            expanded: new Set<string>(),
-          },
+        : { source, sourceLabel: label, dirs: {} },
     ),
   toggleFilter: () =>
     set((s) => ({ filter: s.filter === "all" ? "changed" : "all" })),
@@ -149,6 +174,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
     set({
       dirs: {},
       expanded: new Set(),
+      treeCursor: null,
       source: WORKTREE_SOURCE,
       sourceLabel: null,
       inlineFlipped: new Set(),

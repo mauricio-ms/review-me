@@ -80,10 +80,12 @@ export async function openRepoByPath(path: string): Promise<void> {
   repoStore.setStatus({ kind: "loading" });
   const info = await openRepo(path);
   repoStore.setRepo(info, info.root);
-  // Even the same repo reopened gets a fresh history — and no files open, one window.
+  // Even the same repo reopened gets a fresh history — and no files open, one window, a
+  // tree read afresh.
   useLogStore.getState().reset();
   useFilesStore.getState().reset();
   useWindowStore.getState().reset();
+  useProjectStore.getState().reset();
   useHistoryStore.getState().clear();
   // The branch under review starts as whatever the checkout is on (else the repo's
   // default branch) — the backend already picked; we only need its display name.
