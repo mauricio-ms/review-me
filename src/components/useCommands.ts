@@ -463,7 +463,7 @@ export function useCommands(close: CommandClose): {
           : activeBuffer === "log"
             ? "search the commits' subjects"
             : openPath
-              ? "search the file: the lines that match as you type"
+              ? "search the file, its removed lines too"
               : "search a file (open one first)",
       enabled:
         !!repo && (activeBuffer === "diff" || activeBuffer === "log" || !!openPath),

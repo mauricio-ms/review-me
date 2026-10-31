@@ -69,8 +69,9 @@ export function swipeList(search: ListSearch): void {
 /**
  * The matches light up through CSS custom highlights (`::highlight(swiper-match)` in
  * styles.css), which mark text ranges without touching the rows' markup — a row's text
- * is split into word-diff spans, path folders and the like. Without the API (an older
- * WebKit) only the minibuffer marks them.
+ * is split into word-diff spans, path folders and the like (the viewer's removed lines,
+ * a widget's DOM, light this way too). Without the API (an older WebKit) only the
+ * minibuffer marks them.
  */
 const registry = (globalThis as { CSS?: { highlights?: HighlightRegistry } }).CSS?.highlights;
 

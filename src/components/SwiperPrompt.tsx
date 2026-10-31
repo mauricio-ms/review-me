@@ -172,7 +172,7 @@ export default function SwiperPrompt({ request }: { request: SwiperRequest }) {
               onClick={() => accept(h)}
             >
               <span className="swiper-label">
-                <bdi>{label(h.index)}</bdi>
+                <bdi dir="ltr">{label(h.index)}</bdi>
               </span>
               <span className="swiper-text">{marked(request.lines[h.index], h.spans)}</span>
             </div>

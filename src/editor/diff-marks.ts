@@ -31,6 +31,12 @@ export type ShownBlock = ChangeBlock & { shown: boolean; showRemoved: boolean };
  */
 export const setDiffMarks = StateEffect.define<ShownBlock[]>();
 
+/**
+ * Show one block's diff as `M-x hunk` would (null: none) — Swiper landing on a line the
+ * block took out, which it hides. It lasts until the marks are next set.
+ */
+export const revealBlock = StateEffect.define<string | null>();
+
 /** A gutter sign: a bar for written lines, a notch where lines were removed. */
 class ChangeSign extends GutterMarker {
   constructor(readonly cls: string) {
@@ -67,6 +73,7 @@ class RemovedLines extends WidgetType {
   toDOM(): HTMLElement {
     const root = document.createElement("div");
     root.className = "cm-diff-removed";
+    root.dataset.block = this.id;
     this.lines.forEach((text, i) => {
       const line = document.createElement("div");
       line.className = "cm-diff-removed-line";
@@ -89,9 +96,19 @@ class RemovedLines extends WidgetType {
   }
 }
 
-type Marks = { deco: DecorationSet; signs: RangeSet<GutterMarker>; blocks: ShownBlock[] };
+type Marks = {
+  deco: DecorationSet;
+  signs: RangeSet<GutterMarker>;
+  blocks: ShownBlock[];
+  revealed: string | null;
+};
 
-const EMPTY_MARKS: Marks = { deco: Decoration.none, signs: RangeSet.empty, blocks: [] };
+const EMPTY_MARKS: Marks = {
+  deco: Decoration.none,
+  signs: RangeSet.empty,
+  blocks: [],
+  revealed: null,
+};
 
 const lineClass = (cls: string) => Decoration.line({ attributes: { class: cls } });
 const ADDED_LINE = lineClass("cm-diff-line-added");
@@ -100,7 +117,7 @@ const MODIFIED_LINE = lineClass("cm-diff-line-modified");
 const NEW_LINE = lineClass("cm-diff-line-new");
 const WORD = Decoration.mark({ class: "cm-diff-word" });
 
-function buildMarks(doc: Text, blocks: ShownBlock[]): Marks {
+function buildMarks(doc: Text, blocks: ShownBlock[], revealed: string | null): Marks {
   const deco: Range<Decoration>[] = [];
   // Per line: one sign, whose classes stack (a bar plus a removal notch).
   const signs = new Map<number, string[]>();
@@ -117,13 +134,14 @@ function buildMarks(doc: Text, blocks: ShownBlock[]): Marks {
 
   for (const block of blocks) {
     const valid = (ln: number) => ln >= 1 && ln <= doc.lines;
+    const shown = block.shown || block.id === revealed;
     for (const ln of block.modified.filter(valid)) {
       sign(ln, "cm-diff-sign-modified");
-      deco.push((block.shown ? NEW_LINE : MODIFIED_LINE).range(doc.line(ln).from));
+      deco.push((shown ? NEW_LINE : MODIFIED_LINE).range(doc.line(ln).from));
     }
     for (const ln of block.added.filter(valid)) {
       sign(ln, "cm-diff-sign-added");
-      deco.push((block.shown ? NEW_LINE : ADDED_LINE).range(doc.line(ln).from));
+      deco.push((shown ? NEW_LINE : ADDED_LINE).range(doc.line(ln).from));
     }
     if (block.removed.length > 0 && block.modified.length === 0 && block.added.length === 0) {
       removalSign(block.removedAt);
@@ -134,12 +152,12 @@ function buildMarks(doc: Text, blocks: ShownBlock[]): Marks {
       removalSign(written[written.length - 1] + 1);
     }
 
-    if (block.removed.length > 0 && (block.shown || block.showRemoved)) {
+    if (block.removed.length > 0 && (shown || block.showRemoved)) {
       const widget = new RemovedLines(
         block.id,
         block.removed.map((l) => l.content),
         block.removedSegs,
-        block.shown,
+        shown,
       );
       deco.push(
         block.removedAt > doc.lines
@@ -149,7 +167,7 @@ function buildMarks(doc: Text, blocks: ShownBlock[]): Marks {
             ),
       );
     }
-    if (!block.shown) continue;
+    if (!shown) continue;
     for (const [ln, segs] of block.newSegs) {
       // Only where the viewer still holds the text the diff saw — a file changed on
       // disk since the diff was computed would put the highlights on the wrong words.
@@ -167,14 +185,15 @@ function buildMarks(doc: Text, blocks: ShownBlock[]): Marks {
   const signRanges = [...signs]
     .sort(([a], [b]) => a - b)
     .map(([ln, classes]) => new ChangeSign(classes.join(" ")).range(doc.line(ln).from));
-  return { deco: Decoration.set(deco, true), signs: RangeSet.of(signRanges), blocks };
+  return { deco: Decoration.set(deco, true), signs: RangeSet.of(signRanges), blocks, revealed };
 }
 
 const diffMarksField = StateField.define<Marks>({
   create: () => EMPTY_MARKS,
   update(marks, tr) {
     for (const effect of tr.effects) {
-      if (effect.is(setDiffMarks)) return buildMarks(tr.state.doc, effect.value);
+      if (effect.is(setDiffMarks)) return buildMarks(tr.state.doc, effect.value, null);
+      if (effect.is(revealBlock)) return buildMarks(tr.state.doc, marks.blocks, effect.value);
     }
     if (!tr.docChanged) return marks;
     return { ...marks, deco: marks.deco.map(tr.changes), signs: marks.signs.map(tr.changes) };
@@ -187,6 +206,17 @@ const REMOVED_SIGN = new ChangeSign("cm-diff-sign-removed-lines");
 /** The change blocks marked in a viewer, as last set. */
 export function markedBlocks(state: EditorState): readonly ShownBlock[] {
   return state.field(diffMarksField, false)?.blocks ?? [];
+}
+
+/** The removed lines drawn in `view` — only `block`'s, when given — top to bottom. */
+export function removedLineElements(view: EditorView, block?: string): HTMLElement[] {
+  const out: HTMLElement[] = [];
+  for (const root of view.contentDOM.querySelectorAll<HTMLElement>(".cm-diff-removed")) {
+    if (block === undefined || root.dataset.block === block) {
+      out.push(...(Array.from(root.children) as HTMLElement[]));
+    }
+  }
+  return out;
 }
 
 /** The project viewer's change marks: add `diffMarks`, then dispatch `setDiffMarks`. */

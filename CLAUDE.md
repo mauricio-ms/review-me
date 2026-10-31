@@ -476,6 +476,16 @@ in-order words, `!` negation, smart case, Emacs regexp syntax (`(` literal, `\(`
 with a literal fallback. The selection is held as a *line*, so narrowing keeps it or moves
 on to the next match (`nearestHit`).
 
+A file's search also reads the lines the comparison's changes **took out** — shown or not —
+each just above where it went, labelled with its old number and `−` (`searchedLines`, from
+`markedBlocks`). Landing on one whose block hides them reveals that block's diff in that
+view only (`diff-marks.ts`'s `revealBlock`, which lasts until the marks are next set), and
+moving on closes it again, as the diff's search does folds; `RET` keeps it open through
+`flipChanges` (`M-x hunk`'s state), `C-g` closes it. The widget's lines aren't the document,
+so the cursor goes to the line below them, a frame later `scrollToRemoved` brings the line
+itself on screen, and their matches light through `markMatches`' CSS highlights (re-applied
+after every update, since a redrawn widget loses them).
+
 The diff buffer and the log have `C-s` too (`lib/swiper-list.ts`'s `swipeList`; each
 registers its starter with `setListSwiper`, which `M-x swiper`'s `swiperHere` dispatches
 to). The diff searches `buildRows` with **everything unfolded** — so folded files, hunks

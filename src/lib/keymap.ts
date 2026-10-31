@@ -247,7 +247,7 @@ const VIEWER_KEYS = [
     keys: ["C-s"],
     action: "swiper",
     command: "swiper",
-    doc: "search the file (Swiper): the lines that match as you type, the file following",
+    doc: "search the file and its removed lines (Swiper), the file following",
   },
   { keys: ["C-<mouse-1>"], label: "C-click", external: true, doc: "go to definition" },
   {

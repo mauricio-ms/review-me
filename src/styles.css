@@ -2257,7 +2257,8 @@ kbd {
   text-overflow: ellipsis;
 }
 
-/* The diff's and the log's matches on screen (lib/swiper-list.ts), as the viewer's. */
+/* The diff's and the log's matches on screen (lib/swiper-list.ts), and the viewer's
+   removed lines', as the viewer's own. */
 ::highlight(swiper-match) {
   background-color: var(--bg-4);
 }

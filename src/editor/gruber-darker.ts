@@ -83,7 +83,7 @@ const gruberDarkerEditorTheme = EditorView.theme(
       boxShadow: `inset 0 -1px ${c.niagara1}`,
     },
     // Swiper: every match in view, the selected line, and the matches on it.
-    ".cm-line.cm-swiper-line": {
+    ".cm-line.cm-swiper-line, .cm-diff-removed-line.cm-swiper-line": {
       backgroundColor: c.bg2,
     },
     ".cm-swiper-match": {
