@@ -3,8 +3,10 @@ export type SymbolKind =
   | "interface"
   | "enum"
   | "method"
+  | "function"
   | "field"
   | "type"
+  | "module"
   | "identifier";
 
 export interface SymbolRef {

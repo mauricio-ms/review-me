@@ -49,8 +49,8 @@ React component → src/lib/*.ts action → invoke() wrapper in src/lib/tauri.ts
 **Backend (`src-tauri/src/`)** — small feature modules; `commands.rs` is a thin wrapper
 layer and `lib.rs` is the module list + `invoke_handler!`. Each command is **stateless**:
 it receives `repo` (the repo root path), opens the repo fresh via `repo::open` (cheap
-with libgit2), and returns. The one exception is `xref.rs`, which caches a parsed
-symbol index in a global `Mutex`.
+with libgit2), and returns. The one exception is `xref/`, which caches a parsed
+symbol index per language in a global `Mutex`.
 - `repo.rs` open/validate, `RepoInfo` (incl. `review_branch_ref`, the branch the UI starts reviewing). `branches.rs` local/remote ref discovery + `resolve()` → (base tip, target tip, merge base).
 - `commits.rs` `list(repo, ref, skip, limit)` → a newest-first page of `CommitInfo`s, each with its ref `Decoration`s (filled by `list` only), and `resolve(repo, rev)` → (oid, **first** parent oid, info, full message). Any revision resolves (full oid, abbreviation, `HEAD~2`), but only full oids may reach a `DiffSpec`/`ReviewScope`.
 - `diff.rs` `compute(repo, &DiffSpec)` → `DiffSummary { comparison, files }` (`ChangedFile`/`Hunk`/`DiffLine`). See "Comparisons" below.
@@ -63,7 +63,9 @@ symbol index in a global `Mutex`.
   `*.min.js`, `*.snap`, `__generated__/`…), then a header that says so. Only a label — the
   diff row says `generated`, and `M-x ignore-generated` ignores the ones still open.
 - `notes.rs` the Markdown export of review notes (see "Notes" below). `review_dir.rs` owns `.review-me/`: every write goes through `ensure`, which also adds it to `.git/info/exclude`.
-- `queries.rs` + `xref.rs` tree-sitter symbol index and find-definition/references.
+- `xref/` cross-references: `mod.rs` holds the shared contract and dispatches by extension
+  (`xref_extensions` tells the viewer which) to `java.rs` (with `queries.rs`) and `js/`
+  (JavaScript, TypeScript, single-file components).
 - `window.rs` builds the main window in `setup` (`tauri.conf.json` has it `"create": false`) so decorations can follow the desktop: off on tiling compositors, on elsewhere, `REVIEW_ME_DECORATIONS` overrides.
 
 **Frontend (`src/`)** — Emacs's model: a **frame** (`AppShell`'s `Frame`) holds the
@@ -518,7 +520,7 @@ not on it being replaced.
 
 ### Cross-references
 
-`xref.rs` parses every `.java` file once into a cached index, keyed by
+`xref/java.rs` parses every `.java` file once into a cached index, keyed by
 `(root, ProjectSource)` so a branch index never mixes in the checkout's version of a
 file. The index stores syntax and *declarations* — each file's `package`/`import`s,
 each type's members, supertype names, method arity, and declared types — but never
@@ -561,6 +563,45 @@ makes navigation lie:
 So **the picker only appears when resolution genuinely couldn't decide** — never for a
 symbol we know isn't ours.
 
+#### JavaScript and TypeScript
+
+`xref/js/` reads `.ts`/`.tsx`/`.mts`/`.cts`/`.d.ts`/`.js`/`.jsx`/`.mjs`/`.cjs` (and, through
+`sfc.rs`, `.vue`/`.svelte`/`.astro`) and keeps Java's contract, but its index is **lazy**:
+building it reads every file's text and the project's config, and a file is parsed only
+when a query needs it (a `OnceCell` per file) — the import chain a definition follows, the
+files find-references' plain-text prefilter keeps — so a monorepo costs what a query
+touches. Columns are UTF-16 both ways.
+
+Imports resolve the way the project's own tooling resolves them, from the revision under
+review — never `node_modules`, which a revision that isn't checked out doesn't have.
+`project.rs`: relative paths probed as TypeScript does (`./x.js` → `x.ts`, extensions,
+`index.*`, a folder's `package.json`); the configs that include the file, nearest first
+(`tsconfig`/`jsconfig` `paths`, `baseUrl`, `extends` chains, solution-style roots; JSONC via
+`jsonc.rs`); `package.json` `imports` (`#x`); workspace packages by `name`, through
+`exports` or their entry fields, with `dist/…` read back as `src/…` since builds aren't
+committed. `config.rs` adds aliases from bundler and framework config, read **without
+running it** — `alias` objects and arrays (Vite, webpack, Rollup, Nuxt, Astro, Babel),
+`alias.set(..)`, Jest's `moduleNameMapper`, SvelteKit's `kit.alias` — evaluating only
+literal paths and the usual spellings (`path.resolve(__dirname, 'src')`,
+`fileURLToPath(new URL('./src', import.meta.url))`); plus what frameworks add unsaid:
+SvelteKit's `$lib`, Nuxt's `~`/`@`/`~~`/`@@` (`app/` in Nuxt 4), Vue CLI's `@`, Quasar's
+folders. A bare specifier that's a declared dependency, a Node builtin, a virtual module
+(`virtual:`, `$app/`, `astro:`) or merely package-shaped is **External**; one we couldn't map
+(`@/x` with no alias found) is **Unresolved**, never External.
+
+`resolve.rs`: a name resolves through local scopes (`scope.rs`, TypeScript's type and value
+spaces kept apart), the module's top level — an import follows the export through
+re-exports, `export *` and CommonJS (`require`, `module.exports`) — then the project's
+globals (`declare global`, a script's top level, an auto-import's `typeof import('x')['y']`)
+and the runtime's (`builtins.rs`, External). A member types its receiver from declarations
+only — annotations, `new`, declared return types, object literals, `this` in a class,
+constructor parameter properties, `this.x =` in plain JS — and walks `extends`; a miss on a
+fully visible TypeScript declaration is External, anything else Unresolved. In JSX `<div>` is
+External, `<Foo>` resolves as a name, and an attribute resolves to the component's
+destructured prop or props member. A module specifier resolves to its file
+(`Target::File`), so find-references on a module lists its imports; references also follow
+an import that renames the symbol (`{ x as y }`, a default import).
+
 `find_references` name-matches first (the cheap prefilter) and resolves only the
 survivors. An occurrence proved to be a *different* symbol is **dropped**; one that
 can't be proved either way comes back with `confirmed: false` and is shown in a
@@ -577,7 +618,7 @@ jumps to definition; it and `M-.` both route through `xref.ts`'s
 open/refresh (`applyComparison`).
 
 The viewer marks **the other occurrences of the symbol under the cursor** once it rests
-there (`editor/occurrences.ts`). In Java the index answers (`xref::occurrences`:
+there (`editor/occurrences.ts`). Where a resolver reads the language the index answers (`xref::occurrences`:
 find-references' drop rule over one file, so a field and a same-named local stay
 apart); it never waits for the index lock, and says `None` when the index isn't built
 for that revision. Elsewhere — or when the index can't say, or read the file before it
@@ -604,8 +645,8 @@ clears the history whenever the comparison (or its revision) changes.
 - **New backend command:** add logic to a feature module, a thin `#[tauri::command]` in
   `commands.rs`, register it in `lib.rs`'s `invoke_handler!`, and add an `invoke<T>`
   wrapper in `src/lib/tauri.ts` (+ a TS type mirroring the Rust struct).
-- **New tree-sitter language:** add a `queries::<lang>` module and register its parser +
-  extension dispatch in `xref.rs`. The capture-name → `SymbolKind` map is the contract.
+- **New tree-sitter language:** add a resolver module under `xref/` and its extensions to
+  `xref/mod.rs`'s `Lang` dispatch (and `indexed_extensions`). The capture-name → `SymbolKind` map is the contract.
 - **Anything that reads repo content:** take a `ProjectSource` (project/browse reads) or a
   `ReviewScope` (tag reads) rather than assuming the working tree — that assumption is
   exactly what branch comparison broke.

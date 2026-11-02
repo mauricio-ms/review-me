@@ -9,6 +9,7 @@
 //! navigation lie.
 
 mod java;
+mod js;
 
 use std::path::Path;
 
@@ -25,8 +26,10 @@ pub enum SymbolKind {
     Interface,
     Enum,
     Method,
+    Function,
     Field,
     Type,
+    Module,
     Identifier,
 }
 
@@ -99,25 +102,26 @@ pub(crate) static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Lang {
     Java,
+    Js,
 }
 
 impl Lang {
     fn of(rel: &str) -> Option<Lang> {
         let ext = rel.rsplit_once('.').map(|(_, ext)| ext)?;
-        EXTENSIONS
-            .iter()
-            .find(|(e, _)| *e == ext)
-            .map(|&(_, lang)| lang)
+        if ext == "java" {
+            Some(Lang::Java)
+        } else if js::EXTENSIONS.contains(&ext) {
+            Some(Lang::Js)
+        } else {
+            None
+        }
     }
 }
-
-/// Every file extension some resolver reads, and which.
-const EXTENSIONS: &[(&str, Lang)] = &[("java", Lang::Java)];
 
 /// The extensions cross-references answer for — what the viewer asks the index about
 /// rather than matching by name.
 pub fn indexed_extensions() -> Vec<&'static str> {
-    EXTENSIONS.iter().map(|&(ext, _)| ext).collect()
+    std::iter::once("java").chain(js::EXTENSIONS.iter().copied()).collect()
 }
 
 /// (Re)build every language's index for `root` at `source` over the given repo-relative
@@ -129,7 +133,12 @@ pub fn build_index(
     source: &ProjectSource,
     rel_files: &[String],
 ) -> AppResult<IndexStats> {
-    java::build_index(repo, root, source, rel_files)
+    let java = java::build_index(repo, root, source, rel_files)?;
+    let js = js::build_index(repo, root, source, rel_files)?;
+    Ok(IndexStats {
+        files: java.files + js.files,
+        symbols: java.symbols + js.symbols,
+    })
 }
 
 /// The identifier under `(line, col)` in `rel`, parsed fresh from `source`.
@@ -143,6 +152,7 @@ pub fn symbol_at(
 ) -> AppResult<Option<SymbolRef>> {
     match Lang::of(rel) {
         Some(Lang::Java) => java::symbol_at(repo, root, source, rel, line, col),
+        Some(Lang::Js) => js::symbol_at(repo, root, source, rel, line, col),
         None => Ok(None),
     }
 }
@@ -156,6 +166,7 @@ pub fn find_definition(
 ) -> AppResult<Vec<XrefResult>> {
     match Lang::of(&symbol.file) {
         Some(Lang::Java) => java::find_definition(repo, root, source, rel_files, symbol),
+        Some(Lang::Js) => js::find_definition(repo, root, source, rel_files, symbol),
         None => Ok(Vec::new()),
     }
 }
@@ -169,6 +180,7 @@ pub fn find_references(
 ) -> AppResult<Vec<XrefResult>> {
     match Lang::of(&symbol.file) {
         Some(Lang::Java) => java::find_references(repo, root, source, rel_files, symbol),
+        Some(Lang::Js) => js::find_references(repo, root, source, rel_files, symbol),
         None => Ok(Vec::new()),
     }
 }
@@ -186,6 +198,7 @@ pub fn occurrences(
 ) -> AppResult<Option<Occurrences>> {
     match Lang::of(rel) {
         Some(Lang::Java) => java::occurrences(root, source, rel, line, col),
+        Some(Lang::Js) => js::occurrences(root, source, rel, line, col),
         None => Ok(None),
     }
 }
