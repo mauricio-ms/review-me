@@ -311,7 +311,7 @@ fn audit_names_from_env() {
                 Resolution::Ambiguous(_) => "ambiguous",
                 Resolution::External => "external",
                 Resolution::Unresolved => {
-                    if samples.len() < 60 && fi % 7 == 0 {
+                    if samples.len() < 60 && fi % std::env::var("REVIEW_ME_AUDIT_EVERY").ok().and_then(|v| v.parse().ok()).unwrap_or(7) == 0 {
                         let (line, _) = position(&index.files[fi].source, n.start_byte());
                         samples.push(format!("{}:{} [{}] {} | {}", index.files[fi].rel, line, ctx, text(n, code), line_text(&index.files[fi].source, line as usize - 1)));
                     }
@@ -367,4 +367,91 @@ fn store_selectors_read_the_store_state() {
     assert_eq!(f.def_nth("src/view.tsx", "picker);", 0, 0), s(&["src/store.ts:3"]));
     assert_eq!(f.def_nth("src/view.tsx", "open('x')", 0, 0), s(&["src/store.ts:4"]));
     assert!(f.def_nth("src/view.tsx", "key}", 0, 0).is_empty(), "a DOM event's member is the runtime's");
+}
+
+#[test]
+fn vue_components_resolve_their_templates() {
+    let f = fixture(&[
+        ("package.json", r#"{ "dependencies": { "vue": "3" } }"#),
+        ("src/components/TodoItem.vue", "<template><li>{{ todo.title }}</li></template>\n<script setup lang=\"ts\">\nimport type { Todo } from '../types'\nconst props = defineProps<{ todo: Todo; done?: boolean }>()\n</script>\n"),
+        ("src/types.ts", "export interface Todo {\n  id: number;\n  title: string;\n}\n"),
+        (
+            "src/App.vue",
+            "<template>\n  <ul>\n    <todo-item v-for=\"t in todos\" :key=\"t.id\" :todo=\"t\" @click=\"remove(t)\" />\n  </ul>\n  <p>{{ count }} {{ todos.length }}</p>\n</template>\n\n<script setup lang=\"ts\">\nimport { ref } from 'vue'\nimport TodoItem from './components/TodoItem.vue'\nimport type { Todo } from './types'\nconst todos = ref<Todo[]>([])\nconst count = ref(0)\nfunction remove(t: Todo) {}\n</script>\n",
+        ),
+        (
+            "src/Legacy.vue",
+            "<template><div @click=\"bump\">{{ total }} {{ label }}</div></template>\n<script>\nexport default {\n  props: ['label'],\n  data() {\n    return { total: 0 }\n  },\n  methods: {\n    bump() { this.total++ }\n  },\n}\n</script>\n",
+        ),
+    ]);
+    assert_eq!(f.def("src/App.vue", "todo-item"), s(&["src/components/TodoItem.vue:1"]), "a kebab-case tag");
+    assert_eq!(f.def("src/App.vue", "todos\" :key"), s(&["src/App.vue:12"]), "into the script");
+    assert_eq!(f.def_nth("src/App.vue", "t.id", 0, 2), s(&["src/types.ts:2"]), "a v-for alias's member");
+    assert_eq!(f.def_nth("src/App.vue", "t)", 0, 0), s(&["src/App.vue:3"]), "the v-for alias");
+    assert_eq!(f.def("src/App.vue", "remove(t)"), s(&["src/App.vue:14"]));
+    assert_eq!(f.def("src/App.vue", "count }}"), s(&["src/App.vue:13"]));
+    assert_eq!(f.def_nth("src/components/TodoItem.vue", "todo.title", 0, 0), s(&["src/components/TodoItem.vue:4"]), "a prop");
+    assert_eq!(f.def_nth("src/components/TodoItem.vue", "title }}", 0, 0), s(&["src/types.ts:3"]), "a prop's member");
+    assert_eq!(f.def("src/Legacy.vue", "bump\""), s(&["src/Legacy.vue:9"]), "options API: methods");
+    assert_eq!(f.def("src/Legacy.vue", "total }}"), s(&["src/Legacy.vue:6"]), "options API: data");
+    assert_eq!(f.def("src/Legacy.vue", "label }}"), s(&["src/Legacy.vue:4"]), "options API: props");
+
+    // The component's uses: its import (the name and the path) and its kebab-case tag.
+    let (confirmed, _) = f.refs("src/App.vue", "TodoItem from", 0);
+    assert_eq!(confirmed, s(&["src/App.vue:10", "src/App.vue:10", "src/App.vue:3"]));
+}
+
+#[test]
+fn svelte_and_astro_components() {
+    let f = fixture(&[
+        ("src/lib/stores.ts", "import { writable } from 'svelte/store';\nexport const count = writable(0);\n"),
+        ("src/lib/Row.svelte", "<script lang=\"ts\">\n  export let item: { name: string };\n</script>\n<li>{item.name}</li>\n"),
+        (
+            "src/routes/+page.svelte",
+            "<script lang=\"ts\">\n  import Row from '$lib/Row.svelte';\n  import { count } from '$lib/stores';\n  let items = [{ name: 'a' }];\n</script>\n\n{#each items as item}\n  <Row {item} />\n{/each}\n<p>{$count}</p>\n",
+        ),
+        ("svelte.config.js", "export default { kit: {} };\n"),
+        ("src/components/Card.astro", "---\nconst { title } = Astro.props;\n---\n<h2>{title}</h2>\n"),
+        ("src/pages/index.astro", "---\nimport Card from '../components/Card.astro';\nconst posts = [{ title: 'x' }];\n---\n<main>\n  {posts.map((p) => <Card title={p.title} />)}\n  <Card title=\"y\" />\n</main>\n"),
+    ]);
+    assert_eq!(f.def("src/routes/+page.svelte", "Row {item}"), s(&["src/lib/Row.svelte:1"]));
+    assert_eq!(f.def_nth("src/routes/+page.svelte", "item} />", 0, 0), s(&["src/routes/+page.svelte:7"]), "the each binding");
+    assert_eq!(f.def("src/routes/+page.svelte", "$count"), s(&["src/lib/stores.ts:2"]), "a store subscription");
+    assert_eq!(f.def_nth("src/pages/index.astro", "Card title=\"y\"", 0, 0), s(&["src/components/Card.astro:1"]), "a tag");
+    assert_eq!(f.def_nth("src/pages/index.astro", "Card title={", 0, 0), s(&["src/components/Card.astro:1"]), "JSX in an expression");
+    assert_eq!(f.def_nth("src/pages/index.astro", "posts.map", 0, 0), s(&["src/pages/index.astro:3"]));
+}
+
+#[test]
+fn nuxt_conventions() {
+    let f = fixture(&[
+        ("package.json", r#"{ "devDependencies": { "nuxt": "4" } }"#),
+        ("nuxt.config.ts", "export default defineNuxtConfig({})\n"),
+        ("app/app.vue", "<template><NuxtLayout><BaseButton /><LazyAppHeader /></NuxtLayout></template>\n"),
+        ("app/components/base/BaseButton.vue", "<template><button /></template>\n"),
+        ("app/components/AppHeader.vue", "<template><header>{{ user.name }}</header></template>\n<script setup lang=\"ts\">\nconst user = useUser()\nconst route = useRoute()\n</script>\n"),
+        ("app/composables/useUser.ts", "export function useUser() {\n  return { name: 'x' }\n}\n"),
+        ("app/pages/index.vue", "<script setup lang=\"ts\">\nimport { useUser } from '#imports'\nimport { BaseButton } from '#components'\nconst u = useUser()\n</script>\n"),
+    ]);
+    assert_eq!(f.def("app/app.vue", "BaseButton"), s(&["app/components/base/BaseButton.vue:1"]));
+    assert_eq!(f.def("app/app.vue", "LazyAppHeader"), s(&["app/components/AppHeader.vue:1"]));
+    assert!(f.def("app/app.vue", "NuxtLayout").is_empty(), "Nuxt's own");
+    assert_eq!(f.def("app/components/AppHeader.vue", "useUser()"), s(&["app/composables/useUser.ts:1"]), "auto-imported");
+    assert!(f.def("app/components/AppHeader.vue", "useRoute()").is_empty(), "Vue Router's");
+    assert_eq!(f.def_nth("app/components/AppHeader.vue", "name }}", 0, 0), s(&["app/composables/useUser.ts:2"]));
+    assert_eq!(f.def("app/pages/index.vue", "useUser()"), s(&["app/composables/useUser.ts:1"]), "#imports");
+    assert_eq!(f.def("app/pages/index.vue", "BaseButton }"), s(&["app/components/base/BaseButton.vue:1"]), "#components");
+}
+
+#[test]
+fn globally_registered_components() {
+    let f = fixture(&[
+        ("components.d.ts", "export {}\ndeclare module 'vue' {\n  export interface GlobalComponents {\n    AppIcon: typeof import('./src/components/AppIcon.vue')['default']\n  }\n}\n"),
+        ("src/components/AppIcon.vue", "<template><i /></template>\n"),
+        ("src/components/Panel.vue", "<template><section /></template>\n"),
+        ("src/main.ts", "import { createApp } from 'vue';\nimport Panel from './components/Panel.vue';\ncreateApp({}).component('Panel', Panel);\n"),
+        ("src/Page.vue", "<template><AppIcon /><Panel /></template>\n"),
+    ]);
+    assert_eq!(f.def("src/Page.vue", "AppIcon"), s(&["src/components/AppIcon.vue:1"]));
+    assert_eq!(f.def("src/Page.vue", "Panel"), s(&["src/components/Panel.vue:1"]));
 }

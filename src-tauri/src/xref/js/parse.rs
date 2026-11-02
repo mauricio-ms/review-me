@@ -112,7 +112,9 @@ pub fn parse(rel: &str, source: &str) -> Option<Parsed> {
     let (grammar, code, template) = match script_grammar(rel) {
         Some(g) => (g, None, Template::default()),
         None => {
-            let doc = sfc::virtual_doc(rel, source)?;
+            // The markup scanner reads whatever a template holds; a file it trips on goes
+            // unindexed rather than taking the query down with it.
+            let doc = std::panic::catch_unwind(|| sfc::virtual_doc(rel, source)).ok().flatten()?;
             (doc.grammar, Some(doc.code), doc.template)
         }
     };
@@ -120,7 +122,7 @@ pub fn parse(rel: &str, source: &str) -> Option<Parsed> {
     parser.set_language(&grammar.language()).ok()?;
     let text = code.as_deref().unwrap_or(source);
     let tree = parser.parse(text, None)?;
-    let module = module_info(tree.root_node(), text, rel.ends_with(".d.ts"));
+    let module = module_info(tree.root_node(), text, rel.ends_with(".d.ts"), code.is_some());
     Some(Parsed {
         typed: grammar != Grammar::Js,
         code,
@@ -232,9 +234,10 @@ pub fn required<'t>(call: Node<'t>, code: &str) -> Option<Node<'t>> {
     (first.kind() == "string").then_some(first)
 }
 
-/// The top-level facts of a parsed file.
-pub fn module_info(root: Node, code: &str, declaration_file: bool) -> ModuleInfo {
-    let mut m = ModuleInfo::default();
+/// The top-level facts of a parsed file. A `component`'s top level is its own, never
+/// global, imports or not.
+pub fn module_info(root: Node, code: &str, declaration_file: bool, component: bool) -> ModuleInfo {
+    let mut m = ModuleInfo { is_module: component, ..ModuleInfo::default() };
     let mut cur = root.walk();
     for stmt in root.named_children(&mut cur) {
         match stmt.kind() {

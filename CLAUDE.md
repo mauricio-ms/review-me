@@ -610,6 +610,25 @@ destructured prop or props member. A module specifier resolves to its file
 (`Target::File`), so find-references on a module lists its imports; references also follow
 an import that renames the symbol (`{ x as y }`, a default import).
 
+Single-file components are one program each (`sfc.rs`): the scripts (Astro's frontmatter
+too) copied verbatim and every template expression copied **in place** as a statement of
+its own (`;expr;`, parenthesized when it starts like a block), everything else blanked — so
+the virtual code is byte-for-byte as long as the file and every tree position is a file
+position. What the program can't say goes in side tables (`Template`): the names a template
+binds and where they're visible (`v-for`, slot props, `{#each}`, `{#await}`, `{@const}`,
+`let:`), and component tags (`<my-button>` → `MyButton`, `Located::Tag`). The scanner steps
+whole characters, and a file it trips on is left unindexed (`catch_unwind`), never fatal.
+`templates.rs` adds what templates and conventions reach: a tag resolves through the
+script, then globally registered components (a `GlobalComponents` declaration such as
+unplugin's `components.d.ts`, `app.component('Name', X)`), then Nuxt's `components/` names
+(`base/Button.vue` → `BaseButton`, `Lazy…`), then the framework's own (External); a Vue
+template name sees `defineProps` and the Options API (`props`, `data`, `computed`, `methods`,
+`inject`, `setup`'s return) and reads refs unwrapped; Svelte's `$store` reads `store`; a
+Nuxt app's undeclared names come from `composables/`, `utils/`, `shared/` (and
+`server/utils` on the server), as do `#imports` and `#components`; Vue's and Nuxt's
+auto-imported API is External. A function with no declared return type that returns one
+expression has that expression's type — a composable's `return { user }`.
+
 **`M-x xref-audit`** (`js::audit`) resolves every import, re-export, `require` and `import()`
 of the revision and lists the ones nothing accounts for, grouped by how they start (`@/…`,
 `./…`, a package) — how to see why navigation falls back to names in a project whose setup

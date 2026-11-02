@@ -106,6 +106,7 @@ fn conventions(project: &mut Project, rel: &str, stem: &str, code: &str, out: &m
                     if nuxt4 { app } else { dir.to_string() }
                 }
             };
+            project.add_nuxt(dir, &src);
             for find in ["~", "@"] {
                 out.push(alias(find, src.clone()));
             }

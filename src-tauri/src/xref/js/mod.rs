@@ -17,6 +17,7 @@ mod project;
 mod resolve;
 mod scope;
 mod sfc;
+mod templates;
 
 use std::cell::{OnceCell, RefCell};
 use std::collections::HashMap;
@@ -60,6 +61,8 @@ pub struct JsIndex {
     project: Project,
     /// Global declarations by name, found as names are asked about.
     globals: RefCell<HashMap<String, Vec<Target>>>,
+    /// Nuxt's components by name, by the folder they're registered from.
+    components: RefCell<HashMap<String, HashMap<String, String>>>,
 }
 
 // One cached index, rebuilt when the root or revision changes, or on request.
@@ -121,6 +124,7 @@ impl JsIndex {
             file_index,
             project,
             globals: RefCell::new(HashMap::new()),
+            components: RefCell::new(HashMap::new()),
         })
     }
 

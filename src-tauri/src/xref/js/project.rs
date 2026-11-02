@@ -98,6 +98,8 @@ pub struct Project {
     /// Module prefixes a framework makes up at build time (Nuxt's `#app`), by the folder
     /// whose files see them.
     virtual_modules: Vec<(String, String)>,
+    /// Nuxt apps: their root and the folder their app code is in (`srcDir`).
+    nuxt: Vec<(String, String)>,
     /// Folder → the configs that may apply to its files, best first.
     configs_by_dir: RefCell<HashMap<String, Vec<usize>>>,
 }
@@ -160,6 +162,7 @@ impl Project {
             configs: Vec::new(),
             aliases: Vec::new(),
             virtual_modules: Vec::new(),
+            nuxt: Vec::new(),
             configs_by_dir: RefCell::new(HashMap::new()),
         };
         let mut configs = Vec::new();
@@ -189,6 +192,29 @@ impl Project {
     /// Specifiers starting `prefix` are a framework's own modules for files under `scope`.
     pub fn add_virtual(&mut self, scope: &str, prefix: &str) {
         self.virtual_modules.push((scope.to_string(), prefix.to_string()));
+    }
+
+    pub fn add_nuxt(&mut self, root: &str, src: &str) {
+        self.nuxt.push((root.to_string(), src.to_string()));
+    }
+
+    /// The Nuxt app `rel` belongs to: its root and `srcDir`.
+    pub fn nuxt_for(&self, rel: &str) -> Option<(&str, &str)> {
+        self.nuxt
+            .iter()
+            .filter(|(root, _)| within(rel, root))
+            .max_by_key(|(root, _)| root.len())
+            .map(|(r, s)| (r.as_str(), s.as_str()))
+    }
+
+    /// Whether some `package.json` depends on `name`.
+    pub fn has_dependency(&self, name: &str) -> bool {
+        self.deps.contains(name)
+    }
+
+    /// Every file under the folder `dir`.
+    pub fn files_under<'s>(&'s self, dir: &'s str) -> impl Iterator<Item = &'s String> + 's {
+        self.files.iter().filter(move |f| within(f, dir))
     }
 
     /// The package named `name` nearest `from`: the one sharing most of its path, as a

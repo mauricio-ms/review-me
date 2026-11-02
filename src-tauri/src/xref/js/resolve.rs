@@ -56,7 +56,7 @@ pub enum Module {
 
 /// The type of an expression, as far as declarations say.
 #[derive(Clone)]
-enum Ty<'a> {
+pub(super) enum Ty<'a> {
     /// A class: its instances' members, or (`instance: false`) its static ones.
     Class { file: usize, decl: Node<'a>, instance: bool },
     /// Members by declaration: an interface, an object type or literal, an enum, a
@@ -81,7 +81,7 @@ enum Ty<'a> {
     Unknown,
 }
 
-enum Member {
+pub(super) enum Member {
     Hits(Vec<Target>),
     External,
     /// Not there: provably (`complete`), or not as far as we can see.
@@ -238,7 +238,7 @@ impl JsIndex {
     }
 
     /// A name at the top of `file`: an import, or a declaration in `space`.
-    fn resolve_top(&self, file: usize, name: &str, space: Space, depth: usize) -> Option<Resolution> {
+    pub(super) fn resolve_top(&self, file: usize, name: &str, space: Space, depth: usize) -> Option<Resolution> {
         let m = &self.parsed(file)?.module;
         if let Some(imp) = m.imports.get(name) {
             return Some(self.resolve_import(file, imp, depth + 1));
@@ -268,6 +268,9 @@ impl JsIndex {
     pub fn resolve_import(&self, file: usize, imp: &Import, depth: usize) -> Resolution {
         if depth > MAX_DEPTH {
             return Resolution::Unresolved;
+        }
+        if let Some(found) = self.virtual_import(file, imp, depth) {
+            return found;
         }
         match self.module(file, &imp.spec) {
             Module::Indexed(fi) => match &imp.kind {
@@ -438,7 +441,7 @@ impl JsIndex {
 
     /// Whether a miss on `ty` is proof: its declarations are TypeScript, closed to
     /// members added on the fly.
-    fn typed(&self, ty: &Ty) -> bool {
+    pub(super) fn typed(&self, ty: &Ty) -> bool {
         match ty {
             Ty::Class { file, .. } => self.parsed(*file).is_some_and(|p| p.typed),
             Ty::Shape { file, node } => {
@@ -523,27 +526,11 @@ impl JsIndex {
         }
     }
 
-    /// A name a template uses that the component's script doesn't declare — Angular's
-    /// component members, Vue's options (`templates.rs` fills this in).
-    fn resolve_template_name(&self, _file: usize, _node: Node, _name: &str, _depth: usize) -> Option<Resolution> {
-        None
-    }
-
-    /// A name a framework provides by convention: Nuxt's auto-imports.
-    fn resolve_convention(&self, _file: usize, _name: &str, _depth: usize) -> Option<Resolution> {
-        None
-    }
-
-    /// A component tag in a template.
-    pub fn resolve_tag(&self, _file: usize, _tag: &super::sfc::Tag, _depth: usize) -> Resolution {
-        Resolution::Unresolved
-    }
-
     // -----------------------------------------------------------------------------
     // Types
     // -----------------------------------------------------------------------------
 
-    fn expr_type<'a>(&'a self, file: usize, node: Node<'a>, depth: usize) -> Ty<'a> {
+    pub(super) fn expr_type<'a>(&'a self, file: usize, node: Node<'a>, depth: usize) -> Ty<'a> {
         if depth > MAX_DEPTH {
             return Ty::Unknown;
         }
@@ -555,7 +542,14 @@ impl JsIndex {
                 let in_type = node.parent().is_some_and(|p| p.kind() == "nested_type_identifier");
                 let space = if in_type { Space::Type } else { Space::Value };
                 match self.resolve_name(file, node, text(node, code), space, depth + 1) {
-                    Resolution::Found(t) => self.target_type(&t, depth + 1),
+                    Resolution::Found(t) => {
+                        let ty = self.target_type(&t, depth + 1);
+                        // A Vue template reads refs unwrapped: `count`, not `count.value`.
+                        match ty {
+                            Ty::Boxed { key: "value", inner } if self.in_vue_template(file, node.start_byte()) => *inner,
+                            ty => ty,
+                        }
+                    }
                     Resolution::External => Ty::External,
                     _ => Ty::Unknown,
                 }
@@ -813,12 +807,17 @@ impl JsIndex {
         };
         match func.child_by_field_name("return_type") {
             Some(r) => self.type_of(*file, r, depth + 1),
-            None => Ty::Unknown,
+            // Undeclared: what its one `return` (or its expression body) gives back — a
+            // composable's `return { user, login }`.
+            None => match returned_expression(func) {
+                Some(e) => self.expr_type(*file, e, depth + 1),
+                None => Ty::Unknown,
+            },
         }
     }
 
     /// The type a type annotation names.
-    fn type_of<'a>(&'a self, file: usize, ty: Node<'a>, depth: usize) -> Ty<'a> {
+    pub(super) fn type_of<'a>(&'a self, file: usize, ty: Node<'a>, depth: usize) -> Ty<'a> {
         if depth > MAX_DEPTH {
             return Ty::Unknown;
         }
@@ -1144,7 +1143,7 @@ impl JsIndex {
     // Members
     // -----------------------------------------------------------------------------
 
-    fn lookup_member(&self, ty: &Ty, name: &str, depth: usize) -> Member {
+    pub(super) fn lookup_member(&self, ty: &Ty, name: &str, depth: usize) -> Member {
         if depth > MAX_DEPTH {
             return Member::Missing { complete: false };
         }
@@ -1487,6 +1486,34 @@ fn component_function_value(value: Node) -> Option<Node> {
         }
         _ => None,
     }
+}
+
+/// What a function without a declared return type returns, when that's one expression:
+/// an arrow's expression body, or the argument of the body's only `return`.
+fn returned_expression(func: Node) -> Option<Node> {
+    let body = func.child_by_field_name("body")?;
+    if body.kind() != "statement_block" {
+        return Some(body);
+    }
+    let mut found = None;
+    let mut stack = vec![body];
+    let mut cursor = body.walk();
+    while let Some(n) = stack.pop() {
+        for c in n.named_children(&mut cursor) {
+            if scope::is_function(c.kind()) || is_class(c.kind()) {
+                continue;
+            }
+            if c.kind() == "return_statement" {
+                if found.is_some() {
+                    return None;
+                }
+                found = Some(c.named_child(0)?);
+            } else {
+                stack.push(c);
+            }
+        }
+    }
+    found
 }
 
 /// An element of an array or tuple: the `index`-th, or any.
