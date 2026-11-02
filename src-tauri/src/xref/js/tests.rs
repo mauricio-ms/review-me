@@ -336,6 +336,38 @@ fn audit_names_from_env() {
     for s in &samples {
         eprintln!("  {s}");
     }
+    // Stylesheets: every token that isn't a definition.
+    let mut styles: HashMap<String, [u32; 4]> = HashMap::new();
+    let mut style_samples = Vec::new();
+    let mut sheets: Vec<&String> = index.sheets.keys().collect();
+    sheets.sort();
+    for rel in sheets {
+        let text = index.sheet_text(rel).unwrap();
+        for t in &index.sheets[rel].tokens(text).tokens {
+            if t.def {
+                continue;
+            }
+            let slot = match index.resolve_style(rel, t, 0) {
+                Resolution::Found(_) => 0,
+                Resolution::Ambiguous(_) => 1,
+                Resolution::External => 2,
+                Resolution::Unresolved => {
+                    if style_samples.len() < 20 {
+                        let (line, _) = position(text, t.start);
+                        style_samples.push(format!("{rel}:{line} [{:?}] {}", t.space, t.name));
+                    }
+                    3
+                }
+            };
+            styles.entry(format!("{:?}", t.space)).or_default()[slot] += 1;
+        }
+    }
+    for (space, c) in &styles {
+        eprintln!("  style {space:>12}  found {:6} amb {:5} ext {:6} unres {:6}", c[0], c[1], c[2], c[3]);
+    }
+    for s in &style_samples {
+        eprintln!("  {s}");
+    }
 }
 
 #[test]
@@ -511,4 +543,41 @@ fn template_bindings_take_the_type_of_what_they_bind() {
     assert_eq!(f.def_nth("src/List.svelte", "price}", 0, 0), s(&["src/model.ts:2"]));
     assert_eq!(f.def_nth("src/list.component.ts", "price }} }\n    @if", 0, 0), s(&["src/model.ts:2"]), "@for over a signal input");
     assert_eq!(f.def_nth("src/list.component.ts", "price }} }\n  `", 0, 0), s(&["src/model.ts:2"]), "@if's alias");
+}
+
+#[test]
+fn stylesheets_resolve_variables_modules_and_custom_properties() {
+    let f = fixture(&[
+        ("tsconfig.json", r#"{ "compilerOptions": { "paths": { "@/*": ["./src/*"] } } }"#),
+        ("src/styles/_tokens.scss", "$space: 8px;\n@mixin card($pad: $space) {\n  padding: $pad;\n}\n@function double($x) { @return $x * 2; }\n"),
+        ("src/styles/index.scss", "@forward 'tokens';\n"),
+        ("src/theme.css", ":root {\n  --accent: #f00;\n}\n.dark {\n  --accent: #0f0;\n}\n"),
+        (
+            "src/app.scss",
+            "@use '@/styles' as s;\n@use 'sass:math';\n$local: 1px;\n.app {\n  $inner: 2px;\n  margin: s.$space $local $inner;\n  @include s.card;\n  width: s.double(2) math.div(1, 2);\n  color: var(--accent);\n}\n",
+        ),
+        ("src/legacy.less", "@gap: 4px;\n.a { margin: @gap; }\n"),
+        ("src/Card.module.scss", ".card {\n  padding: 1px;\n  &__title { font-weight: bold; }\n}\n.card-body { x: 1 }\n"),
+        ("src/Card.tsx", "import styles from './Card.module.scss';\nexport const Card = () => <div className={styles.card}><h2 className={styles.card__title} /><p className={styles.cardBody} /></div>;\n"),
+        ("src/Panel.vue", "<template><div /></template>\n<style lang=\"scss\">\n@use '@/styles' as s;\n.panel { padding: s.$space; color: var(--accent); }\n</style>\n"),
+    ]);
+    let app = "src/app.scss";
+    assert_eq!(f.def_nth(app, "$space", 0, 1), s(&["src/styles/_tokens.scss:1"]), "through @use and @forward");
+    assert_eq!(f.def_nth(app, "$local", 1, 1), s(&["src/app.scss:3"]));
+    assert_eq!(f.def_nth(app, "$inner", 1, 1), s(&["src/app.scss:5"]), "a block's own");
+    assert_eq!(f.def_nth(app, "card;", 0, 0), s(&["src/styles/_tokens.scss:2"]), "a mixin");
+    assert_eq!(f.def_nth(app, "double(2)", 0, 0), s(&["src/styles/_tokens.scss:5"]), "a function");
+    assert!(f.def_nth(app, "div(1", 0, 0).is_empty(), "sass:math's");
+    assert_eq!(f.def_nth(app, "--accent", 0, 0), s(&["src/theme.css:2", "src/theme.css:5"]), "every declaration");
+    assert_eq!(f.def_nth(app, "@/styles", 0, 0), s(&["src/styles/index.scss:1"]), "a @use path");
+    assert_eq!(f.def_nth("src/legacy.less", "@gap;", 0, 0), s(&["src/legacy.less:1"]));
+    assert_eq!(f.def_nth("src/Panel.vue", "$space", 0, 1), s(&["src/styles/_tokens.scss:1"]), "a component's style block");
+    assert_eq!(f.def_nth("src/Card.tsx", "card}", 0, 0), s(&["src/Card.module.scss:1"]), "a CSS module's class");
+    assert_eq!(f.def_nth("src/Card.tsx", "card__title", 0, 0), s(&["src/Card.module.scss:3"]), "a nested `&__` class");
+    assert_eq!(f.def_nth("src/Card.tsx", "cardBody", 0, 0), s(&["src/Card.module.scss:5"]), "camelCased");
+
+    let (confirmed, _) = f.refs("src/styles/_tokens.scss", "$space: 8px", 0);
+    assert_eq!(confirmed, s(&["src/Panel.vue:4", "src/app.scss:6", "src/styles/_tokens.scss:1", "src/styles/_tokens.scss:2"]));
+    let (confirmed, _) = f.refs("src/Card.module.scss", "card {", 0);
+    assert_eq!(confirmed, s(&["src/Card.module.scss:1", "src/Card.tsx:2"]));
 }

@@ -501,6 +501,37 @@ impl Project {
         None
     }
 
+    /// Where `spec`, written in `from`, may point through the project's aliases and
+    /// `paths` — unprobed, for loaders that find files their own way (Sass's partials).
+    pub fn expand(&self, from: &str, spec: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        for alias in self.aliases.iter().filter(|a| within(from, &a.scope)) {
+            if spec == alias.find || spec.strip_prefix(alias.find.as_str()).is_some_and(|r| r.starts_with('/')) {
+                out.push(format!("{}{}", alias.replacement, &spec[alias.find.len()..]).trim_start_matches('/').to_string());
+            }
+        }
+        for c in self.configs_for(from) {
+            let config = &self.configs[c];
+            let base = config.base_url.as_deref().unwrap_or(&config.paths_dir);
+            for (pattern, targets) in &config.paths {
+                let star = match pattern.split_once('*') {
+                    None if pattern == spec => Some(""),
+                    Some((prefix, suffix)) if spec.starts_with(prefix) && spec.ends_with(suffix) && spec.len() >= prefix.len() + suffix.len() => {
+                        Some(&spec[prefix.len()..spec.len() - suffix.len()])
+                    }
+                    _ => None,
+                };
+                if let Some(star) = star {
+                    out.extend(targets.iter().filter_map(|t| join(base, &t.replacen('*', star, 1))));
+                }
+            }
+            if let Some(base) = &config.base_url {
+                out.extend(join(base, spec));
+            }
+        }
+        out
+    }
+
     /// `spec` through a config's `paths`: the exact pattern, else the one with the
     /// longest prefix, its targets tried in order.
     fn via_paths(&self, config: &TsConfig, spec: &str) -> Option<String> {

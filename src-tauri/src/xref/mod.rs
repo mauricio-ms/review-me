@@ -110,7 +110,7 @@ impl Lang {
         let ext = rel.rsplit_once('.').map(|(_, ext)| ext)?;
         if ext == "java" {
             Some(Lang::Java)
-        } else if js::EXTENSIONS.contains(&ext) {
+        } else if js::EXTENSIONS.contains(&ext) || js::STYLE_EXTENSIONS.contains(&ext) {
             Some(Lang::Js)
         } else {
             None
@@ -121,7 +121,10 @@ impl Lang {
 /// The extensions cross-references answer for — what the viewer asks the index about
 /// rather than matching by name.
 pub fn indexed_extensions() -> Vec<&'static str> {
-    std::iter::once("java").chain(js::EXTENSIONS.iter().copied()).collect()
+    std::iter::once("java")
+        .chain(js::EXTENSIONS.iter().copied())
+        .chain(js::STYLE_EXTENSIONS.iter().copied())
+        .collect()
 }
 
 /// (Re)build every language's index for `root` at `source` over the given repo-relative

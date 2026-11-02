@@ -646,6 +646,19 @@ External. Find-references on a component also finds its selector in templates
 `v-for`, `{#each}`, `@for` take elements, `@if (x; as a)` the value), and calling a signal
 (`signal<T>()`, `computed`, `input.required<T>()`, `model`) reads its value.
 
+Stylesheets (`.css`/`.scss`/`.sass`/`.less`, and components' `<style>` blocks) are
+tokenized by `css.rs`, not parsed — custom properties, Sass variables/mixins/functions/
+placeholders, LESS variables, and a CSS module's classes (`&__title` composed with its
+rule's class), each `Token` with its block — and resolved by `styles.rs` to
+`Target::Style`: a custom property to every declaration in the project (a theme's overrides
+are all its definition: Ambiguous); a Sass/LESS name through its blocks outward, then what
+its sheet loads (`@use` by namespace or `as *`, `@forward`, `@import`, found as Sass finds
+partials and `_index` files, and through the project's aliases — `Project::expand`), with
+`sass:` modules and undeclared functions (`rgba`) External; a CSS module's class from a
+script's `styles.card`/`styles.cardTitle` (`Ty::CssModule`) or a named import. A `@use` path
+opens its stylesheet. References from a stylesheet definition list its stylesheet uses and,
+for a module class, only the scripts' *proven* uses — a class name is any word.
+
 **`M-x xref-audit`** (`js::audit`) resolves every import, re-export, `require` and `import()`
 of the revision and lists the ones nothing accounts for, grouped by how they start (`@/…`,
 `./…`, a package) — how to see why navigation falls back to names in a project whose setup

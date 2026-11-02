@@ -12,12 +12,14 @@
 mod angular;
 mod builtins;
 mod config;
+mod css;
 mod jsonc;
 mod parse;
 mod project;
 mod resolve;
 mod scope;
 mod sfc;
+mod styles;
 mod templates;
 
 use std::cell::{OnceCell, RefCell};
@@ -39,6 +41,8 @@ use project::Project;
 use resolve::{Resolution, Target};
 use scope::{in_space, is_declaration_name, Space, NAME_KINDS};
 use sfc::Tag;
+
+pub use css::STYLE_EXTENSIONS;
 
 /// The extensions this resolver reads.
 pub const EXTENSIONS: &[&str] = &[
@@ -67,6 +71,9 @@ pub struct JsIndex {
     /// Angular's components, directives and pipes, gathered the first time a template
     /// asks.
     angular: OnceCell<angular::Angular>,
+    /// Stylesheets by path: each `.css`/`.scss`/`.less` file, and each component with
+    /// `<style>` blocks.
+    sheets: HashMap<String, css::Sheet>,
 }
 
 // One cached index, rebuilt when the root or revision changes, or on request.
@@ -121,6 +128,19 @@ impl JsIndex {
                 parsed: OnceCell::new(),
             });
         }
+        let mut sheets = HashMap::new();
+        for rel in rel_files.iter().filter(|f| css::is_stylesheet(f) && !f.split('/').any(|s| s == "node_modules")) {
+            if let Some(text) = read(rel).filter(|t| t.len() <= MAX_FILE_BYTES) {
+                sheets.insert(rel.clone(), css::Sheet::file(text, rel));
+            }
+        }
+        for f in &files {
+            if matches!(f.rel.rsplit_once('.').map(|(_, e)| e), Some("vue" | "svelte" | "astro")) {
+                if let Some(sheet) = css::Sheet::component(&f.source) {
+                    sheets.insert(f.rel.clone(), sheet);
+                }
+            }
+        }
         Ok(JsIndex {
             root: root.to_path_buf(),
             source: source.clone(),
@@ -130,6 +150,7 @@ impl JsIndex {
             globals: RefCell::new(HashMap::new()),
             components: RefCell::new(HashMap::new()),
             angular: OnceCell::new(),
+            sheets,
         })
     }
 
@@ -169,6 +190,19 @@ impl JsIndex {
                     snippet: line_text(&f.source, line as usize - 1),
                     kind,
                     symbol_kind: self.node_at(*file, *byte).map_or(SymbolKind::Identifier, symbol_kind),
+                    confirmed: true,
+                }
+            }
+            Target::Style { file, byte } => {
+                let text = self.sheet_text(file).unwrap_or("");
+                let (line, col) = position(text, *byte);
+                XrefResult {
+                    file: file.clone(),
+                    line,
+                    col,
+                    snippet: line_text(text, line as usize - 1),
+                    kind,
+                    symbol_kind: SymbolKind::Identifier,
                     confirmed: true,
                 }
             }
@@ -385,6 +419,9 @@ pub fn symbol_at(
     col: u32,
 ) -> AppResult<Option<SymbolRef>> {
     let text = revision::read_file(repo, source, root, rel)?;
+    if let Some(symbol) = style_symbol_at(rel, &text, line, col) {
+        return Ok(Some(symbol));
+    }
     let Some(parsed) = parse::parse(rel, &text) else {
         return Ok(None);
     };
@@ -424,6 +461,10 @@ pub fn find_definition(
     ensure_index(repo, root, source, rel_files)?;
     let guard = INDEX.lock().unwrap();
     let index = guard.as_ref().expect("index built");
+    if let Some(mut results) = style_definition(index, symbol) {
+        rank(&mut results, &symbol.file);
+        return Ok(results);
+    }
     let mut results = match index.locate(symbol) {
         Some((fi, located)) => match index.resolve_located(fi, &located) {
             Resolution::Found(t) => vec![index.result(&t, XrefKind::Definition)],
@@ -449,9 +490,15 @@ pub fn find_references(
     ensure_index(repo, root, source, rel_files)?;
     let guard = INDEX.lock().unwrap();
     let index = guard.as_ref().expect("index built");
-    let want = index
-        .locate(symbol)
-        .map(|(fi, located)| index.resolve_located(fi, &located));
+    let at_style = index
+        .sheet_text(&symbol.file)
+        .and_then(|text| byte_at(text, symbol.line, symbol.col))
+        .and_then(|byte| index.style_token(&symbol.file, byte))
+        .map(|(_, t)| t.clone());
+    let want = match &at_style {
+        Some(tok) => Some(index.resolve_style(&symbol.file, tok, 0)),
+        None => index.locate(symbol).map(|(fi, located)| index.resolve_located(fi, &located)),
+    };
     let found = match &want {
         Some(Resolution::Found(t)) => Some(t.clone()),
         _ => None,
@@ -463,9 +510,38 @@ pub fn find_references(
         _ => None,
     };
     // An Angular class is written in templates by its selectors and pipe name.
-    let written_as = found.as_ref().map(|t| index.angular_names(t)).unwrap_or_default();
-
+    let mut written_as = found.as_ref().map(|t| index.angular_names(t)).unwrap_or_default();
     let mut results = Vec::new();
+    // A stylesheet's definition: its uses in stylesheets, and a CSS module class's in
+    // scripts (`styles.cardTitle`) — only where they're proven, a class name being any word.
+    let style = found.as_ref().and_then(|t| index.style_name(t));
+    if let (Some(want), Some((space, name))) = (&found, &style) {
+        for (file, byte, res) in index.style_references(want, name) {
+            let confirmed = match &res {
+                Resolution::Found(g) if g == want => true,
+                Resolution::Found(_) | Resolution::External => continue,
+                _ => false,
+            };
+            let text = index.sheet_text(&file).unwrap_or("");
+            let (line, col) = position(text, byte);
+            results.push(XrefResult {
+                file: file.clone(),
+                line,
+                col,
+                snippet: line_text(text, line as usize - 1),
+                kind: XrefKind::Reference,
+                symbol_kind: symbol.kind,
+                confirmed,
+            });
+        }
+        if *space != css::Space::Class {
+            rank(&mut results, &symbol.file);
+            return Ok(results);
+        }
+        written_as.push(name.clone());
+        written_as.push(css::camel(name));
+    }
+
     for fi in 0..index.files.len() {
         let src = &index.files[fi].source;
         let by_name = src.contains(&symbol.name);
@@ -481,6 +557,7 @@ pub fn find_references(
         // The names this file knows the symbol by: its own, and an import's alias.
         let mut names = vec![symbol.name.clone()];
         names.extend(written_as.iter().cloned());
+        let proven_only = style.is_some();
         if let Some(want) = &found {
             for (local, imp) in &parsed.module.imports {
                 // Renamed on the way in (`{ name as other }`), or a default or namespace
@@ -535,11 +612,91 @@ pub fn find_references(
             }
         }
         for (byte, res) in hits {
+            if proven_only && !matches!(&res, Resolution::Found(g) if Some(g) == found.as_ref()) {
+                continue;
+            }
             keep(byte, res, &mut results);
         }
     }
     rank(&mut results, &symbol.file);
     Ok(results)
+}
+
+/// The stylesheet symbol at a viewer position of `rel` (a stylesheet, or a component's
+/// `<style>`), read from `text`: its name as written.
+fn style_symbol_at(rel: &str, text: &str, line: u32, col: u32) -> Option<SymbolRef> {
+    let sheet = if css::is_stylesheet(rel) {
+        css::Sheet::file(text.to_string(), rel)
+    } else if matches!(rel.rsplit_once('.').map(|(_, e)| e), Some("vue" | "svelte" | "astro")) {
+        css::Sheet::component(text)?
+    } else {
+        return None;
+    };
+    let byte = byte_at(text, line, col)?;
+    sheet.region_at(byte)?;
+    let toks = sheet.tokens(text);
+    // `@use 'tokens'`: the path names the stylesheet.
+    let (start, len) = match toks.loads.iter().find(|l| l.start <= byte && byte < l.start + l.spec.len()) {
+        Some(load) => (load.start, load.spec.len()),
+        None => {
+            let tok = toks.tokens.iter().find(|t| t.start <= byte && byte < t.start + t.len)?;
+            (tok.start, tok.len)
+        }
+    };
+    let (line, col) = position(text, start);
+    Some(SymbolRef {
+        name: text[start..start + len].to_string(),
+        kind: SymbolKind::Identifier,
+        file: rel.to_string(),
+        line,
+        col,
+    })
+}
+
+/// Where the stylesheet symbol `symbol` is defined; `None` when it isn't one.
+fn style_definition(index: &JsIndex, symbol: &SymbolRef) -> Option<Vec<XrefResult>> {
+    let text = index.sheet_text(&symbol.file)?;
+    let byte = byte_at(text, symbol.line, symbol.col)?;
+    if let Some(found) = index.style_load_at(&symbol.file, byte) {
+        return Some(found.map(|t| vec![index.result(&t, XrefKind::Definition)]).unwrap_or_default());
+    }
+    let (_, tok) = index.style_token(&symbol.file, byte)?;
+    Some(match index.resolve_style(&symbol.file, tok, 0) {
+        Resolution::Found(t) => vec![index.result(&t, XrefKind::Definition)],
+        Resolution::Ambiguous(ts) => ts.iter().map(|t| index.result(t, XrefKind::Definition)).collect(),
+        Resolution::External => Vec::new(),
+        // Every definition by that name: a variable some build config injects, say.
+        Resolution::Unresolved => index
+            .style_definitions(tok.space, &tok.name)
+            .iter()
+            .map(|t| index.result(t, XrefKind::Definition))
+            .collect(),
+    })
+}
+
+/// The occurrences of the stylesheet symbol at a position, in its sheet.
+fn style_occurrences(index: &JsIndex, rel: &str, line: u32, col: u32) -> Option<Occurrences> {
+    let text = index.sheet_text(rel)?;
+    let byte = byte_at(text, line, col)?;
+    let (at, tok) = index.style_token(rel, byte)?;
+    let written = &text[tok.start..tok.start + tok.len];
+    let want = index.resolve_style(rel, tok, 0);
+    let tokens = &index.sheets.get(rel)?.tokens(text).tokens;
+    let mut spans: Vec<Span> = tokens
+        .iter()
+        .enumerate()
+        .filter(|(i, t)| {
+            t.space == tok.space
+                && &text[t.start..t.start + t.len] == written
+                && (*i == at || !provably_different(&want, &index.resolve_style(rel, t, 0)))
+        })
+        .map(|(_, t)| {
+            let (line, col) = position(text, t.start);
+            Span { line, col }
+        })
+        .collect();
+    spans.sort_by_key(|s| (s.line, s.col));
+    Some(Occurrences { name: written.to_string(), spans })
 }
 
 /// `src/components/Button.vue` → `Button`; `src/util/index.ts` → `util`.
@@ -570,6 +727,12 @@ pub fn occurrences(
         return Ok(None);
     };
     if index.root != root || index.source != *source {
+        return Ok(None);
+    }
+    if let Some(found) = style_occurrences(index, rel, line, col) {
+        return Ok(Some(found));
+    }
+    if css::is_stylesheet(rel) {
         return Ok(None);
     }
     let Some(&fi) = index.file_index.get(rel) else {

@@ -22,6 +22,8 @@ pub enum Target {
     Decl { file: usize, byte: usize },
     /// A module as a whole: an indexed file, or any other (a stylesheet, an image).
     File(String),
+    /// A stylesheet's definition: a custom property, a Sass variable, a module's class.
+    Style { file: String, byte: usize },
 }
 
 #[derive(Debug)]
@@ -77,6 +79,8 @@ pub(super) enum Ty<'a> {
     /// A library's wrapper whose one member holds the value: a ref's `.current` or
     /// `.value`.
     Boxed { key: &'static str, inner: Box<Ty<'a>> },
+    /// A CSS module: its classes.
+    CssModule(String),
     External,
     Unknown,
 }
@@ -291,6 +295,14 @@ impl JsIndex {
                 ImportKind::Default => self.resolve_export(fi, "default", depth + 1, &mut Vec::new()),
                 ImportKind::Namespace => Resolution::Found(Target::File(self.files[fi].rel.clone())),
             },
+            // `import { card } from './Card.module.css'`: the class.
+            Module::Other(rel) if super::css::is_css_module(&rel) => match &imp.kind {
+                ImportKind::Named(n) => match self.css_module_class(&rel, n) {
+                    Member::Hits(hits) => finish(hits),
+                    _ => Resolution::Unresolved,
+                },
+                _ => Resolution::Found(Target::File(rel)),
+            },
             Module::Other(rel) => Resolution::Found(Target::File(rel)),
             Module::External => Resolution::External,
             Module::Unresolved => Resolution::Unresolved,
@@ -364,7 +376,7 @@ impl JsIndex {
             .into_iter()
             .filter(|t| match t {
                 Target::Decl { file, byte } => self.node_at(*file, *byte).is_some_and(|n| in_space(n, space)),
-                Target::File(_) => true,
+                Target::File(_) | Target::Style { .. } => true,
             })
             .collect();
         if hits.len() == 1 {
@@ -719,10 +731,14 @@ impl JsIndex {
     /// The type of the value a target denotes.
     fn target_type<'a>(&'a self, target: &Target, depth: usize) -> Ty<'a> {
         match target {
+            Target::File(rel) if super::css::is_css_module(rel) && self.sheets.contains_key(rel) => {
+                Ty::CssModule(rel.clone())
+            }
             Target::File(rel) => match self.file_index.get(rel) {
                 Some(&fi) => Ty::Module(fi),
                 None => Ty::Unknown,
             },
+            Target::Style { .. } => Ty::External,
             Target::Decl { file, byte } => {
                 if let Some(ty) = self.template_binding_type(*file, *byte, depth + 1) {
                     return ty;
@@ -960,6 +976,7 @@ impl JsIndex {
                 Some(&fi) => Ty::Module(fi),
                 None => Ty::Unknown,
             },
+            Target::Style { .. } => Ty::External,
         }
     }
 
@@ -1216,6 +1233,7 @@ impl JsIndex {
         match ty {
             Ty::Unknown => Member::Missing { complete: false },
             Ty::External | Ty::Promise(_) | Ty::Array(_) | Ty::Tuple(_) | Ty::Boxed { .. } => Member::External,
+            Ty::CssModule(rel) => self.css_module_class(rel, name),
             Ty::Module(fi) => match self.resolve_export(*fi, name, depth + 1, &mut Vec::new()) {
                 Resolution::Found(t) => Member::Hits(vec![t]),
                 Resolution::Ambiguous(ts) => Member::Hits(ts),
