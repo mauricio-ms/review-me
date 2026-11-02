@@ -1,7 +1,7 @@
 //! Test ↔ code: the file a test exercises, or the tests of a file, by naming convention
 //! (projectile's toggle between implementation and test). `FooTest.java` ↔ `Foo.java`,
-//! `foo.test.ts` ↔ `foo.ts`, `test_foo.py` ↔ `foo.py`, `foo_test.go` ↔ `foo.go`, and a
-//! file under `__tests__/` ↔ the same name outside it.
+//! `foo.test.ts` ↔ `foo.ts` (or `Foo.spec.ts` ↔ `Foo.vue`), `test_foo.py` ↔ `foo.py`,
+//! `foo_test.go` ↔ `foo.go`, and a file under `__tests__/` ↔ the same name outside it.
 
 use git2::Repository;
 use serde::Serialize;
@@ -24,9 +24,11 @@ pub struct Counterpart {
 /// Endings that make a file name a test's, and the part before them its subject's.
 /// `IT`/`ITCase` (Maven's integration tests) only after a lowercase letter or digit, so
 /// `SPLIT` isn't the test of `SPL`.
+/// `.e2e-spec` (Angular's end-to-end tests) before `-spec`, so its subject is `app`, not
+/// `app.e2e`.
 const TEST_SUFFIXES: &[&str] = &[
-    "Tests", "Test", "ITCase", "IT", "Spec", ".test", ".spec", "_test", "_spec", "-test",
-    "-spec",
+    "Tests", "Test", "ITCase", "IT", "Spec", ".test", ".spec", ".e2e-spec", ".e2e", ".cy",
+    "_test", "_spec", "-test", "-spec",
 ];
 
 /// Folders that hold tests or code by role rather than by package: left out when
@@ -55,13 +57,31 @@ fn test_subject(stem: &str) -> Option<&str> {
     stem.strip_prefix("test_").filter(|base| !base.is_empty())
 }
 
-/// Extensions a subject and its test may differ by (`foo.test.ts` may test `foo.tsx`).
-fn extension_family(ext: &str) -> Vec<&str> {
-    match ext {
-        "ts" | "tsx" => vec!["ts", "tsx"],
-        "js" | "jsx" | "mjs" | "cjs" => vec!["js", "jsx", "mjs", "cjs"],
-        other => vec![other],
+/// Single-file components: tested from script files, never by a file of their own kind.
+const COMPONENT_EXTENSIONS: &[&str] = &["vue", "svelte", "astro"];
+
+/// What a test with extension `ext` may test: its own family (`foo.test.ts` may test
+/// `foo.tsx`), and from a script, a single-file component (`Button.spec.ts` tests
+/// `Button.vue`).
+fn subject_extensions(ext: &str) -> Vec<&str> {
+    let family: &[&str] = match ext {
+        "ts" | "tsx" | "mts" | "cts" => &["ts", "tsx", "mts", "cts"],
+        "js" | "jsx" | "mjs" | "cjs" => &["js", "jsx", "mjs", "cjs"],
+        other => return vec![other],
+    };
+    family.iter().chain(COMPONENT_EXTENSIONS).copied().collect()
+}
+
+/// The extensions the tests of a file with extension `ext` may have — the inverse of
+/// [`subject_extensions`].
+fn test_extensions(ext: &str) -> Vec<&str> {
+    if COMPONENT_EXTENSIONS.contains(&ext) {
+        return vec!["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"];
     }
+    subject_extensions(ext)
+        .into_iter()
+        .filter(|e| !COMPONENT_EXTENSIONS.contains(e))
+        .collect()
 }
 
 /// A path's folders, file stem and extension (`a/b/foo.test.ts` → `[a, b]`, `foo.test`, `ts`).
@@ -106,7 +126,12 @@ pub fn rank(path: &str, files: &[String]) -> Counterpart {
     let in_tests_dir = dirs.contains(&"__tests__");
     let subject = test_subject(stem).or(if in_tests_dir { Some(stem) } else { None });
     let from_test = subject.is_some();
-    let family = extension_family(ext);
+    // The extensions the other side may have.
+    let family = if from_test {
+        subject_extensions(ext)
+    } else {
+        test_extensions(ext)
+    };
 
     let names: Vec<String> = match subject {
         Some(subject) => family.iter().map(|e| file_name(subject, e)).collect(),
@@ -227,6 +252,31 @@ mod tests {
         assert_eq!(to_code.paths, vec!["src/cart.tsx"]);
         let to_test = rank("src/cart.tsx", &repo);
         assert_eq!(to_test.paths, vec!["src/cart.test.ts"]);
+    }
+
+    #[test]
+    fn component_files_pair_with_script_tests() {
+        let repo = files(&[
+            "src/components/Button.vue",
+            "src/components/Button.spec.ts",
+            "src/lib/Card.svelte",
+            "src/lib/Card.test.js",
+            "src/pages/Home.astro",
+            "tests/Home.test.ts",
+        ]);
+        assert_eq!(rank("src/components/Button.spec.ts", &repo).paths, vec!["src/components/Button.vue"]);
+        assert_eq!(rank("src/components/Button.vue", &repo).paths, vec!["src/components/Button.spec.ts"]);
+        assert_eq!(rank("src/lib/Card.svelte", &repo).paths, vec!["src/lib/Card.test.js"]);
+        assert_eq!(rank("src/pages/Home.astro", &repo).paths, vec!["tests/Home.test.ts"]);
+    }
+
+    #[test]
+    fn cypress_and_end_to_end_suffixes() {
+        let repo = files(&["src/cart.ts", "cypress/cart.cy.ts", "e2e/app.e2e-spec.ts", "src/app.ts"]);
+        assert_eq!(rank("cypress/cart.cy.ts", &repo).paths, vec!["src/cart.ts"]);
+        assert_eq!(rank("src/cart.ts", &repo).paths, vec!["cypress/cart.cy.ts"]);
+        assert_eq!(rank("e2e/app.e2e-spec.ts", &repo).paths, vec!["src/app.ts"]);
+        assert_eq!(test_subject("app.e2e"), Some("app"));
     }
 
     #[test]
