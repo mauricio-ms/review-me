@@ -9,6 +9,7 @@
 //! Imports resolve the way the project's own tooling resolves them (`project.rs`); see
 //! `resolve.rs` for names and members.
 
+mod angular;
 mod builtins;
 mod config;
 mod jsonc;
@@ -41,7 +42,7 @@ use sfc::Tag;
 
 /// The extensions this resolver reads.
 pub const EXTENSIONS: &[&str] = &[
-    "ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs", "vue", "svelte", "astro",
+    "ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs", "vue", "svelte", "astro", "html",
 ];
 
 /// Bigger files are bundles or generated, not code anyone navigates.
@@ -63,6 +64,9 @@ pub struct JsIndex {
     globals: RefCell<HashMap<String, Vec<Target>>>,
     /// Nuxt's components by name, by the folder they're registered from.
     components: RefCell<HashMap<String, HashMap<String, String>>>,
+    /// Angular's components, directives and pipes, gathered the first time a template
+    /// asks.
+    angular: OnceCell<angular::Angular>,
 }
 
 // One cached index, rebuilt when the root or revision changes, or on request.
@@ -125,6 +129,7 @@ impl JsIndex {
             project,
             globals: RefCell::new(HashMap::new()),
             components: RefCell::new(HashMap::new()),
+            angular: OnceCell::new(),
         })
     }
 
@@ -457,13 +462,16 @@ pub fn find_references(
         Some(Target::File(rel)) => Some(module_stem(rel).to_string()),
         _ => None,
     };
+    // An Angular class is written in templates by its selectors and pipe name.
+    let written_as = found.as_ref().map(|t| index.angular_names(t)).unwrap_or_default();
 
     let mut results = Vec::new();
     for fi in 0..index.files.len() {
         let src = &index.files[fi].source;
         let by_name = src.contains(&symbol.name);
         let by_stem = stem.as_ref().is_some_and(|s| src.contains(s.as_str()));
-        if !by_name && !by_stem {
+        let by_selector = written_as.iter().any(|w| src.contains(w.as_str()));
+        if !by_name && !by_stem && !by_selector {
             continue;
         }
         let Some(parsed) = index.parsed(fi) else {
@@ -472,6 +480,7 @@ pub fn find_references(
         let code = index.code(fi);
         // The names this file knows the symbol by: its own, and an import's alias.
         let mut names = vec![symbol.name.clone()];
+        names.extend(written_as.iter().cloned());
         if let Some(want) = &found {
             for (local, imp) in &parsed.module.imports {
                 // Renamed on the way in (`{ name as other }`), or a default or namespace

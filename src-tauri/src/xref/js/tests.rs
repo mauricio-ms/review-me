@@ -455,3 +455,60 @@ fn globally_registered_components() {
     assert_eq!(f.def("src/Page.vue", "AppIcon"), s(&["src/components/AppIcon.vue:1"]));
     assert_eq!(f.def("src/Page.vue", "Panel"), s(&["src/components/Panel.vue:1"]));
 }
+
+#[test]
+fn angular_templates_resolve_against_their_components() {
+    let f = fixture(&[
+        ("package.json", r#"{ "dependencies": { "@angular/core": "19" } }"#),
+        ("src/app/hero.ts", "export interface Hero {\n  id: number;\n  name: string;\n}\n"),
+        (
+            "src/app/hero-detail.component.ts",
+            "import { Component, Input, Output, EventEmitter } from '@angular/core';\nimport { Hero } from './hero';\n\n@Component({\n  selector: 'app-hero-detail',\n  templateUrl: './hero-detail.component.html',\n})\nexport class HeroDetailComponent {\n  @Input() hero?: Hero;\n  @Output() deleted = new EventEmitter<Hero>();\n  remove() {}\n}\n",
+        ),
+        ("src/app/hero-detail.component.html", "<h2>{{ hero?.name | titlecase }}</h2>\n<button (click)=\"remove()\">x</button>\n"),
+        ("src/app/shout.pipe.ts", "import { Pipe } from '@angular/core';\n@Pipe({ name: 'shout' })\nexport class ShoutPipe {\n  transform(v: string) { return v; }\n}\n"),
+        ("src/app/highlight.directive.ts", "import { Directive, Input } from '@angular/core';\n@Directive({ selector: '[appHighlight]' })\nexport class HighlightDirective {\n  @Input() appHighlight = '';\n}\n"),
+        (
+            "src/app/app.component.ts",
+            "import { Component } from '@angular/core';\nimport { Hero } from './hero';\n\n@Component({\n  selector: 'app-root',\n  template: `\n    <app-hero-detail [hero]=\"selected\" (deleted)=\"onDeleted($event)\"></app-hero-detail>\n    <p [appHighlight]=\"color\">{{ title | shout }}</p>\n    @for (h of heroes; track h.id) {\n      <li>{{ h.name }}</li>\n    }\n  `,\n})\nexport class AppComponent {\n  title = 'Tour';\n  color = 'yellow';\n  heroes: Hero[] = [];\n  selected?: Hero;\n  onDeleted(h: Hero) {}\n}\n",
+        ),
+    ]);
+    let html = "src/app/hero-detail.component.html";
+    let app = "src/app/app.component.ts";
+    assert_eq!(f.def_nth(html, "hero?.name", 0, 0), s(&["src/app/hero-detail.component.ts:9"]), "a component member");
+    assert_eq!(f.def_nth(html, "name |", 0, 0), s(&["src/app/hero.ts:3"]), "through the member's type");
+    assert!(f.def(html, "titlecase").is_empty(), "Angular's own pipe");
+    assert_eq!(f.def(html, "remove()"), s(&["src/app/hero-detail.component.ts:11"]));
+    assert_eq!(f.def(app, "app-hero-detail [hero]"), s(&["src/app/hero-detail.component.ts:8"]), "an element selector");
+    assert_eq!(f.def_nth(app, "hero]", 0, 0), s(&["src/app/hero-detail.component.ts:9"]), "an input");
+    assert_eq!(f.def_nth(app, "deleted)", 0, 0), s(&["src/app/hero-detail.component.ts:10"]), "an output");
+    assert_eq!(f.def(app, "selected\""), s(&["src/app/app.component.ts:18"]), "inline: the component's member");
+    assert_eq!(f.def(app, "onDeleted($event)"), s(&["src/app/app.component.ts:19"]));
+    assert_eq!(f.def(app, "shout }}"), s(&["src/app/shout.pipe.ts:3"]), "a pipe");
+    assert_eq!(f.def_nth(app, "appHighlight]", 0, 0), s(&["src/app/highlight.directive.ts:4"]), "a directive's input");
+    assert_eq!(f.def_nth(app, "h.name", 0, 2), s(&["src/app/hero.ts:3"]), "a @for item's member");
+    assert_eq!(f.def_nth("src/app/hero-detail.component.ts", "hero-detail.component.html", 0, 0), s(&["src/app/hero-detail.component.html:1"]), "templateUrl");
+
+    // A member's uses in its template, and a component's by its selector.
+    let (confirmed, _) = f.refs("src/app/hero-detail.component.ts", "hero?: Hero", 0);
+    assert_eq!(confirmed, s(&["src/app/app.component.ts:7", "src/app/hero-detail.component.html:1", "src/app/hero-detail.component.ts:9"]));
+    let (confirmed, _) = f.refs("src/app/hero-detail.component.ts", "HeroDetailComponent", 0);
+    assert_eq!(confirmed, s(&["src/app/app.component.ts:7", "src/app/hero-detail.component.ts:8"]));
+}
+
+#[test]
+fn template_bindings_take_the_type_of_what_they_bind() {
+    let f = fixture(&[
+        ("src/model.ts", "export interface Item {\n  price: number;\n}\nexport interface Decoy {\n  price: string;\n}\n"),
+        ("src/List.vue", "<template><p v-for=\"it in items\">{{ it.price }}</p></template>\n<script setup lang=\"ts\">\nimport type { Item } from './model'\ndefineProps<{ items: Item[] }>()\n</script>\n"),
+        ("src/List.svelte", "<script lang=\"ts\">\n  import type { Item } from './model';\n  export let items: Item[] = [];\n</script>\n{#each items as it}{it.price}{/each}\n"),
+        (
+            "src/list.component.ts",
+            "import { Component, input, signal } from '@angular/core';\nimport { Item } from './model';\n@Component({\n  selector: 'app-list',\n  template: `\n    @for (it of items(); track it) { {{ it.price }} }\n    @if (current(); as c) { {{ c.price }} }\n  `,\n})\nexport class ListComponent {\n  items = input.required<Item[]>();\n  current = signal<Item | null>(null);\n}\n",
+        ),
+    ]);
+    assert_eq!(f.def_nth("src/List.vue", "price }}", 0, 0), s(&["src/model.ts:2"]));
+    assert_eq!(f.def_nth("src/List.svelte", "price}", 0, 0), s(&["src/model.ts:2"]));
+    assert_eq!(f.def_nth("src/list.component.ts", "price }} }\n    @if", 0, 0), s(&["src/model.ts:2"]), "@for over a signal input");
+    assert_eq!(f.def_nth("src/list.component.ts", "price }} }\n  `", 0, 0), s(&["src/model.ts:2"]), "@if's alias");
+}

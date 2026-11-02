@@ -99,6 +99,8 @@ pub struct Parsed {
     /// Whether the file is TypeScript, whose types make a miss on a fully visible
     /// declaration proof the member comes from elsewhere.
     pub typed: bool,
+    /// Whether the file is a single-file component — its own default export.
+    pub component: bool,
 }
 
 impl Parsed {
@@ -109,7 +111,13 @@ impl Parsed {
 
 /// Parse a script or single-file component. `None` for anything else.
 pub fn parse(rel: &str, source: &str) -> Option<Parsed> {
+    let component = script_grammar(rel).is_none();
     let (grammar, code, template) = match script_grammar(rel) {
+        // An Angular component's inline template, laid out in place.
+        Some(Grammar::Ts) if !rel.ends_with(".d.ts") => match sfc::inline_angular(source) {
+            Some(doc) => (Grammar::Ts, Some(doc.code), doc.template),
+            None => (Grammar::Ts, None, Template::default()),
+        },
         Some(g) => (g, None, Template::default()),
         None => {
             // The markup scanner reads whatever a template holds; a file it trips on goes
@@ -122,9 +130,11 @@ pub fn parse(rel: &str, source: &str) -> Option<Parsed> {
     parser.set_language(&grammar.language()).ok()?;
     let text = code.as_deref().unwrap_or(source);
     let tree = parser.parse(text, None)?;
-    let module = module_info(tree.root_node(), text, rel.ends_with(".d.ts"), code.is_some());
+    // An HTML page's scripts are scripts; a component's top level is its own.
+    let module = module_info(tree.root_node(), text, rel.ends_with(".d.ts"), component && !rel.ends_with(".html"));
     Some(Parsed {
         typed: grammar != Grammar::Js,
+        component: component && !rel.ends_with(".html"),
         code,
         tree,
         module,

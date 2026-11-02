@@ -48,7 +48,8 @@ const GLOBALS: &[&str] = &[
     "$bindable", "$inspect", "$host",
     // Template-only names: Vue's event and helpers, Angular's.
     "$event", "$attrs", "$slots", "$refs", "$emit", "$props", "$el", "$parent",
-    "$root", "$data", "$router", "$route", "$t", "$any",
+    "$root", "$data", "$router", "$route", "$t", "$any", "$index", "$first", "$last",
+    "$even", "$odd", "$count", "$implicit",
     // Astro's.
     "Astro",
 ];

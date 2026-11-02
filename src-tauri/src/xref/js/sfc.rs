@@ -17,15 +17,38 @@ pub struct TemplateBinding {
     pub name: String,
     pub byte: usize,
     pub scope: (usize, usize),
+    /// Where the value it takes is written, and whether it takes that value's elements
+    /// (`v-for`, `{#each}`, `@for`) rather than the value itself (`@if (x; as a)`).
+    pub of: Option<(usize, usize, bool)>,
 }
 
-/// A component used in a template: where its tag name is written and the name it goes
-/// by in script (`my-button` → `MyButton`).
+/// Something a template names that no expression does: a component tag, and in Angular
+/// an element or attribute selector, a bound input or output, a pipe.
 #[derive(Debug, Clone)]
 pub struct Tag {
     pub byte: usize,
     pub len: usize,
+    /// The name in script (`my-button` → `MyButton`), or as Angular matches it.
     pub name: String,
+    pub kind: TagKind,
+    /// The element an Angular attribute, input or output is written on.
+    pub element: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TagKind {
+    /// A component tag, by the name the script gives it.
+    Component,
+    /// Angular: an element, matched by its components' selectors.
+    Element,
+    /// Angular: a plain attribute, perhaps a directive's selector.
+    Attribute,
+    /// Angular: `[name]`, an input of the element's component or directive.
+    Input,
+    /// Angular: `(name)`, an output.
+    Output,
+    /// Angular: `| name`.
+    Pipe,
 }
 
 #[derive(Debug, Default)]
@@ -35,6 +58,9 @@ pub struct Template {
     /// Where the template's expressions are: names there see what the template sees
     /// (Vue's props and options, unwrapped refs).
     pub exprs: Vec<(usize, usize)>,
+    /// Angular templates: where each is, and where its component class's name is
+    /// written when the template is inline (an external one is found by its path).
+    pub angular: Vec<(usize, usize, Option<usize>)>,
 }
 
 impl Template {
@@ -52,6 +78,11 @@ impl Template {
     pub fn in_template(&self, byte: usize) -> bool {
         self.exprs.iter().any(|&(a, b)| a <= byte && byte <= b)
     }
+
+    /// The Angular template `byte` is in.
+    pub fn angular_at(&self, byte: usize) -> Option<(usize, usize, Option<usize>)> {
+        self.angular.iter().copied().find(|&(a, b, _)| a <= byte && byte < b)
+    }
 }
 
 pub struct VirtualDoc {
@@ -65,6 +96,14 @@ enum Flavor {
     Vue,
     Svelte,
     Astro,
+    Angular,
+}
+
+/// What the scripts a scan copies are written in.
+#[derive(Default)]
+struct Lang {
+    typed: bool,
+    tsx: bool,
 }
 
 /// The program a single-file component reads as. `None` for any other file.
@@ -73,11 +112,12 @@ pub fn virtual_doc(rel: &str, source: &str) -> Option<VirtualDoc> {
         "vue" => Flavor::Vue,
         "svelte" => Flavor::Svelte,
         "astro" => Flavor::Astro,
+        // An Angular template — or any page, whose `{{ }}` and scripts read the same.
+        "html" | "htm" => Flavor::Angular,
         _ => return None,
     };
     let mut b = Builder::new(source);
-    let mut typed = flavor == Flavor::Astro;
-    let mut tsx = flavor == Flavor::Astro;
+    let mut lang = Lang { typed: matches!(flavor, Flavor::Astro | Flavor::Angular), tsx: flavor == Flavor::Astro };
     let mut start = 0;
     if flavor == Flavor::Astro {
         // The frontmatter fence: TypeScript between two `---` lines.
@@ -90,12 +130,73 @@ pub fn virtual_doc(rel: &str, source: &str) -> Option<VirtualDoc> {
             }
         }
     }
+    if flavor == Flavor::Angular {
+        b.template.angular.push((0, source.len(), None));
+    }
+    scan(&mut b, start, source.len(), flavor, &mut lang);
+    let grammar = if lang.tsx {
+        Grammar::Tsx
+    } else if lang.typed {
+        Grammar::Ts
+    } else {
+        Grammar::Js
+    };
+    Some(VirtualDoc { grammar, code: b.finish(), template: b.template })
+}
+
+/// A TypeScript file whose `@Component`s write their templates inline
+/// (``template: `<p>{{ name }}</p>` ``): the file itself, each template laid out in place
+/// as the body of an arrow function — ``template: (()=>{ ;name; })`` — so its names are
+/// in the tree. `None` when it has none.
+pub fn inline_angular(source: &str) -> Option<VirtualDoc> {
+    if !source.contains("@Component") || !source.contains("template") {
+        return None;
+    }
+    let mut b = Builder::new(source);
+    b.copy(0, source.len());
+    let mut found = false;
+    let mut from = 0;
+    while let Some(k) = source[from..].find("template:") {
+        let at = from + k + "template:".len();
+        from = at;
+        let ws = source[at..].len() - source[at..].trim_start().len();
+        let open = at + ws;
+        if source.as_bytes().get(open) != Some(&b'`') {
+            continue;
+        }
+        let Some(close) = source[open + 1..].find('`').map(|e| open + 1 + e) else {
+            break;
+        };
+        from = close + 1;
+        let content = &source[open + 1..close];
+        // A literal with substitutions isn't a template Angular reads; one too short to
+        // hold the wrapper, or opening or closing on an interpolation, isn't worth it.
+        if content.contains("${") || content.len() < 8 || content[..5].contains('{') || content.ends_with('}') {
+            continue;
+        }
+        b.blank(open, close + 1);
+        b.reserve(open, b"(()=>{");
+        b.reserve(close - 1, b"})");
+        // The class the decorator decorates: the next `class Name` after it.
+        let class = source[close..].find("class ").map(|c| close + c + 6).map(|n| {
+            n + source[n..].len() - source[n..].trim_start().len()
+        });
+        b.template.angular.push((open, close + 1, class));
+        scan(&mut b, open + 6, close - 1, Flavor::Angular, &mut Lang::default());
+        found = true;
+    }
+    found.then(|| VirtualDoc { grammar: Grammar::Ts, code: b.finish(), template: b.template })
+}
+
+/// Read `[start, end)` of the builder's source as markup of `flavor`.
+fn scan(b: &mut Builder, start: usize, end: usize, flavor: Flavor, lang: &mut Lang) {
+    let source = b.source;
     let mut stack: Vec<Open> = Vec::new();
     let mut blocks: Vec<Open> = Vec::new();
     // Vue: only the top-level `<template>`'s contents are a template.
     let mut template_depth: Option<usize> = None;
     let mut i = start;
-    let bytes = source.as_bytes();
+    let bytes = &source.as_bytes()[..end];
     while i < bytes.len() {
         if source[i..].starts_with("<!--") {
             i = source[i..].find("-->").map_or(bytes.len(), |e| i + e + 3);
@@ -108,10 +209,10 @@ pub fn virtual_doc(rel: &str, source: &str) -> Option<VirtualDoc> {
                 let close = format!("</{lower}");
                 let end = find_ci(source, tag.end, &close).unwrap_or(bytes.len());
                 let at_top = flavor != Flavor::Vue || stack.is_empty();
-                if lower == "script" && at_top && !tag.self_closing {
-                    let lang = tag.attr_value(source, "lang");
-                    typed |= matches!(lang, Some("ts" | "tsx"));
-                    tsx |= lang == Some("tsx");
+                if lower == "script" && at_top && !tag.self_closing && tag.attr_value(source, "src").is_none() {
+                    let written = tag.attr_value(source, "lang");
+                    lang.typed |= matches!(written, Some("ts" | "tsx"));
+                    lang.tsx |= written == Some("tsx");
                     b.copy(tag.end, end);
                 }
                 i = source[end..].find('>').map_or(bytes.len(), |e| end + e + 1);
@@ -170,6 +271,20 @@ pub fn virtual_doc(rel: &str, source: &str) -> Option<VirtualDoc> {
                 b.expr(i + 2, close);
                 i = close + 2;
             }
+            Flavor::Angular if source[i..].starts_with("{{") => {
+                let close = source[i + 2..end].find("}}").map_or(bytes.len(), |e| i + 2 + e);
+                b.angular_expr(i + 2, close);
+                i = close + 2;
+            }
+            Flavor::Angular if bytes[i] == b'@' => {
+                i = b.angular_block(i, end, &mut blocks, stack.last().map(|o| o.start));
+            }
+            Flavor::Angular if bytes[i] == b'}' => {
+                if let Some(block) = blocks.pop() {
+                    b.close_scope(&block.bindings, i + 1);
+                }
+                i += 1;
+            }
             Flavor::Svelte | Flavor::Astro if bytes[i] == b'{' => {
                 let close = matching_brace(source, i).unwrap_or(bytes.len());
                 if flavor == Flavor::Svelte {
@@ -188,18 +303,9 @@ pub fn virtual_doc(rel: &str, source: &str) -> Option<VirtualDoc> {
             _ => i += source[i..].chars().next().map_or(1, char::len_utf8),
         }
     }
-    let end = bytes.len();
     for open in stack.drain(..).chain(blocks.drain(..)) {
         b.close_scope(&open.bindings, end);
     }
-    let grammar = if tsx {
-        Grammar::Tsx
-    } else if typed {
-        Grammar::Ts
-    } else {
-        Grammar::Js
-    };
-    Some(VirtualDoc { grammar, code: b.finish(), template: b.template })
 }
 
 /// An element or block whose bindings are visible until it closes.
@@ -352,6 +458,26 @@ impl<'s> Builder<'s> {
         self.taken[a..b].iter_mut().for_each(|t| *t = true);
     }
 
+    /// Blank `[a, b)` again, freeing it.
+    fn blank(&mut self, a: usize, b: usize) {
+        for i in a..b.min(self.code.len()) {
+            if !matches!(self.code[i], b'\n' | b'\r') {
+                self.code[i] = b' ';
+            }
+            self.taken[i] = false;
+        }
+    }
+
+    /// Write `text` at `at`, claimed: a wrapper's own punctuation.
+    fn reserve(&mut self, at: usize, text: &[u8]) {
+        for (k, &c) in text.iter().enumerate() {
+            if let Some(slot) = self.code.get_mut(at + k) {
+                *slot = c;
+                self.taken[at + k] = true;
+            }
+        }
+    }
+
     /// Put `c` at the nearest free byte from `from` in `dir`, at most a few bytes away.
     fn put(&mut self, from: usize, back: bool, c: u8) -> Option<usize> {
         let mut i = from;
@@ -401,9 +527,278 @@ impl<'s> Builder<'s> {
         }
     }
 
+    fn tag(&mut self, byte: usize, len: usize, name: &str, kind: TagKind, element: Option<&str>) {
+        self.template.tags.push(Tag { byte, len, name: name.to_string(), kind, element: element.map(String::from) });
+    }
+
+    /// An Angular expression at `[a, b)`, its pipes (`value | date:'short'`) taken out:
+    /// the value and each argument copied as expressions, each pipe's name a tag.
+    fn angular_expr(&mut self, a: usize, b: usize) {
+        let text = &self.source[a..b.min(self.source.len())];
+        let cuts = top_level(text, b'|');
+        let main_end = cuts.first().map_or(b, |&c| a + c);
+        self.expr(a, main_end);
+        for (k, &cut) in cuts.iter().enumerate() {
+            let seg_start = a + cut + 1;
+            let seg_end = cuts.get(k + 1).map_or(b, |&c| a + c);
+            let seg = &self.source[seg_start..seg_end];
+            let lead = seg.len() - seg.trim_start().len();
+            let name_len = seg[lead..]
+                .find(|c: char| !(c.is_alphanumeric() || c == '_' || c == '$'))
+                .unwrap_or(seg.len() - lead);
+            if name_len > 0 {
+                let at = seg_start + lead;
+                self.tag(at, name_len, &self.source[at..at + name_len].to_string(), TagKind::Pipe, None);
+            }
+            let args = &seg[lead + name_len..];
+            let args_at = seg_start + lead + name_len;
+            let colons = top_level(args, b':');
+            for (j, &c) in colons.iter().enumerate() {
+                let arg_end = colons.get(j + 1).map_or(seg_end, |&n| args_at + n);
+                self.expr(args_at + c + 1, arg_end);
+            }
+        }
+    }
+
+    /// An attribute on an Angular element: a binding (`[x]`, `(x)`, `[(x)]`, `bind-x`,
+    /// `on-x`), a structural directive's microsyntax (`*ngFor`), a template reference
+    /// (`#ref`), `let-x`, or a plain attribute that may select a directive.
+    fn angular_attr(&mut self, element: &str, ns: usize, ne: usize, value: Option<(usize, usize)>) {
+        let name = &self.source[ns..ne];
+        let (core, at, input, output) = if let Some(inner) = name.strip_prefix("[(").and_then(|n| n.strip_suffix(")]")) {
+            (inner, ns + 2, true, true)
+        } else if let Some(inner) = name.strip_prefix('[').and_then(|n| n.strip_suffix(']')) {
+            (inner, ns + 1, true, false)
+        } else if let Some(inner) = name.strip_prefix('(').and_then(|n| n.strip_suffix(')')) {
+            (inner, ns + 1, false, true)
+        } else if let Some(inner) = name.strip_prefix("bindon-") {
+            (inner, ns + 7, true, true)
+        } else if let Some(inner) = name.strip_prefix("bind-") {
+            (inner, ns + 5, true, false)
+        } else if let Some(inner) = name.strip_prefix("on-") {
+            (inner, ns + 3, false, true)
+        } else {
+            (name, ns, false, false)
+        };
+        if input || output {
+            // `[class.active]`, `[attr.role]`, `[style.width.px]`, `(keyup.enter)`: the DOM's.
+            let prop = core.split('.').next().unwrap_or(core);
+            let dom = matches!(prop, "class" | "attr" | "style") || (output && core.contains('.'));
+            if !dom {
+                let kind = if input { TagKind::Input } else { TagKind::Output };
+                self.tag(at, prop.len(), prop, kind, Some(element));
+            }
+            if let Some((vs, ve)) = value {
+                self.angular_expr(vs, ve);
+            }
+            return;
+        }
+        if let Some(micro) = name.strip_prefix('*') {
+            self.tag(ns + 1, micro.len(), micro, TagKind::Attribute, Some(element));
+            if let Some((vs, ve)) = value {
+                self.angular_micro(micro, vs, ve);
+            }
+            return;
+        }
+        if let Some(var) = name.strip_prefix('#').or_else(|| name.strip_prefix("ref-")) {
+            // Visible across the whole template.
+            let at = ne - var.len();
+            let scope = self.template.angular.last().map_or((0, usize::MAX), |&(a, b, _)| (a, b));
+            self.template.bindings.push(TemplateBinding { name: var.to_string(), byte: at, scope, of: None });
+            return;
+        }
+        if let Some(var) = name.strip_prefix("let-") {
+            self.bind(var, ns + 4);
+            return;
+        }
+        // `routerLink`, `appHighlight`, `mat-raised-button`: perhaps a directive's selector.
+        let custom = core.chars().any(|c| c.is_ascii_uppercase())
+            || (core.contains('-') && !core.starts_with("data-") && !core.starts_with("aria-"));
+        if custom {
+            self.tag(ns, core.len(), core, TagKind::Attribute, Some(element));
+        }
+        if let Some((vs, ve)) = value {
+            // `title="Hello {{ name }}"`.
+            let mut j = vs;
+            while let Some(o) = self.source.get(j..ve).and_then(|v| v.find("{{")).map(|o| j + o) {
+                let close = self.source[o + 2..ve].find("}}").map_or(ve, |e| o + 2 + e);
+                self.angular_expr(o + 2, close);
+                j = close + 2;
+            }
+        }
+    }
+
+    /// A structural directive's microsyntax: `let item of items; index as i; trackBy: f`,
+    /// `user$ | async as user; else loading`.
+    fn angular_micro(&mut self, directive: &str, a: usize, b: usize) {
+        let text = &self.source[a..b];
+        let mut cuts = vec![0];
+        cuts.extend(top_level(text, b';').into_iter().map(|c| c + 1));
+        for (k, &start) in cuts.iter().enumerate() {
+            let end = cuts.get(k + 1).map_or(text.len(), |&n| n - 1);
+            let part = &text[start..end];
+            let lead = part.len() - part.trim_start().len();
+            let p = part.trim();
+            let at = a + start + lead;
+            if let Some(rest) = p.strip_prefix("let ") {
+                // `let item of items`, `let i = index`.
+                let name_len = rest.find(|c: char| c.is_whitespace() || c == '=').unwrap_or(rest.len());
+                let since = self.template.bindings.len();
+                self.bind(&rest[..name_len], at + 4);
+                if let Some(of) = rest.find(" of ") {
+                    let expr_at = at + 4 + of + 4;
+                    self.typed_by(since, expr_at, a + end, true);
+                    self.angular_expr(expr_at, a + end);
+                }
+                continue;
+            }
+            if let Some(as_at) = p.find(" as ") {
+                let alias = p[as_at + 4..].trim();
+                let since = self.template.bindings.len();
+                self.bind(alias, at + p.len() - alias.len());
+                // `user$ | async as user` tests a value; `index as i` names a context key.
+                if k == 0 {
+                    let value_end = top_level(&p[..as_at], b'|').first().map_or(as_at, |&c| c);
+                    self.typed_by(since, at, at + value_end, false);
+                    self.angular_expr(at, at + as_at);
+                }
+                continue;
+            }
+            let key_len = p.find(|c: char| c == ':' || c.is_whitespace()).unwrap_or(0);
+            let keyed = k > 0 && key_len > 0 && p[..key_len].chars().all(char::is_alphanumeric);
+            if keyed {
+                let rest = p[key_len..].trim_start_matches(':').trim_start();
+                let expr_at = at + p.len() - rest.len();
+                self.angular_expr(expr_at, at + p.len());
+            } else if !p.is_empty() {
+                let _ = directive;
+                self.angular_expr(at, at + p.len());
+            }
+        }
+    }
+
+    /// A control-flow block at `at` (`@if (..) {`, `@for (..) {`, `@let x = ..;`, ...):
+    /// where reading resumes.
+    fn angular_block(&mut self, at: usize, end: usize, blocks: &mut Vec<Open>, element: Option<usize>) -> usize {
+        let source = self.source;
+        let rest = &source[at + 1..end];
+        let kw_len = rest.find(|c: char| !c.is_ascii_alphabetic()).unwrap_or(rest.len());
+        let kw = &rest[..kw_len];
+        let mut i = at + 1 + kw_len;
+        let skip_ws = |mut j: usize| {
+            while j < end && source.as_bytes()[j].is_ascii_whitespace() {
+                j += 1;
+            }
+            j
+        };
+        match kw {
+            "if" | "else" | "for" | "switch" | "case" | "default" | "defer" | "placeholder"
+            | "loading" | "error" | "empty" => {}
+            "let" => {
+                // `@let total = a + b;`
+                let semi = source[i..end].find(';').map_or(end, |e| i + e);
+                let body = &source[i..semi];
+                if let Some(eq) = body.find('=') {
+                    let name = body[..eq].trim();
+                    let name_at = i + body[..eq].find(name).unwrap_or(0);
+                    let scope = (name_at, blocks.last().map_or(usize::MAX, |_| usize::MAX));
+                    self.template.bindings.push(TemplateBinding { name: name.to_string(), byte: name_at, scope, of: None });
+                    let index = self.template.bindings.len() - 1;
+                    match blocks.last_mut() {
+                        Some(block) => block.bindings.push(index),
+                        None => self.pending.push(index),
+                    }
+                    self.angular_expr(i + eq + 1, semi);
+                }
+                let _ = element;
+                return semi + 1;
+            }
+            // An `@` in text: an email, a handle.
+            _ => return at + 1,
+        }
+        i = skip_ws(i);
+        // `@else if (..)`.
+        if kw == "else" && source[i..end].starts_with("if") {
+            i = skip_ws(i + 2);
+        }
+        if source.as_bytes().get(i) == Some(&b'(') {
+            let close = matching_paren(source, i).unwrap_or(end).min(end);
+            let params = &source[i + 1..close];
+            match kw {
+                "for" => {
+                    // `item of items; track item.id; let i = $index, odd = $odd`
+                    let parts = top_level(params, b';');
+                    let first_end = parts.first().map_or(params.len(), |&c| c);
+                    let first = &params[..first_end];
+                    if let Some(of) = first.find(" of ") {
+                        let lead = first.len() - first.trim_start().len();
+                        let name = first[..of].trim();
+                        let since = self.template.bindings.len();
+                        self.bind(name, i + 1 + lead);
+                        self.typed_by(since, i + 1 + of + 4, i + 1 + first_end, true);
+                        self.angular_expr(i + 1 + of + 4, i + 1 + first_end);
+                    }
+                    for (k, &c) in parts.iter().enumerate() {
+                        let seg_start = c + 1;
+                        let seg_end = parts.get(k + 1).copied().unwrap_or(params.len());
+                        let seg = &params[seg_start..seg_end];
+                        let t = seg.trim_start();
+                        let t_at = i + 1 + seg_start + (seg.len() - t.len());
+                        if let Some(track) = t.strip_prefix("track ") {
+                            self.angular_expr(t_at + 6, t_at + 6 + track.trim_end().len());
+                        } else if let Some(lets) = t.strip_prefix("let ") {
+                            let mut off = 0;
+                            for decl in lets.split(',') {
+                                let name = decl.split('=').next().unwrap_or("").trim();
+                                let name_at = t_at + 4 + off + decl.find(name).unwrap_or(0);
+                                if !name.is_empty() {
+                                    self.bind(name, name_at);
+                                }
+                                off += decl.len() + 1;
+                            }
+                        }
+                    }
+                }
+                "if" | "else" => {
+                    // `cond; as alias`
+                    let parts = top_level(params, b';');
+                    let first_end = parts.first().map_or(params.len(), |&c| c);
+                    self.angular_expr(i + 1, i + 1 + first_end);
+                    if let Some(&c) = parts.first() {
+                        let rest = &params[c + 1..];
+                        if let Some(alias) = rest.trim().strip_prefix("as ") {
+                            let alias = alias.trim();
+                            let alias_at = i + 1 + c + 1 + rest.find(alias).unwrap_or(0);
+                            let since = self.template.bindings.len();
+                            self.bind(alias, alias_at);
+                            let value_end = top_level(&params[..first_end], b'|').first().map_or(first_end, |&p| p);
+                            self.typed_by(since, i + 1, i + 1 + value_end, false);
+                        }
+                    }
+                }
+                "switch" | "case" => self.angular_expr(i + 1, close),
+                _ => {}
+            }
+            i = skip_ws(close + 1);
+        }
+        if source.as_bytes().get(i) == Some(&b'{') {
+            blocks.push(Open { name: kw.to_string(), start: at, bindings: self.pending.drain(..).collect() });
+            return i + 1;
+        }
+        i
+    }
+
     fn bind(&mut self, name: &str, byte: usize) {
-        self.template.bindings.push(TemplateBinding { name: name.to_string(), byte, scope: (byte, usize::MAX) });
+        self.template.bindings.push(TemplateBinding { name: name.to_string(), byte, scope: (byte, usize::MAX), of: None });
         self.pending.push(self.template.bindings.len() - 1);
+    }
+
+    /// The binding made since `since` (the first, for a pattern) takes its value from
+    /// what's written at `[a, b)`.
+    fn typed_by(&mut self, since: usize, a: usize, b: usize, element: bool) {
+        if let Some(binding) = self.template.bindings.get_mut(since) {
+            binding.of = Some((a, b, element));
+        }
     }
 
     fn close_scope(&mut self, bindings: &[usize], end: usize) {
@@ -460,8 +855,20 @@ impl<'s> Builder<'s> {
     /// An element in a template: its component tag, and its attributes' expressions and
     /// bindings.
     fn element(&mut self, source: &str, tag: &TagInfo, flavor: Flavor) {
+        if flavor == Flavor::Angular {
+            let element = tag.name.to_ascii_lowercase();
+            if element.contains('-') && !element.starts_with("ng-") {
+                self.tag(tag.name_at, tag.name.len(), &element, TagKind::Element, None);
+            }
+            for attr in &tag.attrs {
+                if let Some((ns, ne)) = attr.name {
+                    self.angular_attr(&element, ns, ne, attr.value);
+                }
+            }
+            return;
+        }
         if let Some((name, len)) = component_name(tag.name, flavor) {
-            self.template.tags.push(Tag { byte: tag.name_at, len, name });
+            self.tag(tag.name_at, len, &name, TagKind::Component, None);
         }
         for attr in &tag.attrs {
             let name = attr.name.map(|(s, e)| &source[s..e]).unwrap_or("");
@@ -487,6 +894,7 @@ impl<'s> Builder<'s> {
                 continue;
             };
             match flavor {
+                Flavor::Angular => {}
                 Flavor::Vue => self.vue_attr(name, vs, ve),
                 Flavor::Svelte | Flavor::Astro if attr.braced => {
                     // `{...props}`: the expression after the dots.
@@ -536,7 +944,9 @@ impl<'s> Builder<'s> {
                 .filter_map(|sep| value.find(sep).map(|at| (at, *sep)))
                 .min_by_key(|(at, _)| *at);
             if let Some((at, sep)) = split {
+                let since = self.template.bindings.len();
                 self.bind_pattern(vs, vs + at);
+                self.typed_by(since, vs + at + sep.len(), ve, true);
                 self.expr(vs, ve);
                 if sep == " of " {
                     // `item of items` isn't an expression; `item in items` is.
@@ -576,7 +986,9 @@ impl<'s> Builder<'s> {
                                 self.expr(rest_at, rest_at + a);
                                 let pat_start = rest_at + a + 4;
                                 let key = source[pat_start..close].find('(').map(|k| pat_start + k);
+                                let since = self.template.bindings.len();
                                 self.bind_pattern(pat_start, key.unwrap_or(close));
+                                self.typed_by(since, rest_at, rest_at + a, true);
                                 self.expr(pat_start, key.unwrap_or(close));
                                 if let Some(k) = key {
                                     if let Some(kc) = source[k..close].rfind(')') {
@@ -605,6 +1017,7 @@ impl<'s> Builder<'s> {
                             name: snippet_name,
                             byte: name_at,
                             scope: (stack.last().map_or(0, |o| o.start), usize::MAX),
+                            of: None,
                         });
                         if let Some(p) = rest.find('(') {
                             let params_end = rest.rfind(')').unwrap_or(rest.len());
@@ -689,6 +1102,71 @@ fn component_name(tag: &str, flavor: Flavor) -> Option<(String, usize)> {
             })
             .collect();
         return Some((pascal, first.len()));
+    }
+    None
+}
+
+/// Where `sep` occurs in `text` outside strings and brackets — `|` alone, not `||`.
+fn top_level(text: &str, sep: u8) -> Vec<usize> {
+    let bytes = text.as_bytes();
+    let mut out = Vec::new();
+    let mut depth = 0i32;
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'(' | b'[' | b'{' => depth += 1,
+            b')' | b']' | b'}' => depth -= 1,
+            q @ (b'\'' | b'"' | b'`') => {
+                i += 1;
+                while i < bytes.len() && bytes[i] != q {
+                    if bytes[i] == b'\\' {
+                        i += 1;
+                    }
+                    i += 1;
+                }
+            }
+            c if c == sep && depth == 0 => {
+                let doubled = sep == b'|'
+                    && (bytes.get(i + 1) == Some(&b'|') || (i > 0 && bytes[i - 1] == b'|'));
+                // `a ? b : c` isn't a pipe argument's colon.
+                let ternary = sep == b':' && text[..i].contains('?');
+                if !doubled && !ternary {
+                    out.push(i);
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    out
+}
+
+/// The `)` closing the `(` at `open`, skipping strings.
+fn matching_paren(source: &str, open: usize) -> Option<usize> {
+    let bytes = source.as_bytes();
+    let mut depth = 0usize;
+    let mut i = open;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'(' => depth += 1,
+            b')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i);
+                }
+            }
+            q @ (b'\'' | b'"' | b'`') => {
+                i += 1;
+                while i < bytes.len() && bytes[i] != q {
+                    if bytes[i] == b'\\' {
+                        i += 1;
+                    }
+                    i += 1;
+                }
+            }
+            _ => {}
+        }
+        i += 1;
     }
     None
 }
@@ -791,6 +1269,43 @@ mod tests {
         assert!(d.template.binding("item", in_block).is_some());
         assert!(d.template.binding("label", in_block).is_some(), "{{@const}} binds to the block's end");
         assert!(d.template.binding("item", src.find("{#if").unwrap()).is_none());
+    }
+
+    #[test]
+    fn angular_templates() {
+        let src = "<app-hero-detail [hero]=\"selected\" (deleted)=\"onDelete($event)\" appHighlight></app-hero-detail>\n<li *ngFor=\"let h of heroes; let i = index; trackBy: byId\">{{ h.name | uppercase }} {{ i }}</li>\n@for (item of items; track item.id; let idx = $index) {\n  <span #box>{{ item.price | currency:code:'symbol' }}</span>\n} @empty { none }\n@if (user$ | async; as user) { {{ user.name }} }\n@let total = sum(items);\n<input [(ngModel)]=\"query\" [class.on]=\"active\">\n";
+        let d = doc("hero.component.html", src);
+        assert_eq!(d.grammar, Grammar::Ts);
+        for expr in ["selected", "onDelete($event)", "heroes", "byId", "h.name", "item.price", "code", "'symbol'", "user$", "user.name", "sum(items)", "query", "active", "item.id"] {
+            let at = src.find(expr).unwrap();
+            assert_eq!(&d.code[at..at + expr.len()], expr, "{expr} in place");
+        }
+        assert!(!d.code.contains("uppercase") && !d.code.contains("currency"), "pipes are tags");
+        let tags: Vec<(TagKind, &str)> = d.template.tags.iter().map(|t| (t.kind, t.name.as_str())).collect();
+        for want in [(TagKind::Element, "app-hero-detail"), (TagKind::Input, "hero"), (TagKind::Output, "deleted"), (TagKind::Attribute, "appHighlight"), (TagKind::Pipe, "uppercase"), (TagKind::Pipe, "currency"), (TagKind::Input, "ngModel")] {
+            assert!(tags.contains(&want), "{want:?} in {tags:?}");
+        }
+        let in_li = src.find("h.name").unwrap();
+        assert!(d.template.binding("h", in_li).is_some() && d.template.binding("i", in_li).is_some());
+        let in_for = src.find("item.price").unwrap();
+        assert!(d.template.binding("item", in_for).is_some() && d.template.binding("box", in_for).is_some());
+        assert!(d.template.binding("item", src.find("@if").unwrap()).is_none(), "the block's own");
+        assert!(d.template.binding("user", src.find("user.name").unwrap()).is_some());
+        assert!(d.template.binding("total", src.find("<input").unwrap()).is_some());
+    }
+
+    #[test]
+    fn inline_angular_templates() {
+        let src = "@Component({\n  selector: 'app-root',\n  template: `\n    <h1>{{ title }}</h1>\n    <button (click)=\"go()\">go</button>\n  `,\n})\nexport class AppComponent {\n  title = 'x';\n  go() {}\n}\n";
+        let d = inline_angular(src).unwrap();
+        assert_eq!(d.code.len(), src.len());
+        assert!(d.code.contains("template: (()=>{"));
+        for expr in ["title", "go()"] {
+            let at = src.find(&format!("{expr}")).unwrap();
+            assert_eq!(&d.code[at..at + expr.len()], expr);
+        }
+        let (_, _, class) = d.template.angular[0];
+        assert_eq!(&src[class.unwrap()..class.unwrap() + 12], "AppComponent");
     }
 
     #[test]

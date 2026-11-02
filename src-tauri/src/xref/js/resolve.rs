@@ -127,7 +127,16 @@ impl JsIndex {
         if matches!(node.kind(), "string_fragment" | "string") {
             let s = if node.kind() == "string" { Some(node) } else { node.parent() };
             return match s.filter(|s| is_module_source(*s, code)) {
-                Some(s) => self.module_resolution(file, string_value(s, code)),
+                Some(s) => {
+                    // `templateUrl: 'hero.component.html'` is relative, `./` or not.
+                    let spec = string_value(s, code);
+                    let spec = if is_module_specifier(s, code) || spec.starts_with('.') {
+                        spec.to_string()
+                    } else {
+                        format!("./{spec}")
+                    };
+                    self.module_resolution(file, &spec)
+                }
                 None => Resolution::Unresolved,
             };
         }
@@ -228,6 +237,10 @@ impl JsIndex {
                 return Resolution::Found(Target::Decl { file, byte: b.byte });
             }
         }
+        // An Angular template sees its component's members, not the module around it.
+        if let Some(found) = self.resolve_angular_name(file, node, name, depth) {
+            return found;
+        }
         if let Some(found) = self.resolve_top(file, name, space, depth) {
             return found;
         }
@@ -319,7 +332,7 @@ impl JsIndex {
             ),
             None => {
                 // A single-file component is its own default export.
-                if name == "default" && parsed.code.is_some() {
+                if name == "default" && parsed.component {
                     return Resolution::Found(Target::File(self.files[file].rel.clone()));
                 }
                 let mut external = false;
@@ -710,11 +723,31 @@ impl JsIndex {
                 Some(&fi) => Ty::Module(fi),
                 None => Ty::Unknown,
             },
-            Target::Decl { file, byte } => match self.node_at(*file, *byte) {
-                Some(node) => self.decl_type(*file, node, depth + 1),
-                None => Ty::Unknown,
-            },
+            Target::Decl { file, byte } => {
+                if let Some(ty) = self.template_binding_type(*file, *byte, depth + 1) {
+                    return ty;
+                }
+                match self.node_at(*file, *byte) {
+                    Some(node) => self.decl_type(*file, node, depth + 1),
+                    None => Ty::Unknown,
+                }
+            }
         }
+    }
+
+    /// A template binding's type: the value it's bound to, or that value's elements.
+    fn template_binding_type<'a>(&'a self, file: usize, byte: usize, depth: usize) -> Option<Ty<'a>> {
+        let parsed = self.parsed(file)?;
+        let (a, b, element) = parsed.template.bindings.iter().find(|t| t.byte == byte)?.of?;
+        let text = &self.code(file)[a..b];
+        let a = a + (text.len() - text.trim_start().len());
+        let b = b - (text.len() - text.trim_end().len());
+        let mut node = parsed.tree.root_node().named_descendant_for_byte_range(a, b)?;
+        while let Some(p) = node.parent().filter(|p| p.start_byte() == a && p.end_byte() <= b) {
+            node = p;
+        }
+        let ty = self.expr_type(file, node, depth + 1);
+        Some(if element { index_type(ty, None) } else { ty })
     }
 
     /// The type of what the declaration named at `node` declares (or of the expression
@@ -778,6 +811,13 @@ impl JsIndex {
         };
         let func = match parent.kind() {
             "variable_declarator" | "public_field_definition" | "field_definition" | "pair" => {
+                // Angular's signals and inputs: calling one reads its value.
+                if let Some(held) = parent
+                    .child_by_field_name("value")
+                    .and_then(|v| self.signal_value(*file, v, depth + 1))
+                {
+                    return held;
+                }
                 match parent.child_by_field_name("value").and_then(component_function_value) {
                     Some(f) => f,
                     None => {
@@ -1089,6 +1129,32 @@ impl JsIndex {
         Some(self.type_of(df, state, depth + 1))
     }
 
+    /// The value an Angular signal holds — `signal<T>(..)`, `computed(() => ..)`,
+    /// `input<T>()`, `input.required<T>()`, `model<T>()`, `toSignal(..)` — which calling it
+    /// reads. `None` for anything else.
+    fn signal_value<'a>(&'a self, file: usize, value: Node<'a>, depth: usize) -> Option<Ty<'a>> {
+        if value.kind() != "call_expression" {
+            return None;
+        }
+        let code = self.code(file);
+        let callee = text(value.child_by_field_name("function")?, code);
+        if !matches!(callee, "signal" | "computed" | "input" | "input.required" | "model" | "model.required" | "linkedSignal" | "toSignal") {
+            return None;
+        }
+        let type_arg = value.child_by_field_name("type_arguments").and_then(|a| a.named_child(0));
+        if let Some(t) = type_arg {
+            return Some(self.type_of(file, t, depth + 1));
+        }
+        let arg = value.child_by_field_name("arguments").and_then(|a| a.named_child(0))?;
+        Some(match arg.kind() {
+            "arrow_function" => match arg.child_by_field_name("body") {
+                Some(body) if body.kind() != "statement_block" => self.expr_type(file, body, depth + 1),
+                _ => Ty::Unknown,
+            },
+            _ => self.expr_type(file, arg, depth + 1),
+        })
+    }
+
     /// The type a `for (.. of x)` binding takes: an element of `x`.
     fn iterated<'a>(&'a self, file: usize, stmt: Node<'a>, depth: usize) -> Ty<'a> {
         let mut cur = stmt.walk();
@@ -1377,8 +1443,31 @@ impl JsIndex {
     }
 }
 
-/// `import x from 'here'`, `export .. from 'here'`, `require('here')`, `import('here')`.
+/// `import x from 'here'`, `export .. from 'here'`, `require('here')`, `import('here')` —
+/// or a file an Angular decorator names (`templateUrl`, `styleUrl`, `styleUrls`).
 pub fn is_module_source(string: Node, code: &str) -> bool {
+    if is_module_specifier(string, code) {
+        return true;
+    }
+    let Some(parent) = string.parent() else {
+        return false;
+    };
+    let key = |pair: Node| pair.child_by_field_name("key").map(|k| text(k, code).trim_matches(['\'', '"']).to_string());
+    match parent.kind() {
+        "pair" => {
+            parent.child_by_field_name("value").map(|v| v.id()) == Some(string.id())
+                && matches!(key(parent).as_deref(), Some("templateUrl" | "styleUrl"))
+        }
+        "array" => parent
+            .parent()
+            .filter(|p| p.kind() == "pair")
+            .is_some_and(|p| key(p).as_deref() == Some("styleUrls")),
+        _ => false,
+    }
+}
+
+/// `import x from 'here'`, `export .. from 'here'`, `require('here')`, `import('here')`.
+fn is_module_specifier(string: Node, code: &str) -> bool {
     let Some(parent) = string.parent() else {
         return false;
     };

@@ -12,7 +12,7 @@ use super::parse::{string_value, text, ExportTarget, Import, ImportKind};
 use super::project::{file_name, join, parent};
 use super::resolve::{Member, Resolution, Target};
 use super::scope::Space;
-use super::sfc::Tag;
+use super::sfc::{Tag, TagKind};
 use super::{walk, JsIndex};
 
 /// Extensions a component may be written in.
@@ -113,6 +113,9 @@ impl JsIndex {
     /// A component tag: what the script imports or declares under its name, a globally
     /// registered component, a framework convention's, or the framework's own.
     pub fn resolve_tag(&self, file: usize, tag: &Tag, depth: usize) -> Resolution {
+        if tag.kind != TagKind::Component {
+            return self.resolve_angular_tag(tag, depth);
+        }
         let name = tag.name.as_str();
         if let Some(found) = self.resolve_top(file, name, Space::Value, depth + 1) {
             return found;

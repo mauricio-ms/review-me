@@ -629,6 +629,23 @@ Nuxt app's undeclared names come from `composables/`, `utils/`, `shared/` (and
 auto-imported API is External. A function with no declared return type that returns one
 expression has that expression's type — a composable's `return { user }`.
 
+Angular (`angular.rs`) reads the same way: an `.html` file is a template program, and a
+component's inline ``template: `…` `` is laid out in place as the body of an arrow function
+(``template: (()=>{ ;title; })``, `sfc::inline_angular`). Pipes come out of expressions as
+tags (`value | date:fmt` → `value`, `fmt` and a `date` tag), as do element selectors,
+plain attributes that may select a directive, and `[input]`/`(output)` bindings, each with
+its element; control flow (`@if (x; as a)`, `@for (i of xs; track …; let k = $index)`, `@let`)
+and `*ngFor`/`*ngIf` microsyntax bind template names, `#ref` across the template. The
+decorator index (`Angular`, built the first time a template asks) maps element and
+attribute selectors, pipe names and `templateUrl`s to their classes: a template's free name
+is a member of its component (never the module's), an element its component, an
+input/output the element's component's member (else a directive selected by that name),
+and anything no project declaration matches — `titlecase`, `ngModel`, `[src]` — is
+External. Find-references on a component also finds its selector in templates
+(`angular_names`). A template binding takes its type from what it binds (`TemplateBinding.of`:
+`v-for`, `{#each}`, `@for` take elements, `@if (x; as a)` the value), and calling a signal
+(`signal<T>()`, `computed`, `input.required<T>()`, `model`) reads its value.
+
 **`M-x xref-audit`** (`js::audit`) resolves every import, re-export, `require` and `import()`
 of the revision and lists the ones nothing accounts for, grouped by how they start (`@/…`,
 `./…`, a package) — how to see why navigation falls back to names in a project whose setup
