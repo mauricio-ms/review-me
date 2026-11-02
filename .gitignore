@@ -25,3 +25,4 @@ src-tauri/gen/
 # local fixtures (own git repos)
 sample/
 sample-java/
+sample-frontend/

@@ -746,7 +746,8 @@ clears the history whenever the comparison (or its revision) changes.
 ## Testing
 
 Logic is unit-tested in Rust against `tempfile` git fixtures (`diff`, `tags`, `commits`,
-`coverage`, `notes`, `review_dir`, `fuzzy`, `tree`, `xref`, `repo_library`), and
+`coverage`, `notes`, `review_dir`, `fuzzy`, `tree`, `xref` (Java and `js`), `repo_library`,
+`generated`), and
 `counterpart`'s ranking over plain path lists. UI/interaction has no automated or written
 test plan.
 
@@ -755,6 +756,14 @@ appear across packages, so `xref_validate.rs` runs the resolver over a realistic
 multi-package project — 52 assertions covering every tier plus the residue. Build it with
 `./scripts/make-java-sample.sh` (the tree is gitignored); the test skips loudly without
 it. It's also the fixture to open in the app for hand-testing `M-.`/`M-,`/`M-?`.
+
+The JavaScript/TypeScript resolver is validated the same way against real projects —
+Vue core, Next commerce, shadcn/ui, SvelteKit and Angular realworld, Nuxt movies, vitesse,
+Starlight, Express, Bootstrap — pinned to the commits it was measured on:
+`./scripts/make-frontend-samples.sh` fetches them into the gitignored `sample-frontend/`, and
+`cargo test --lib xref::js::validate -- --ignored --nocapture` (ignored by default: about a
+minute) asserts each one's unresolved imports and undecided-name share haven't grown. A
+change that moves those numbers moves the thresholds in `js/validate.rs` with it, on purpose.
 
 **`xref`'s symbol index is a process-global `Mutex`**, so any test that builds one must
 hold `xref::TEST_LOCK` for its whole body — otherwise parallel tests clobber each

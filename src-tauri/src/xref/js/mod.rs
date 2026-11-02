@@ -809,7 +809,10 @@ pub fn audit(
 ) -> AppResult<Audit> {
     ensure_index(repo, root, source, rel_files)?;
     let guard = INDEX.lock().unwrap();
-    let index = guard.as_ref().expect("index built");
+    Ok(audit_index(guard.as_ref().expect("index built")))
+}
+
+fn audit_index(index: &JsIndex) -> Audit {
     let mut audit = Audit {
         files: index.files.len() as u32,
         imports: 0,
@@ -849,7 +852,7 @@ pub fn audit(
     let mut patterns: Vec<(String, u32)> = patterns.into_iter().collect();
     patterns.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
     audit.patterns = patterns;
-    Ok(audit)
+    audit
 }
 
 /// What a specifier starts with, the way an alias or a package names it: `@/…`, `~/…`,
@@ -873,3 +876,5 @@ fn spec_pattern(spec: &str) -> String {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod validate;
