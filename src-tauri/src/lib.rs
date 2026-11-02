@@ -54,6 +54,7 @@ pub fn run() {
             commands::find_counterpart,
             commands::list_repo_dir,
             commands::build_symbol_index,
+            commands::xref_extensions,
             commands::symbol_at,
             commands::find_definition,
             commands::find_references,

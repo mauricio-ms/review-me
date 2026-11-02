@@ -279,6 +279,12 @@ pub fn build_symbol_index(repo: String, source: ProjectSource) -> AppResult<Inde
     xref::build_index(&repository, &root, &source, &files)
 }
 
+/// The file extensions cross-references read — the rest the viewer matches by name.
+#[tauri::command]
+pub fn xref_extensions() -> Vec<&'static str> {
+    xref::indexed_extensions()
+}
+
 /// Resolve the symbol under a cursor position (1-based line, 0-based col).
 #[tauri::command]
 pub fn symbol_at(

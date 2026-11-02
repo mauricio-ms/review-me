@@ -289,6 +289,11 @@ export function buildSymbolIndex(
   return invoke<IndexStats>("build_symbol_index", { repo, source });
 }
 
+/** The file extensions cross-references read; the viewer matches the rest by name. */
+export function xrefExtensions(): Promise<string[]> {
+  return invoke<string[]>("xref_extensions");
+}
+
 export function symbolAt(
   repo: string,
   source: ProjectSource,

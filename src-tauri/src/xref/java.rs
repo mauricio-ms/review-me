@@ -14,65 +14,16 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use git2::Repository;
-use serde::{Deserialize, Serialize};
 use streaming_iterator::StreamingIterator;
 use tree_sitter::{Language, Node, Parser, Point, Query, QueryCursor, Tree};
 
+use super::{
+    line_text, rank, row_start, utf16_to_byte, IndexStats, Occurrences, Span, SymbolKind,
+    SymbolRef, XrefKind, XrefResult,
+};
 use crate::error::{AppError, AppResult};
 use crate::queries;
 use crate::revision::{self, ProjectSource};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum SymbolKind {
-    Class,
-    Interface,
-    Enum,
-    Method,
-    Field,
-    Type,
-    Identifier,
-}
-
-#[derive(Debug, Clone, Copy, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub enum XrefKind {
-    Definition,
-    Reference,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SymbolRef {
-    pub name: String,
-    pub kind: SymbolKind,
-    pub file: String,
-    pub line: u32,
-    pub col: u32,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct XrefResult {
-    pub file: String,
-    pub line: u32,
-    pub col: u32,
-    pub snippet: String,
-    pub kind: XrefKind,
-    pub symbol_kind: SymbolKind,
-    /// True when the resolver *proved* this occurrence refers to the symbol under the
-    /// cursor. False means "matches by name, couldn't be decided" — never "wrong".
-    /// Occurrences proven to mean something else are dropped instead of being flagged,
-    /// so an unconfirmed result is always worth a look.
-    pub confirmed: bool,
-}
-
-#[derive(Debug, Clone, Copy, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct IndexStats {
-    pub files: u32,
-    pub symbols: u32,
-}
 
 // ---------------------------------------------------------------------------
 // Index
@@ -145,13 +96,6 @@ struct JavaIndex {
 // explicit request.
 static INDEX: Mutex<Option<JavaIndex>> = Mutex::new(None);
 
-/// `INDEX` above is process-global, so two tests building their own fixtures in
-/// parallel would clobber each other. Every test that builds or queries an index holds
-/// this for its duration — including `xref_validate`, which lives in another module,
-/// which is why it isn't private to `tests` below.
-#[cfg(test)]
-pub(crate) static TEST_LOCK: Mutex<()> = Mutex::new(());
-
 fn java_language() -> Language {
     tree_sitter_java::LANGUAGE.into()
 }
@@ -166,10 +110,6 @@ fn java_parser() -> AppResult<Parser> {
 
 fn is_java(rel: &str) -> bool {
     rel.ends_with(".java")
-}
-
-fn line_text(source: &str, row0: usize) -> String {
-    source.lines().nth(row0).unwrap_or("").trim().to_string()
 }
 
 fn kind_from_capture(name: &str) -> SymbolKind {
@@ -1433,24 +1373,6 @@ pub fn find_references(
     Ok(results)
 }
 
-/// One occurrence of a symbol in a file, in the viewer's units: a 1-based line and a
-/// 0-based UTF-16 column.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Span {
-    pub line: u32,
-    pub col: u32,
-}
-
-/// The symbol under the viewer's cursor and where else in its file it occurs.
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Occurrences {
-    pub name: String,
-    /// In document order; the cursor's own occurrence included.
-    pub spans: Vec<Span>,
-}
-
 /// The occurrences in `rel` of the symbol at `(line, col)` — a 0-based UTF-16 column, as
 /// the viewer counts — for highlighting: every name match the resolver can't prove is a
 /// different symbol, by the same rule `find_references` drops by.
@@ -1539,41 +1461,9 @@ fn provably_different(want: &Resolution, got: &Resolution) -> bool {
     }
 }
 
-/// The byte offset where 0-based `row` starts, if the text has that many lines.
-fn row_start(src: &str, row: usize) -> Option<usize> {
-    if row == 0 {
-        return Some(0);
-    }
-    src.match_indices('\n').nth(row - 1).map(|(i, _)| i + 1)
-}
-
-/// The byte offset in `line` of its `col`-th UTF-16 unit, clamped to the line's end.
-fn utf16_to_byte(line: &str, col: u32) -> usize {
-    let mut units = 0;
-    for (i, ch) in line.char_indices() {
-        if units >= col as usize || ch == '\n' {
-            return i;
-        }
-        units += ch.len_utf16();
-    }
-    line.len()
-}
-
-/// Order results: proven hits first, then the file the cursor is in, then by path/line.
-fn rank(results: &mut [XrefResult], same_file: &str) {
-    results.sort_by(|a, b| {
-        let a_same = a.file != same_file;
-        let b_same = b.file != same_file;
-        (!a.confirmed)
-            .cmp(&(!b.confirmed))
-            .then_with(|| a_same.cmp(&b_same))
-            .then_with(|| a.file.cmp(&b.file))
-            .then_with(|| a.line.cmp(&b.line))
-    });
-}
-
 #[cfg(test)]
 mod tests {
+    use super::super::TEST_LOCK;
     use super::*;
     use std::fs;
     use std::sync::MutexGuard;

@@ -6,7 +6,13 @@ import { currentFile } from "./buffers";
 import { recordJump } from "./jumps";
 import { visitFile, type SourceChoice } from "./project";
 import { projectCursor } from "./project-view";
-import { findDefinition, findReferences, symbolAt, symbolOccurrences } from "./tauri";
+import {
+  findDefinition,
+  findReferences,
+  symbolAt,
+  symbolOccurrences,
+  xrefExtensions,
+} from "./tauri";
 
 /**
  * Cross-references resolve in the revision of the file they start from — the one in the
@@ -80,15 +86,26 @@ export async function findUsages(): Promise<void> {
 }
 
 /**
+ * The extensions the backend's resolvers read, asked once at startup — long before a
+ * file can be open — so the list lives in one place, next to the resolvers.
+ */
+let indexed: ReadonlySet<string> = new Set();
+void xrefExtensions()
+  .then((exts) => (indexed = new Set(exts)))
+  .catch(() => {});
+
+/**
  * How a viewer of `path` at `source` asks the index where the symbol at its cursor
- * occurs. Null for a file the index doesn't read — it parses Java only — whose viewer
- * matches by name without asking.
+ * occurs. Null for a file no resolver reads, whose viewer matches by name without
+ * asking.
  */
 export function occurrenceLookup(
   source: ProjectSource,
   path: string,
 ): ((line: number, col: number) => Promise<Occurrences | null>) | null {
-  if (!path.endsWith(".java")) return null;
+  const name = path.slice(path.lastIndexOf("/") + 1);
+  const dot = name.lastIndexOf(".");
+  if (dot <= 0 || !indexed.has(name.slice(dot + 1))) return null;
   return (line, col) => {
     const repo = useRepoStore.getState().repoPath;
     return repo ? symbolOccurrences(repo, source, path, line, col) : Promise.resolve(null);
