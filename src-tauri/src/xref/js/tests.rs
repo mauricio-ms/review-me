@@ -581,3 +581,54 @@ fn stylesheets_resolve_variables_modules_and_custom_properties() {
     let (confirmed, _) = f.refs("src/Card.module.scss", "card {", 0);
     assert_eq!(confirmed, s(&["src/Card.module.scss:1", "src/Card.tsx:2"]));
 }
+
+impl Fixture {
+    /// `rel:line` of the first occurrence of `needle` in `rel`.
+    fn line_of(&self, rel: &str, needle: &str) -> String {
+        format!("{rel}:{}", self.at(rel, needle, 0, 0).0)
+    }
+}
+
+#[test]
+fn typescript_constructs_resolve_by_declaration() {
+    let shapes = "src/shapes.ts";
+    let f = fixture(&[
+        (
+            shapes,
+            "export abstract class Base {\n  greet(): string { return ''; }\n  static create(): Base { return null!; }\n}\nexport class Child extends Base {\n  own() {}\n}\nexport enum Color { Red, Green = 'g' }\nexport namespace Geo {\n  export interface Point { x: number }\n  export const origin: Point = { x: 0 };\n}\nexport interface Named { name: string }\nexport interface Person extends Named { age: number }\nexport type Both = Named & { id: number };\nexport type Pair = [Named, Person];\nexport function makeChild(): Child { return new Child(); }\nexport async function load(): Promise<Person> { return null!; }\nexport interface ButtonProps { label: string }\nexport function Button(props: ButtonProps) { return null; }\n",
+        ),
+        (
+            "src/use.tsx",
+            "import { Child, Color, Geo, Both, Pair, Person, makeChild, load, Base, Button } from './shapes';\nimport * as shapes from './shapes';\nclass Sub extends Child {\n  run() { super.greet(); this.own(); }\n}\nmakeChild().greet();\nColor.Green;\nGeo.origin.x;\nlet p: Geo.Point;\np.x;\nlet both: Both;\nboth.id;\nboth.name;\nlet pair: Pair;\npair[1].age;\nasync function f() { const person = await load(); person.age; }\n({} as Person).age;\nshapes.makeChild().own();\nBase.create().greet();\nload().then((v) => v.name);\nconst people: Person[] = [];\npeople.reduce((sum, who) => sum + who.age, 0);\nconst el = <Button label=\"go\" />;\n",
+        ),
+        // The same names, declared elsewhere: a name match would find two of each.
+        (
+            "src/decoys.ts",
+            "export class Decoy {\n  greet() {}\n  own() {}\n  static create() {}\n  get() {}\n}\nexport enum Other { Green }\nexport const origin = 0;\nexport interface D { x: string; id: string; name: string; age: string; label: string }\n",
+        ),
+        ("lib/api.js", "class Api {\n  get() {}\n}\nmodule.exports = new Api();\n"),
+        ("lib/main.js", "const api = require('./api');\napi.get();\n"),
+    ]);
+    let use_ = "src/use.tsx";
+    let want = |needle: &str| vec![f.line_of(shapes, needle)];
+    assert_eq!(f.def(use_, "greet(); this"), want("greet()"), "super: the base class's");
+    assert_eq!(f.def(use_, "own(); }"), want("own()"), "this: an inherited class's own");
+    assert_eq!(f.def(use_, "greet();\nColor"), want("greet()"), "inherited, through a return type");
+    assert_eq!(f.def(use_, "Green;"), want("Green ="), "an enum member");
+    assert_eq!(f.def(use_, "origin.x"), want("origin"), "a namespace's export");
+    assert_eq!(f.def_nth(use_, "x;\nlet p", 0, 0), want("x: number }"), "a namespace const's type");
+    assert_eq!(f.def_nth(use_, "Point;", 0, 0), want("Point {"), "a qualified type");
+    assert_eq!(f.def_nth(use_, "x;\nlet both", 0, 0), want("x: number }"));
+    assert_eq!(f.def(use_, "id;"), want("id: number"), "an intersection's object part");
+    assert_eq!(f.def(use_, "name;\nlet pair"), want("name: string"), "an intersection's named part");
+    assert_eq!(f.def(use_, "age;\nasync"), want("age: number"), "a tuple's element");
+    assert_eq!(f.def(use_, "age; }"), want("age: number"), "awaited");
+    assert_eq!(f.def(use_, "age;\nshapes"), want("age: number"), "`as`");
+    assert_eq!(f.def(use_, "own();\nBase"), want("own()"), "a namespace import's function's return");
+    assert_eq!(f.def(use_, "create()"), want("static create"), "a static member");
+    assert_eq!(f.def(use_, "greet();\nload"), want("greet()"));
+    assert_eq!(f.def(use_, "name);"), want("name: string"), "`.then`'s value, via an interface's `extends`");
+    assert_eq!(f.def(use_, "age, 0"), want("age: number"), "`reduce`'s element");
+    assert_eq!(f.def(use_, "label="), want("label: string"), "a prop typed by an interface");
+    assert_eq!(f.def("lib/main.js", "get()"), vec![f.line_of("lib/api.js", "get()")], "CommonJS exporting an instance");
+}
