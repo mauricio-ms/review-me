@@ -1398,6 +1398,11 @@ kbd {
   background: rgba(var(--accent-green-rgb), 0.1);
 }
 
+/* A file the comparison deletes, read at its old side: every line went. */
+.cm-diff-line-removed {
+  background: rgba(var(--accent-red-rgb), 0.1);
+}
+
 .cm-diff-removed {
   background: rgba(var(--accent-red-rgb), 0.1);
   color: var(--accent-red);

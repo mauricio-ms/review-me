@@ -31,8 +31,9 @@ function changeTo(path: string): ChangedFile | null {
 
 /**
  * Which side of `comparison` a buffer at `source` reads — what its line numbers count —
- * or null for a revision that is neither. The new side is asked first: in the
- * working-tree diff both sides read the checkout, and its lines are the new ones.
+ * or null for a revision that is neither. The new side is asked first: where a
+ * comparison has no old side (a root commit) both name one revision, whose lines are
+ * the new ones.
  */
 export function sideRead(
   comparison: Comparison | undefined,

@@ -5,7 +5,7 @@ import type { ChangedFile, DiffLine, DiffSummary } from "../types/diff";
 import { sameSource, type ProjectSource } from "../types/repo";
 import { currentFile } from "./buffers";
 import { changedFileOrder } from "./changed-tree";
-import { ambientSource, openFileFromDiff } from "./project";
+import { ambientSource, baseSource, openFileFromDiff } from "./project";
 import { projectCursor, projectSelectionRange, setProjectCursor } from "./project-view";
 import { refineHunk, type WordSeg } from "./word-diff";
 
@@ -115,6 +115,21 @@ export function changeForFile(
   return file && file.status !== "deleted" && !file.binary ? file : null;
 }
 
+/**
+ * A file buffer's deletion in the applied comparison — a text file the comparison takes
+ * out, read where it still is: the old side. Every line of it is one that went.
+ */
+export function deletionForFile(
+  diff: DiffSummary | null,
+  source: ProjectSource,
+  path: string | null,
+): ChangedFile | null {
+  if (!diff || !path) return null;
+  if (!sameSource(source, baseSource(diff.comparison).source)) return null;
+  const file = diff.files.find((f) => f.path === path);
+  return file && file.status === "deleted" && !file.binary ? file : null;
+}
+
 /** The new-side lines a block covers, for "is the cursor on it" — never empty. */
 function blockSpan(block: ChangeBlock): [number, number] {
   const lines = [...block.modified, ...block.added];
@@ -142,11 +157,15 @@ export function changeAtLine(blocks: ChangeBlock[], line: number): number {
 /** The file in the selected window and its change in the comparison, or why there's none. */
 function currentChange(): { change: ChangedFile } | { why: string } {
   const file = currentFile();
-  const change = file
-    ? changeForFile(useRepoStore.getState().diff, file.source, file.path)
-    : null;
+  const diff = useRepoStore.getState().diff;
+  const change = file ? changeForFile(diff, file.source, file.path) : null;
   if (change) return { change };
-  return { why: file ? "This file has no changes in the comparison on screen" : "No file here" };
+  if (!file) return { why: "No file here" };
+  return {
+    why: deletionForFile(diff, file.source, file.path)
+      ? "The comparison deletes this whole file — ] f for the next changed file"
+      : "This file has no changes in the comparison on screen",
+  };
 }
 
 /**

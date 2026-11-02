@@ -8,7 +8,7 @@ import { getCM, vim } from "@replit/codemirror-vim";
 import CodeMirror from "@uiw/react-codemirror";
 
 import { swallowColonKeymap, vimEscapeKeymap, vimNavKeymap } from "../editor/cm-shared";
-import { diffMarks, setDiffMarks } from "../editor/diff-marks";
+import { diffMarks, setDeletedFile, setDiffMarks } from "../editor/diff-marks";
 import { flagDecorations, setFlagLines } from "../editor/flag-decorations";
 import { gruberDarkerTheme } from "../editor/gruber-darker";
 import { occurrenceHighlight } from "../editor/occurrences";
@@ -18,7 +18,7 @@ import { viewerKeymap } from "../editor/viewer-keymap";
 import { defineNavVim } from "../editor/vim-nav";
 import { visualLines } from "../editor/visual-lines";
 import { xrefClick } from "../editor/xref-click";
-import { changeBlocks, changeForFile } from "../lib/project-diff";
+import { changeBlocks, changeForFile, deletionForFile } from "../lib/project-diff";
 import { sideRead } from "../lib/project-review";
 import { occurrenceLookup } from "../lib/xref";
 import {
@@ -116,6 +116,12 @@ export default function FileView({ win, bufferId }: { win: WindowId; bufferId: F
     [diff, path, source],
   );
   const blocks = useMemo(() => (change ? changeBlocks(change) : []), [change]);
+  // Or the file as it was, when the comparison deletes it.
+  const deletion = useMemo(
+    () => (source ? deletionForFile(diff, source, path) : null),
+    [diff, path, source],
+  );
+  const deleted = deletion != null;
 
   // The viewer's vim mappings (`q` quits the window) are global to vim: defined once.
   useEffect(() => {
@@ -157,6 +163,10 @@ export default function FileView({ win, bufferId }: { win: WindowId; bufferId: F
     }));
     view.dispatch({ effects: setDiffMarks.of(shown) });
   }, [blocks, changedOnly, content, inlineDiff, inlineFlipped, view]);
+
+  useEffect(() => {
+    view?.dispatch({ effects: setDeletedFile.of(deleted) });
+  }, [deleted, view]);
 
   // A re-read replaces the whole document, which drops the cursor at its start: put it
   // back where the reader was.
@@ -238,6 +248,14 @@ export default function FileView({ win, bufferId }: { win: WindowId; bufferId: F
           >
             <span className="stat-add">+{change.addedLines}</span>{" "}
             <span className="stat-del">−{change.removedLines}</span>
+          </span>
+        )}
+        {deletion && (
+          <span
+            className="project-viewer-change"
+            title="deleted in the comparison on screen — read here as it was"
+          >
+            <span className="stat-del">deleted −{deletion.removedLines}</span>
           </span>
         )}
         {buffer.sourceLabel && (

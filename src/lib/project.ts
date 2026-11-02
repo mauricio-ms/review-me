@@ -67,10 +67,11 @@ export function ambientSource(comparison: Comparison | undefined): SourceChoice 
 }
 
 /**
- * The revision that holds a comparison's *old* side: the merge base for a branch
- * pair, the first parent for a single commit. Deleted files and old-side navigation
- * only exist there. A root commit has no old side, so it falls back to the commit
- * itself — nothing in its diff can ask for old-side content anyway.
+ * The revision that holds a comparison's *old* side: HEAD for the working tree, the
+ * merge base for a branch pair, the first parent for a single commit. Deleted files
+ * and old-side navigation only exist there. A root commit (or an unborn branch) has no
+ * old side, so it falls back to the new one — nothing in its diff can ask for old-side
+ * content anyway.
  */
 export function baseSource(comparison: Comparison | undefined): SourceChoice {
   switch (comparison?.kind) {
@@ -84,6 +85,13 @@ export function baseSource(comparison: Comparison | undefined): SourceChoice {
         ? {
             source: { kind: "commit", oid: comparison.parentOid },
             label: `${shortOid(comparison.parentOid)} (parent of ${comparison.shortOid})`,
+          }
+        : ambientSource(comparison);
+    case "worktree":
+      return comparison.headOid
+        ? {
+            source: { kind: "commit", oid: comparison.headOid },
+            label: `HEAD@${shortOid(comparison.headOid)}`,
           }
         : ambientSource(comparison);
     default:

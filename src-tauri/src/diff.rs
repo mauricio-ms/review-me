@@ -56,7 +56,13 @@ impl Default for DiffSpec {
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Comparison {
     #[serde(rename_all = "camelCase")]
-    Worktree { head: String, branch: String },
+    Worktree {
+        head: String,
+        branch: String,
+        /// HEAD's full oid — the old side, where a deleted file can still be read.
+        /// `None` on an unborn branch.
+        head_oid: Option<String>,
+    },
     #[serde(rename_all = "camelCase")]
     Branches {
         /// Canonical refs — the durable identity of the comparison.
@@ -204,9 +210,14 @@ fn compute_worktree(repo: &Repository) -> AppResult<DiffSummary> {
     }
 
     let (head, branch) = repo::head_info(repo);
+    let head_oid = repo
+        .head()
+        .and_then(|head| head.peel_to_commit())
+        .ok()
+        .map(|commit| commit.id().to_string());
     Ok(DiffSummary {
         repo_root: root.to_string_lossy().into_owned(),
-        comparison: Comparison::Worktree { head, branch },
+        comparison: Comparison::Worktree { head, branch, head_oid },
         files,
     })
 }
@@ -475,6 +486,7 @@ fn line_content(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::revision;
     use std::fs;
     use std::path::Path;
 
@@ -589,6 +601,33 @@ mod tests {
         let summary = compute(&repo, &DiffSpec::Worktree).unwrap();
         let file = summary.files.iter().find(|f| f.path == "a.txt").unwrap();
         assert_eq!(file.staged, Some(true), "a.txt should be marked staged");
+    }
+
+    #[test]
+    fn worktree_diff_names_head_where_a_deletion_is_still_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path();
+        run(path, &["init", "-q", "-b", "master"]);
+        let repo = Repository::open(path).unwrap();
+        let unborn = compute(&repo, &DiffSpec::Worktree).unwrap();
+        assert!(matches!(unborn.comparison, Comparison::Worktree { head_oid: None, .. }));
+
+        fs::write(path.join("gone.txt"), "delete me\n").unwrap();
+        run(path, &["add", "."]);
+        run(path, &["commit", "-qm", "init"]);
+        fs::remove_file(path.join("gone.txt")).unwrap();
+
+        let summary = compute(&repo, &DiffSpec::Worktree).unwrap();
+        let Comparison::Worktree { head_oid: Some(oid), .. } = &summary.comparison else {
+            panic!("a worktree comparison with HEAD's oid");
+        };
+        assert_eq!(*oid, oid_of(&repo, "HEAD"));
+        let source = revision::ProjectSource::Commit { oid: oid.clone() };
+        let root = repo::root(&repo).unwrap();
+        assert_eq!(
+            revision::read_file(&repo, &source, &root, "gone.txt").unwrap(),
+            "delete me\n"
+        );
     }
 
     /// `master` and `feature` both moved past the fork point; `feature` adds, deletes,

@@ -39,7 +39,13 @@ export const WORKTREE_SPEC: DiffSpec = { kind: "worktree" };
 
 /** Resolved metadata for the comparison a `DiffSummary` describes. */
 export type Comparison =
-  | { kind: "worktree"; head: string; branch: string }
+  | {
+      kind: "worktree";
+      head: string;
+      branch: string;
+      /** HEAD's full oid — the old side, where a deleted file is still read; null when unborn. */
+      headOid: string | null;
+    }
   | {
       kind: "branches";
       /** Canonical refs — the durable identity of the comparison. */

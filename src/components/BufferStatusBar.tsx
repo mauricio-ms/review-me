@@ -2,7 +2,7 @@ import { useMemo } from "react";
 
 import { useCurrentFile } from "../lib/buffers";
 import { reviewProgress } from "../lib/coverage";
-import { changeAtLine, changeBlocks, changeForFile } from "../lib/project-diff";
+import { changeAtLine, changeBlocks, changeForFile, deletionForFile } from "../lib/project-diff";
 import { timeAgo } from "../lib/time";
 import { bufferOnScreen, useFilesStore } from "../state/files";
 import { useRepoStore } from "../state/repo";
@@ -70,6 +70,10 @@ export default function BufferStatusBar() {
     return change ? changeBlocks(change) : null;
   }, [diff, file]);
   const onChange = blocks && line != null ? changeAtLine(blocks, line) : -1;
+  const deleted = useMemo(
+    () => (file ? deletionForFile(diff, file.source, file.path) != null : false),
+    [diff, file],
+  );
   // What the tree previews in the selected window is what that window has on screen.
   const previewKey = useWindowStore((s) => (s.preview?.win === s.selected ? s.preview.key : null));
   const previewPath = useFilesStore((s) =>
@@ -146,6 +150,11 @@ export default function BufferStatusBar() {
           {onChange >= 0
             ? `change ${onChange + 1}/${blocks.length}`
             : `${blocks.length} change${blocks.length === 1 ? "" : "s"}`}
+        </span>
+      )}
+      {file && !treeFocused && deleted && (
+        <span className="status-segment status-change" title="] f / [ f move between changed files">
+          deleted
         </span>
       )}
       {here && (

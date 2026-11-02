@@ -37,6 +37,12 @@ export const setDiffMarks = StateEffect.define<ShownBlock[]>();
  */
 export const revealBlock = StateEffect.define<string | null>();
 
+/**
+ * Mark the whole file as one the comparison deletes (false: it doesn't). It has no new
+ * side for change blocks to count in: every line it has is one that went.
+ */
+export const setDeletedFile = StateEffect.define<boolean>();
+
 /** A gutter sign: a bar for written lines, a notch where lines were removed. */
 class ChangeSign extends GutterMarker {
   constructor(readonly cls: string) {
@@ -116,6 +122,8 @@ const MODIFIED_LINE = lineClass("cm-diff-line-modified");
 // A shown change reads like the diff buffer: everything it wrote is new (green).
 const NEW_LINE = lineClass("cm-diff-line-new");
 const WORD = Decoration.mark({ class: "cm-diff-word" });
+const REMOVED_LINE = lineClass("cm-diff-line-removed");
+const REMOVED_SIGN = new ChangeSign("cm-diff-sign-removed-lines");
 
 function buildMarks(doc: Text, blocks: ShownBlock[], revealed: string | null): Marks {
   const deco: Range<Decoration>[] = [];
@@ -201,7 +209,33 @@ const diffMarksField = StateField.define<Marks>({
   provide: (f) => EditorView.decorations.from(f, (marks) => marks.deco),
 });
 
-const REMOVED_SIGN = new ChangeSign("cm-diff-sign-removed-lines");
+type Deleted = { deco: DecorationSet; signs: RangeSet<GutterMarker> } | null;
+
+/** A deleted file's marks: every line tinted and signed as removed. */
+function deletedMarks(doc: Text): Deleted {
+  const deco: Range<Decoration>[] = [];
+  const signs: Range<GutterMarker>[] = [];
+  // The empty line after a final newline is no line of the file's.
+  const last = doc.lines > 1 && doc.line(doc.lines).length === 0 ? doc.lines - 1 : doc.lines;
+  for (let ln = 1; ln <= last; ln++) {
+    const from = doc.line(ln).from;
+    deco.push(REMOVED_LINE.range(from));
+    signs.push(REMOVED_SIGN.range(from));
+  }
+  return { deco: Decoration.set(deco), signs: RangeSet.of(signs) };
+}
+
+const deletedField = StateField.define<Deleted>({
+  create: () => null,
+  update(marks, tr) {
+    for (const effect of tr.effects) {
+      if (effect.is(setDeletedFile)) return effect.value ? deletedMarks(tr.state.doc) : null;
+    }
+    // A re-read replaces the lines: mark the new ones.
+    return marks && tr.docChanged ? deletedMarks(tr.state.doc) : marks;
+  },
+  provide: (f) => EditorView.decorations.from(f, (marks) => marks?.deco ?? Decoration.none),
+});
 
 /** The change blocks marked in a viewer, as last set. */
 export function markedBlocks(state: EditorState): readonly ShownBlock[] {
@@ -219,12 +253,19 @@ export function removedLineElements(view: EditorView, block?: string): HTMLEleme
   return out;
 }
 
-/** The project viewer's change marks: add `diffMarks`, then dispatch `setDiffMarks`. */
+/**
+ * The project viewer's change marks: add `diffMarks`, then dispatch `setDiffMarks` (or
+ * `setDeletedFile`).
+ */
 export const diffMarks = [
   diffMarksField,
+  deletedField,
   gutter({
     class: "cm-diff-gutter",
-    markers: (view) => view.state.field(diffMarksField).signs,
+    markers: (view) => [
+      view.state.field(diffMarksField).signs,
+      view.state.field(deletedField)?.signs ?? RangeSet.empty,
+    ],
     // The inline removed lines get a red bar of their own.
     widgetMarker: (_view, widget) => (widget instanceof RemovedLines ? REMOVED_SIGN : null),
     initialSpacer: () => new ChangeSign(""),

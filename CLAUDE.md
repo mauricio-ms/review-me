@@ -397,9 +397,9 @@ Opening a file never replaces another: **`visitFile(path, choice, at?)`** (Emacs
 find-file) shows the buffer already open for `(revision, path)` in `targetWindow()`, or
 opens a new one (`FileBuffer`: path, its own `source`, content read by `read_file`). Each
 buffer carries its revision: `openFileFromDiff` opens a deletion at the **old side's**
-revision — the merge base, or the commit's first parent (`baseSource`), the only revision
-containing it — as its own buffer, and xref resolves in the revision of the buffer it
-starts from. The viewer's header names the revision whenever it isn't the worktree. A
+revision — HEAD for the working tree (`Comparison::Worktree.headOid`), the merge base, or
+the commit's first parent (`baseSource`), the only revision containing it — as its own
+buffer, and xref resolves in the revision of the buffer it starts from. The viewer's header names the revision whenever it isn't the worktree. A
 buffer's id (`file:<n>`) is stable, so a buffer can be re-pointed in place: on every
 `applyComparison`, `reconcileFileBuffers` keeps buffers whose revision the comparison still
 reads (re-reading working-tree ones — that is the refresh), re-points ones whose revision
@@ -465,8 +465,10 @@ tints always, and inline diffs — removed lines as block widgets, changed words
 for the blocks shown. Blocks come from `lib/project-diff.ts`'s `changeBlocks` (one per
 maximal removed+added run of a hunk) and only while the buffer reads the comparison's
 new side (`changeForFile`: its source must be `ambientSource`, so a file opened at
-the merge base shows no marks). `] c` / `[ c` (`gotoChange`) walk a file's blocks by their
-first line, `] f` / `[ f` (`gotoChangedFile`) the comparison's files in the changed-files
+the merge base shows no marks). A deletion has no new side: read at the old side
+(`deletionForFile`), every line is tinted and signed as removed (`setDeletedFile`).
+`] c` / `[ c` (`gotoChange`) walk a file's blocks by their first line, `] f` / `[ f`
+(`gotoChangedFile`) the comparison's files in the changed-files
 tree's order (`lib/changed-tree.ts`), opened at their first change; the mode line says
 `change i/n` from each window's published cursor line (`useUIStore.fileLines`).
 `changeBlocks` is cached per `ChangedFile`. `editor/overview-ruler.ts` draws the same
