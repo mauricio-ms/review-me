@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { LanguageDescription } from "@codemirror/language";
-import { languages } from "@codemirror/language-data";
 import { EditorState, type Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { getCM, vim } from "@replit/codemirror-vim";
@@ -11,6 +10,7 @@ import { swallowColonKeymap, vimEscapeKeymap, vimNavKeymap } from "../editor/cm-
 import { diffMarks, setDeletedFile, setDiffMarks } from "../editor/diff-marks";
 import { flagDecorations, setFlagLines } from "../editor/flag-decorations";
 import { gruberDarkerTheme } from "../editor/gruber-darker";
+import { languages } from "../editor/languages";
 import { occurrenceHighlight } from "../editor/occurrences";
 import { overviewRuler } from "../editor/overview-ruler";
 import { swiperHighlight } from "../editor/swiper";

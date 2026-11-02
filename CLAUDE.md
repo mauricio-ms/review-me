@@ -296,7 +296,9 @@ mode the first row is the commit itself (`kind: "commit"`: `Comparison::Commit`'
 author, date and `body`, which `TAB` folds to the subject); it belongs to no file, so read a
 row's file through `rowFile` rather than assuming every non-section row has one. Only the
 **file viewer** (`FileView.tsx`) uses CodeMirror (read-only + vim + per-file syntax
-highlighting lazy-loaded by extension via `@codemirror/language-data`).
+highlighting lazy-loaded by extension via `@codemirror/language-data`, which
+`editor/languages.ts` extends with Svelte (Replit's grammar) and Astro — HTML with TypeScript
+mixed over the frontmatter and each `{…}` by `parseMixed` overlays).
 
 **One row ≠ one visual line.** Line content wraps (`pre-wrap` + `overflow-wrap: anywhere`
 in `styles.css`) rather than truncating, so a row can be several lines tall: keep gutters
