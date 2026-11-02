@@ -60,7 +60,7 @@ pub fn is_declaration_name(node: Node) -> bool {
         | "type_alias_declaration" | "enum_declaration" | "internal_module"
         | "method_definition" | "method_signature" | "abstract_method_signature"
         | "public_field_definition" | "property_signature" | "type_parameter"
-        | "enum_assignment" => is_field(parent, "name", node),
+        | "enum_assignment" | "index_signature" => is_field(parent, "name", node),
         "field_definition" => is_field(parent, "property", node),
         "enum_body" => true,
         // An object literal's key.

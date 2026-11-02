@@ -337,3 +337,34 @@ fn audit_names_from_env() {
         eprintln!("  {s}");
     }
 }
+
+#[test]
+fn types_flow_through_destructuring_arrays_and_well_known_calls() {
+    let f = fixture(&[
+        ("src/model.ts", "export interface Commit {\n  subject: string;\n  author: Person;\n}\nexport interface Person {\n  name: string;\n}\nexport interface Props {\n  commits: Commit[];\n  pinned: Array<Commit>;\n}\n"),
+        (
+            "src/view.tsx",
+            "import { useState, useRef } from 'react';\nimport type { Commit, Props } from './model';\n\nexport function View({ commits, pinned: [top] }: Props) {\n  const [current] = useState<Commit | null>(null);\n  const box = useRef<Commit>(null);\n  for (const c of commits) {\n    c.author.name;\n  }\n  commits.map((c) => c.subject);\n  commits.filter(({ author }) => author.name);\n  return [top.subject, current!.subject, box.current!.author, commits[0].subject];\n}\n",
+        ),
+        ("src/store.ts", "import { ref, computed } from 'vue';\nimport type { Person } from './model';\nconst me = ref<Person>();\nconst label = computed(() => me.value!.name);\nme.value!.name;\n"),
+    ]);
+    assert_eq!(f.def_nth("src/view.tsx", "name;\n  }", 0, 0), s(&["src/model.ts:6"]), "for-of, then a member's type");
+    assert_eq!(f.def_nth("src/view.tsx", "subject);", 0, 0), s(&["src/model.ts:2"]), "a map callback");
+    assert_eq!(f.def_nth("src/view.tsx", "name);", 0, 0), s(&["src/model.ts:6"]), "a destructured callback parameter");
+    assert_eq!(f.def_nth("src/view.tsx", "subject, current", 0, 0), s(&["src/model.ts:2"]), "an array pattern in a typed parameter");
+    assert_eq!(f.def_nth("src/view.tsx", "subject, box", 0, 0), s(&["src/model.ts:2"]), "useState's first element");
+    assert_eq!(f.def_nth("src/view.tsx", "author, commits", 0, 0), s(&["src/model.ts:3"]), "useRef's current");
+    assert_eq!(f.def_nth("src/view.tsx", "subject];", 0, 0), s(&["src/model.ts:2"]), "an index");
+    assert_eq!(f.def_nth("src/store.ts", "name;\n", 0, 0), s(&["src/model.ts:6"]), "a ref's value");
+}
+
+#[test]
+fn store_selectors_read_the_store_state() {
+    let f = fixture(&[
+        ("src/store.ts", "import { create } from 'zustand';\nexport interface UIState {\n  picker: string | null;\n  open: (p: string) => void;\n}\nexport const useUI = create<UIState>()((set) => ({\n  picker: null,\n  open: (p) => set({ picker: p }),\n}));\n"),
+        ("src/view.tsx", "import { useUI } from './store';\nconst picker = useUI((s) => s.picker);\nconst state = useUI();\nstate.open('x');\nconst el = <input onKeyDown={(e) => e.key} />;\n"),
+    ]);
+    assert_eq!(f.def_nth("src/view.tsx", "picker);", 0, 0), s(&["src/store.ts:3"]));
+    assert_eq!(f.def_nth("src/view.tsx", "open('x')", 0, 0), s(&["src/store.ts:4"]));
+    assert!(f.def_nth("src/view.tsx", "key}", 0, 0).is_empty(), "a DOM event's member is the runtime's");
+}

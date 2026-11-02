@@ -596,7 +596,15 @@ globals (`declare global`, a script's top level, an auto-import's `typeof import
 and the runtime's (`builtins.rs`, External). A member types its receiver from declarations
 only — annotations, `new`, declared return types, object literals, `this` in a class,
 constructor parameter properties, `this.x =` in plain JS — and walks `extends`; a miss on a
-fully visible TypeScript declaration is External, anything else Unresolved. In JSX `<div>` is
+fully visible TypeScript declaration is External, anything else Unresolved. The few
+inferences it does still start from a declaration: a destructured name takes the type of
+what's destructured, key by key; arrays carry their element type into `for … of`, `a[i]` and
+the callbacks of `map`/`filter`/`find`/…; a union looks a member up in every variant (the
+discriminant answers Ambiguous, a narrowed member one variant); and a handful of library
+calls whose shape is the point of them are modelled (`known_call`: `useState`, `useRef`,
+`useMemo`, Vue's `ref`/`computed`/`reactive`/`defineProps`, Svelte's runes; `store_state`:
+a Zustand `create<State>()` hook's selectors). An intrinsic element's event handler
+parameter is the DOM's. In JSX `<div>` is
 External, `<Foo>` resolves as a name, and an attribute resolves to the component's
 destructured prop or props member. A module specifier resolves to its file
 (`Target::File`), so find-references on a module lists its imports; references also follow

@@ -66,7 +66,17 @@ enum Ty<'a> {
     Module(usize),
     /// An intersection: the members of all of them.
     All(Vec<Ty<'a>>),
+    /// A union: a member is any variant's that declares it — the one a narrowed
+    /// discriminated union means, or all of them for the discriminant itself.
+    Any(Vec<Ty<'a>>),
     Promise(Box<Ty<'a>>),
+    /// `T[]`, `Array<T>`: its own members are the runtime's, its elements a `T`.
+    Array(Box<Ty<'a>>),
+    /// `[A, B]`, and what `useState` returns.
+    Tuple(Vec<Ty<'a>>),
+    /// A library's wrapper whose one member holds the value: a ref's `.current` or
+    /// `.value`.
+    Boxed { key: &'static str, inner: Box<Ty<'a>> },
     External,
     Unknown,
 }
@@ -434,18 +444,23 @@ impl JsIndex {
             Ty::Shape { file, node } => {
                 node.kind() != "object" && self.parsed(*file).is_some_and(|p| p.typed)
             }
-            Ty::All(tys) => tys.iter().all(|t| self.typed(t)),
+            Ty::All(tys) | Ty::Any(tys) => tys.iter().all(|t| self.typed(t)),
             _ => false,
         }
     }
 
-    /// `{ name: alias } = value`: `name` is `value`'s member.
+    /// `{ name: alias } = value`: `name` is a member of what the pattern destructures.
     fn resolve_destructured<'a>(&'a self, file: usize, pair: Node<'a>, name: &str, depth: usize) -> Resolution {
-        let pattern = pair.parent().filter(|p| p.kind() == "object_pattern");
-        let declarator = pattern.and_then(|p| p.parent()).filter(|d| d.kind() == "variable_declarator");
-        match declarator.and_then(|d| d.child_by_field_name("value")) {
-            Some(value) => self.resolve_member_of(file, value, name, depth + 1),
-            None => Resolution::Unresolved,
+        let Some(pattern) = pair.parent().filter(|p| p.kind() == "object_pattern") else {
+            return Resolution::Unresolved;
+        };
+        let owner = self.pattern_type(file, pattern, depth + 1);
+        let typed = self.typed(&owner);
+        match self.lookup_member(&owner, name, depth + 1) {
+            Member::Hits(hits) => finish(hits),
+            Member::External => Resolution::External,
+            Member::Missing { complete: true } if typed => Resolution::External,
+            Member::Missing { .. } => Resolution::Unresolved,
         }
     }
 
@@ -458,7 +473,10 @@ impl JsIndex {
         let Some(tag) = element.child_by_field_name("name") else {
             return Resolution::Unresolved;
         };
-        if tag.kind() == "identifier" && text(tag, self.code(file)).starts_with(|c: char| c.is_ascii_lowercase()) {
+        let intrinsic =
+            tag.kind() == "identifier" && text(tag, self.code(file)).starts_with(|c: char| c.is_ascii_lowercase());
+        // `key` and `ref` are React's, whatever the element.
+        if intrinsic || matches!(name, "key" | "ref") {
             return Resolution::External;
         }
         let component = match self.resolve_at(file, tag, depth + 1) {
@@ -532,7 +550,11 @@ impl JsIndex {
         let code = self.code(file);
         match node.kind() {
             "identifier" | "shorthand_property_identifier" => {
-                match self.resolve_name(file, node, text(node, code), Space::Value, depth + 1) {
+                // `React` in `React.UIEvent`: a namespace named in a type, where an undeclared
+                // one is a library's like any undeclared type.
+                let in_type = node.parent().is_some_and(|p| p.kind() == "nested_type_identifier");
+                let space = if in_type { Space::Type } else { Space::Value };
+                match self.resolve_name(file, node, text(node, code), space, depth + 1) {
                     Resolution::Found(t) => self.target_type(&t, depth + 1),
                     Resolution::External => Ty::External,
                     _ => Ty::Unknown,
@@ -555,11 +577,23 @@ impl JsIndex {
                 let (Some(object), Some(prop)) = (object, prop) else {
                     return Ty::Unknown;
                 };
-                match self.resolve_member_of(file, object, text(prop, code), depth + 1) {
-                    Resolution::Found(t) => self.target_type(&t, depth + 1),
-                    Resolution::External => Ty::External,
-                    _ => Ty::Unknown,
+                let owner = self.expr_type(file, object, depth + 1);
+                self.member_type(&owner, text(prop, code), depth + 1)
+            }
+            "subscript_expression" => {
+                let (Some(object), Some(index)) = (node.child_by_field_name("object"), node.child_by_field_name("index")) else {
+                    return Ty::Unknown;
+                };
+                let owner = self.expr_type(file, object, depth + 1);
+                match index.kind() {
+                    "string" => self.member_type(&owner, string_value(index, code), depth + 1),
+                    "number" => index_type(owner, text(index, code).parse().ok()),
+                    _ => index_type(owner, None),
                 }
+            }
+            "array" => {
+                let first = node.named_child(0).map(|e| self.expr_type(file, e, depth + 1));
+                Ty::Array(Box::new(first.unwrap_or(Ty::Unknown)))
             }
             "call_expression" => {
                 if let Some(src) = required(node, code) {
@@ -582,10 +616,35 @@ impl JsIndex {
                     },
                     _ => Resolution::Unresolved,
                 };
+                if callee.kind() == "identifier" {
+                    if let Some(state) = self.store_state(file, callee, depth + 1) {
+                        // `useStore()` is the state; `useStore((s) => s.x)` what the selector picks.
+                        let selector = node.child_by_field_name("arguments").and_then(|a| a.named_child(0));
+                        return match selector {
+                            None => state,
+                            Some(f) if f.kind() == "arrow_function" => match f.child_by_field_name("body") {
+                                Some(body) if body.kind() != "statement_block" => self.expr_type(file, body, depth + 1),
+                                _ => Ty::Unknown,
+                            },
+                            Some(_) => Ty::Unknown,
+                        };
+                    }
+                }
                 match resolved {
                     Resolution::Found(t) => self.return_type(&t, depth + 1),
-                    Resolution::External => Ty::External,
-                    _ => Ty::Unknown,
+                    // A library's — or an auto-import's — function: its type is ours to
+                    // know only for the few whose shape is the point of them.
+                    other => {
+                        let name = match callee.kind() {
+                            "member_expression" => callee.child_by_field_name("property").map(|p| text(p, code)),
+                            _ => Some(text(callee, code)),
+                        };
+                        match name.and_then(|n| self.known_call(file, node, n, depth + 1)) {
+                            Some(ty) => ty,
+                            None if matches!(other, Resolution::External) => Ty::External,
+                            None => Ty::Unknown,
+                        }
+                    }
                 }
             }
             "new_expression" => match node.child_by_field_name("constructor") {
@@ -620,8 +679,8 @@ impl JsIndex {
             },
             "object" => Ty::Shape { file, node },
             "class" => Ty::Class { file, decl: node, instance: false },
-            "string" | "template_string" | "number" | "true" | "false" | "regex" | "array"
-            | "null" | "undefined" => Ty::External,
+            "string" | "template_string" | "number" | "true" | "false" | "regex" | "null"
+            | "undefined" => Ty::External,
             _ => Ty::Unknown,
         }
     }
@@ -679,7 +738,15 @@ impl JsIndex {
             "variable_declarator" | "public_field_definition" | "property_signature" | "field_definition" => {
                 typed(parent).or_else(|| value(parent)).unwrap_or(Ty::Unknown)
             }
-            "required_parameter" | "optional_parameter" => typed(parent).unwrap_or(Ty::Unknown),
+            "required_parameter" | "optional_parameter" => typed(parent)
+                .or_else(|| self.contextual_param(file, parent, depth + 1))
+                .unwrap_or(Ty::Unknown),
+            "formal_parameters" | "arrow_function" => {
+                self.contextual_param(file, node, depth + 1).unwrap_or(Ty::Unknown)
+            }
+            "for_in_statement" => self.iterated(file, parent, depth + 1),
+            "object_pattern" | "array_pattern" | "pair_pattern" | "object_assignment_pattern"
+            | "assignment_pattern" => self.pattern_type(file, node, depth + 1),
             "pair" => value(parent).unwrap_or(Ty::Unknown),
             k if is_class(k) => Ty::Class { file, decl: parent, instance: false },
             "interface_declaration" | "enum_declaration" | "internal_module" => Ty::Shape { file, node: parent },
@@ -775,15 +842,22 @@ impl JsIndex {
                 let Some(name) = ty.child_by_field_name("name") else {
                     return Ty::Unknown;
                 };
-                if matches!(text(name, code), "Promise" | "PromiseLike") {
-                    let inner = ty
-                        .child_by_field_name("type_arguments")
+                let inner = || {
+                    ty.child_by_field_name("type_arguments")
                         .and_then(|a| a.named_child(0))
                         .map(|a| self.type_of(file, a, depth + 1))
-                        .unwrap_or(Ty::Unknown);
-                    return Ty::Promise(Box::new(inner));
+                        .unwrap_or(Ty::Unknown)
+                };
+                match text(name, code) {
+                    "Promise" | "PromiseLike" => Ty::Promise(Box::new(inner())),
+                    "Array" | "ReadonlyArray" => Ty::Array(Box::new(inner())),
+                    "Ref" | "ShallowRef" | "ComputedRef" | "WritableComputedRef" => {
+                        Ty::Boxed { key: "value", inner: Box::new(inner()) }
+                    }
+                    "RefObject" | "MutableRefObject" => Ty::Boxed { key: "current", inner: Box::new(inner()) },
+                    "Readonly" | "Partial" | "Required" | "NonNullable" | "DeepReadonly" => inner(),
+                    _ => self.type_of(file, name, depth + 1),
                 }
-                self.type_of(file, name, depth + 1)
             }
             "object_type" => Ty::Shape { file, node: ty },
             "intersection_type" => {
@@ -797,7 +871,7 @@ impl JsIndex {
                 flatten_union(ty, code, &mut members);
                 match members.as_slice() {
                     [one] => self.type_of(file, *one, depth + 1),
-                    _ => Ty::Unknown,
+                    many => Ty::Any(many.iter().map(|m| self.type_of(file, *m, depth + 1)).collect()),
                 }
             }
             "type_query" => match ty.named_child(0) {
@@ -809,8 +883,16 @@ impl JsIndex {
                 Some(Resolution::External) => Ty::External,
                 _ => Ty::Unknown,
             },
-            "predefined_type" | "literal_type" | "array_type" | "tuple_type" | "function_type"
-            | "template_literal_type" => Ty::External,
+            "array_type" => match ty.named_child(0) {
+                Some(e) => Ty::Array(Box::new(self.type_of(file, e, depth + 1))),
+                None => Ty::External,
+            },
+            "tuple_type" => {
+                let mut cur = ty.walk();
+                let parts: Vec<Node> = ty.named_children(&mut cur).collect();
+                Ty::Tuple(parts.into_iter().map(|p| self.type_of(file, p, depth + 1)).collect())
+            }
+            "predefined_type" | "literal_type" | "function_type" | "template_literal_type" => Ty::External,
             _ => Ty::Unknown,
         }
     }
@@ -842,6 +924,222 @@ impl JsIndex {
         }
     }
 
+    /// The type of `owner`'s member `name`: what its declaration declares, or what a
+    /// wrapper holds.
+    fn member_type<'a>(&'a self, owner: &Ty<'a>, name: &str, depth: usize) -> Ty<'a> {
+        if let Ty::Boxed { key, inner } = owner {
+            if *key == name {
+                return (**inner).clone();
+            }
+        }
+        match self.lookup_member(owner, name, depth + 1) {
+            Member::Hits(hits) if hits.len() == 1 => self.target_type(&hits[0], depth + 1),
+            Member::External => Ty::External,
+            _ => Ty::Unknown,
+        }
+    }
+
+    /// The type of a name a destructuring pattern binds: the type of what's destructured,
+    /// followed key by key and index by index down to the name.
+    fn pattern_type<'a>(&'a self, file: usize, binding: Node<'a>, depth: usize) -> Ty<'a> {
+        enum Step {
+            Key(String),
+            Index(usize),
+        }
+        let code = self.code(file);
+        let mut steps = Vec::new();
+        let mut child = binding;
+        let root = loop {
+            let Some(p) = child.parent() else {
+                return Ty::Unknown;
+            };
+            let is = |field: &str| p.child_by_field_name(field).map(|n| n.id()) == Some(child.id());
+            match p.kind() {
+                "object_pattern" => {
+                    if child.kind() == "shorthand_property_identifier_pattern" {
+                        steps.push(Step::Key(text(child, code).to_string()));
+                    }
+                }
+                "object_assignment_pattern" => {
+                    if !is("left") {
+                        return Ty::Unknown;
+                    }
+                    steps.push(Step::Key(text(child, code).to_string()));
+                }
+                "pair_pattern" => match p.child_by_field_name("key") {
+                    Some(k) if is("value") => steps.push(Step::Key(member_name(k, code).to_string())),
+                    _ => return Ty::Unknown,
+                },
+                "array_pattern" => {
+                    let mut cur = p.walk();
+                    let at = p.named_children(&mut cur).position(|c| c.id() == child.id());
+                    steps.push(Step::Index(at.unwrap_or(0)));
+                }
+                "assignment_pattern" => {
+                    if !is("left") {
+                        return Ty::Unknown;
+                    }
+                }
+                "variable_declarator" => {
+                    let declared = p.child_by_field_name("type").map(|t| self.type_of(file, t, depth + 1));
+                    break declared
+                        .or_else(|| p.child_by_field_name("value").map(|v| self.expr_type(file, v, depth + 1)))
+                        .unwrap_or(Ty::Unknown);
+                }
+                "required_parameter" | "optional_parameter" => {
+                    break p
+                        .child_by_field_name("type")
+                        .map(|t| self.type_of(file, t, depth + 1))
+                        .or_else(|| self.contextual_param(file, p, depth + 1))
+                        .unwrap_or(Ty::Unknown);
+                }
+                "formal_parameters" => break self.contextual_param(file, child, depth + 1).unwrap_or(Ty::Unknown),
+                "for_in_statement" => break self.iterated(file, p, depth + 1),
+                _ => return Ty::Unknown,
+            }
+            child = p;
+        };
+        let mut ty = root;
+        for step in steps.into_iter().rev() {
+            ty = match step {
+                Step::Key(k) => self.member_type(&ty, &k, depth + 1),
+                Step::Index(i) => index_type(ty, Some(i)),
+            };
+        }
+        ty
+    }
+
+    /// An unannotated callback parameter's type from the call it's passed to:
+    /// `items.map((item) => ..)` gives `item` the array's element type, `.then((v) => ..)`
+    /// the promised one.
+    fn contextual_param<'a>(&'a self, file: usize, param: Node<'a>, depth: usize) -> Option<Ty<'a>> {
+        let holder = param.parent()?;
+        let (func, index) = match holder.kind() {
+            "formal_parameters" => {
+                let mut cur = holder.walk();
+                let index = holder.named_children(&mut cur).position(|c| c.id() == param.id())?;
+                (holder.parent()?, index)
+            }
+            "arrow_function" => (holder, 0),
+            _ => return None,
+        };
+        if !matches!(func.kind(), "arrow_function" | "function_expression") {
+            return None;
+        }
+        // `onClick={(e) => ..}` on an intrinsic element: a DOM event, the runtime's.
+        let attr = func.parent().filter(|p| p.kind() == "jsx_expression").and_then(|p| p.parent());
+        if let Some(attr) = attr.filter(|a| a.kind() == "jsx_attribute") {
+            let element = attr.parent().and_then(|e| e.child_by_field_name("name"));
+            let intrinsic = element.is_some_and(|n| {
+                n.kind() == "identifier" && text(n, self.code(file)).starts_with(|c: char| c.is_ascii_lowercase())
+            });
+            return intrinsic.then_some(Ty::External);
+        }
+        let args = func.parent().filter(|a| a.kind() == "arguments")?;
+        let mut cur = args.walk();
+        let arg_pos = args.named_children(&mut cur).position(|c| c.id() == func.id())?;
+        let call = args.parent().filter(|c| c.kind() == "call_expression")?;
+        let callee = call.child_by_field_name("function")?;
+        if callee.kind() == "identifier" {
+            // A store hook's selector: `useStore((s) => s.x)` reads the store's state.
+            return match (self.store_state(file, callee, depth + 1), arg_pos, index) {
+                (Some(state), 0, 0) => Some(state),
+                _ => None,
+            };
+        }
+        let callee = Some(callee).filter(|f| f.kind() == "member_expression")?;
+        let method = text(callee.child_by_field_name("property")?, self.code(file));
+        let receiver = self.expr_type(file, callee.child_by_field_name("object")?, depth + 1);
+        match (receiver, method, arg_pos, index) {
+            (
+                Ty::Array(e),
+                "map" | "forEach" | "filter" | "find" | "findLast" | "some" | "every" | "flatMap"
+                | "findIndex" | "findLastIndex" | "toSorted",
+                0,
+                0,
+            ) => Some(*e),
+            (Ty::Array(e), "sort" | "toSorted", 0, 0 | 1) => Some(*e),
+            (Ty::Array(e), "reduce" | "reduceRight", 0, 1) => Some(*e),
+            (Ty::Promise(inner), "then", 0, 0) => Some(*inner),
+            _ => None,
+        }
+    }
+
+    /// The state of a store hook `callee` names — `const useStore = create<State>(..)`,
+    /// Zustand's (or `create<State>()(..)`, its curried TypeScript form).
+    fn store_state<'a>(&'a self, file: usize, callee: Node<'a>, depth: usize) -> Option<Ty<'a>> {
+        let name = text(callee, self.code(file));
+        if !name.starts_with("use") {
+            return None;
+        }
+        let Resolution::Found(Target::Decl { file: df, byte }) = self.resolve_name(file, callee, name, Space::Value, depth + 1) else {
+            return None;
+        };
+        let decl = self.node_at(df, byte)?.parent().filter(|p| p.kind() == "variable_declarator")?;
+        let dcode = self.code(df);
+        let mut call = decl.child_by_field_name("value").filter(|v| v.kind() == "call_expression")?;
+        // `create<State>()(...)`: the type argument is on the inner call.
+        while let Some(inner) = call.child_by_field_name("function").filter(|f| f.kind() == "call_expression") {
+            call = inner;
+        }
+        let creator = text(call.child_by_field_name("function")?, dcode);
+        if !matches!(creator, "create" | "createStore" | "createWithEqualityFn" | "zustand.create") {
+            return None;
+        }
+        let state = call.child_by_field_name("type_arguments")?.named_child(0)?;
+        Some(self.type_of(df, state, depth + 1))
+    }
+
+    /// The type a `for (.. of x)` binding takes: an element of `x`.
+    fn iterated<'a>(&'a self, file: usize, stmt: Node<'a>, depth: usize) -> Ty<'a> {
+        let mut cur = stmt.walk();
+        let of = stmt.children(&mut cur).any(|c| c.kind() == "of");
+        match stmt.child_by_field_name("right") {
+            Some(right) if of => index_type(self.expr_type(file, right, depth + 1), None),
+            // `for (.. in x)`: its keys, strings.
+            _ => Ty::External,
+        }
+    }
+
+    /// What a call to one of the few library functions whose type is the point of them
+    /// returns: React's `useState`/`useRef`/`useMemo`, Vue's `ref`/`computed`/`reactive`/
+    /// `defineProps`, Svelte's runes.
+    fn known_call<'a>(&'a self, file: usize, call: Node<'a>, name: &str, depth: usize) -> Option<Ty<'a>> {
+        let type_arg = || {
+            call.child_by_field_name("type_arguments")
+                .and_then(|a| a.named_child(0))
+                .map(|t| self.type_of(file, t, depth + 1))
+        };
+        let arg = call.child_by_field_name("arguments").and_then(|a| a.named_child(0));
+        // An initializer's value, or what a lazy initializer or getter returns.
+        let value = || match arg {
+            Some(a) if matches!(a.kind(), "arrow_function" | "function_expression") => {
+                let body = a.child_by_field_name("body")?;
+                if body.kind() == "statement_block" {
+                    a.child_by_field_name("return_type").map(|r| self.type_of(file, r, depth + 1))
+                } else {
+                    Some(self.expr_type(file, body, depth + 1))
+                }
+            }
+            Some(a) => Some(self.expr_type(file, a, depth + 1)),
+            None => None,
+        };
+        let held = || type_arg().or_else(value).unwrap_or(Ty::Unknown);
+        Some(match name {
+            "useState" | "useSignal" => Ty::Tuple(vec![held(), Ty::External]),
+            "useRef" | "createRef" => Ty::Boxed { key: "current", inner: Box::new(held()) },
+            "useMemo" | "useDeferredValue" | "$derived" => held(),
+            "ref" | "shallowRef" | "toRef" | "computed" => Ty::Boxed { key: "value", inner: Box::new(held()) },
+            "reactive" | "shallowReactive" | "readonly" | "markRaw" | "toRaw" | "$state"
+            | "structuredClone" | "freeze" | "withDefaults" => held(),
+            "defineProps" | "inject" | "useContext" => type_arg().or_else(|| match arg {
+                Some(a) if a.kind() == "object" => Some(Ty::Shape { file, node: a }),
+                _ => None,
+            })?,
+            _ => return None,
+        })
+    }
+
     // -----------------------------------------------------------------------------
     // Members
     // -----------------------------------------------------------------------------
@@ -852,7 +1150,7 @@ impl JsIndex {
         }
         match ty {
             Ty::Unknown => Member::Missing { complete: false },
-            Ty::External | Ty::Promise(_) => Member::External,
+            Ty::External | Ty::Promise(_) | Ty::Array(_) | Ty::Tuple(_) | Ty::Boxed { .. } => Member::External,
             Ty::Module(fi) => match self.resolve_export(*fi, name, depth + 1, &mut Vec::new()) {
                 Resolution::Found(t) => Member::Hits(vec![t]),
                 Resolution::Ambiguous(ts) => Member::Hits(ts),
@@ -874,6 +1172,25 @@ impl JsIndex {
                     Member::Hits(hits)
                 } else if external {
                     Member::Missing { complete: false }
+                } else {
+                    Member::Missing { complete }
+                }
+            }
+            Ty::Any(variants) => {
+                let mut hits = Vec::new();
+                let mut complete = true;
+                let mut external = 0;
+                for v in variants {
+                    match self.lookup_member(v, name, depth + 1) {
+                        Member::Hits(h) => hits.extend(h.into_iter().filter(|t| !hits.contains(t)).collect::<Vec<_>>()),
+                        Member::External => external += 1,
+                        Member::Missing { complete: c } => complete &= c,
+                    }
+                }
+                if !hits.is_empty() {
+                    Member::Hits(hits)
+                } else if external == variants.len() {
+                    Member::External
                 } else {
                     Member::Missing { complete }
                 }
@@ -1169,6 +1486,15 @@ fn component_function_value(value: Node) -> Option<Node> {
             value.named_child(0).and_then(component_function_value)
         }
         _ => None,
+    }
+}
+
+/// An element of an array or tuple: the `index`-th, or any.
+fn index_type(ty: Ty, index: Option<usize>) -> Ty {
+    match (ty, index) {
+        (Ty::Array(e), _) => *e,
+        (Ty::Tuple(mut parts), Some(i)) if i < parts.len() => parts.swap_remove(i),
+        _ => Ty::Unknown,
     }
 }
 
