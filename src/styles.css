@@ -959,6 +959,12 @@ kbd {
   font-weight: 400;
 }
 
+.diff-file-generated {
+  color: var(--fg-faint);
+  font-size: var(--fs-sm);
+  font-weight: 400;
+}
+
 /* ---------- log buffer (commits) ---------- */
 
 .log-buffer {

@@ -16,6 +16,7 @@ import { applyComparison, refreshDiff } from "../lib/open-repo";
 import { resizeTree, revealFile, toggleChangedOnly, toggleTree } from "../lib/project";
 import { toggleChangesAtCursor } from "../lib/project-diff";
 import { flagHere } from "../lib/project-review";
+import { ignoreGeneratedFiles } from "../lib/review-actions";
 import { adjustTextScale } from "../lib/text-scale";
 import { versionLine } from "../lib/version";
 import {
@@ -74,6 +75,7 @@ export type CommandId =
   | "worktree"
   | "commit-reviewed"
   | "clear"
+  | "ignore-generated"
   | "diff"
   | "project"
   | "switch-buffer"
@@ -198,6 +200,22 @@ export function useCommands(close: CommandClose): {
     close({ restoreFocus: false });
     openPicker("clearTags");
   }, [close, openPicker]);
+
+  const handleIgnoreGenerated = useCallback(async () => {
+    close({ restoreFocus: false });
+    try {
+      const n = await ignoreGeneratedFiles();
+      useUIStore
+        .getState()
+        .showFlash(
+          n === 0
+            ? "No generated files left to review"
+            : `Ignored ${n} generated file${n === 1 ? "" : "s"}`,
+        );
+    } finally {
+      requestFocus();
+    }
+  }, [close, requestFocus]);
 
   const handleCommitReviewed = useCallback(() => {
     close({ restoreFocus: false });
@@ -595,6 +613,14 @@ export function useCommands(close: CommandClose): {
       // `M-x` only — no key for a destructive action.
       enabled: !!repo,
       run: handleClearTags,
+    },
+    {
+      id: "ignore-generated",
+      name: "ignore-generated",
+      aliases: ["generated", "ignore-lockfiles"],
+      label: "ignore the generated files still to review (lockfiles, bundles, codegen)",
+      enabled: !!repo,
+      run: handleIgnoreGenerated,
     },
     {
       id: "diff",

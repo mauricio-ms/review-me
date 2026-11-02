@@ -1289,6 +1289,14 @@ export default function DiffBuffer() {
                     ✎ {fileNotes}
                   </span>
                 )}
+                {f.generated && (
+                  <span
+                    className="diff-file-generated"
+                    title="generated: M-x ignore-generated sets these aside"
+                  >
+                    generated
+                  </span>
+                )}
                 {f.staged === true && (
                   <span className="diff-staged-dot" title="staged">
                     ●

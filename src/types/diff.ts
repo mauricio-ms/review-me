@@ -110,6 +110,11 @@ export interface ChangedFile {
   addedLines: number;
   removedLines: number;
   binary: boolean;
+  /**
+   * A lockfile, bundle, snapshot or codegen output, by `.gitattributes`, name or header.
+   * Only a label: it stays in the review until `M-x ignore-generated` sets it aside.
+   */
+  generated: boolean;
 }
 
 export interface DiffSummary {

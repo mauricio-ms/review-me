@@ -7,6 +7,7 @@ mod diff;
 mod error;
 mod fs_browse;
 mod fuzzy;
+mod generated;
 mod notes;
 mod queries;
 mod repo;

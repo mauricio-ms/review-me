@@ -18,7 +18,7 @@ import {
   setFlagNote,
   unmarkRange,
 } from "./tauri";
-import { hunkTarget } from "./coverage";
+import { fileReviewState, hunkTarget } from "./coverage";
 import { hasNote } from "./notes";
 import type { NoteEdit } from "../state/notes";
 
@@ -75,6 +75,24 @@ export function reviewWholeFile(file: ChangedFile): Promise<void> {
 /** Ignore a whole file, unit by unit — so it leaves the review however its hunks lie. */
 export function ignoreWholeFile(file: ChangedFile): Promise<void> {
   return markEachUnit(file, addIgnoredTag);
+}
+
+/**
+ * Ignore every generated file (`ChangedFile.generated`) still open in the review — the
+ * lockfiles and bundles a change drags along — leaving flagged and finished ones be.
+ * How many it ignored.
+ */
+export async function ignoreGeneratedFiles(): Promise<number> {
+  const files = useRepoStore.getState().diff?.files ?? [];
+  let count = 0;
+  for (const file of files) {
+    if (!file.generated) continue;
+    const { reviewed, flags, ignored } = useTagsStore.getState();
+    if (fileReviewState(reviewed, flags, ignored, file) !== "open") continue;
+    await ignoreWholeFile(file);
+    count += 1;
+  }
+  return count;
 }
 
 /** Ask a `y` / `n` question in the minibuffer. */
