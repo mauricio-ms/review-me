@@ -17,7 +17,7 @@ use crate::review_commit::{
 };
 use crate::tags::{self, AnchorKind, AnchorSide, ReviewScope, TagStore};
 use crate::tree::{self, TreeListing};
-use crate::xref::{self, IndexStats, Occurrences, SymbolRef, XrefResult};
+use crate::xref::{self, Audit, IndexStats, Occurrences, SymbolRef, XrefResult};
 
 /// Resolve and validate the repo at `repo`, returning its canonical working-dir root.
 fn repo_root(repo: String) -> AppResult<PathBuf> {
@@ -283,6 +283,16 @@ pub fn build_symbol_index(repo: String, source: ProjectSource) -> AppResult<Inde
 #[tauri::command]
 pub fn xref_extensions() -> Vec<&'static str> {
     xref::indexed_extensions()
+}
+
+/// How well the revision's JavaScript and TypeScript imports resolve: what
+/// cross-references can't follow in a project whose setup they don't read.
+#[tauri::command]
+pub fn xref_audit(repo: String, source: ProjectSource) -> AppResult<Audit> {
+    let repository = repo::open(&PathBuf::from(repo))?;
+    let root = repo::root(&repository)?;
+    let files = fuzzy::repo_files(&repository, &source)?;
+    xref::audit(&repository, &root, &source, &files)
 }
 
 /// Resolve the symbol under a cursor position (1-based line, 0-based col).

@@ -56,6 +56,7 @@ pub fn run() {
             commands::list_repo_dir,
             commands::build_symbol_index,
             commands::xref_extensions,
+            commands::xref_audit,
             commands::symbol_at,
             commands::find_definition,
             commands::find_references,

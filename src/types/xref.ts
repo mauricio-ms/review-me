@@ -46,3 +46,17 @@ export interface Occurrences {
   /** 1-based line, 0-based UTF-16 column; the cursor's own one included. */
   spans: { line: number; col: number }[];
 }
+
+/** `xref_audit`: where a revision's JavaScript and TypeScript imports lead. */
+export interface ImportAudit {
+  files: number;
+  imports: number;
+  /** Into the project's own files. */
+  resolved: number;
+  /** Packages, the runtime, a framework's virtual modules. */
+  external: number;
+  /** Every import nothing accounts for, where it's written. */
+  unresolved: XrefResult[];
+  /** The unresolved ones by how they start (`@/…`, `./…`, a package), most first. */
+  patterns: [string, number][];
+}

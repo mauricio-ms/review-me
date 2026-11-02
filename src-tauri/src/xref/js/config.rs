@@ -78,7 +78,7 @@ fn depends_on(json: &Value, name: &str) -> bool {
 }
 
 /// The aliases frameworks add on their own, by the config file that says it's theirs.
-fn conventions(project: &Project, rel: &str, stem: &str, code: &str, out: &mut Vec<Alias>) {
+fn conventions(project: &mut Project, rel: &str, stem: &str, code: &str, out: &mut Vec<Alias>) {
     let dir = parent(rel);
     let alias = |find: &str, to: String| Alias { scope: dir.to_string(), find: find.to_string(), replacement: to };
     match stem {
@@ -87,6 +87,14 @@ fn conventions(project: &Project, rel: &str, stem: &str, code: &str, out: &mut V
             out.push(alias("$lib", under(dir, &lib)));
         }
         "nuxt.config" => {
+            // Modules Nuxt and its modules generate: nothing in the project defines them.
+            for prefix in [
+                "#app", "#build", "#head", "#vue-router", "#internal", "#nitro", "#unhead",
+                "#content", "#i18n", "#ui", "#color-mode", "#image", "#site-config", "#imports",
+                "#components", "#auth-utils", "#hub", "#supabase", "#pwa",
+            ] {
+                project.add_virtual(dir, prefix);
+            }
             let src = match literal_option(code, "srcDir") {
                 Some(s) => under(dir, &s),
                 // Nuxt 4 moved the app into `app/`.
@@ -106,6 +114,8 @@ fn conventions(project: &Project, rel: &str, stem: &str, code: &str, out: &mut V
             }
             out.push(alias("assets", format!("{src}/assets").trim_start_matches('/').to_string()));
             out.push(alias("public", under(dir, "public")));
+            out.push(alias("#shared", under(dir, "shared")));
+            out.push(alias("#server", under(dir, "server")));
         }
         "quasar.config" | "quasar.conf" => {
             for folder in ["components", "layouts", "pages", "assets", "boot", "stores"] {

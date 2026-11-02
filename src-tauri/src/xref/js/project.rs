@@ -90,10 +90,14 @@ pub struct Project {
     files: HashSet<String>,
     dirs: HashSet<String>,
     packages: Vec<Package>,
-    by_name: HashMap<String, usize>,
+    /// Packages by name — several, when a repo holds templates or fixtures that reuse one.
+    by_name: HashMap<String, Vec<usize>>,
     deps: HashSet<String>,
     configs: Vec<TsConfig>,
     aliases: Vec<Alias>,
+    /// Module prefixes a framework makes up at build time (Nuxt's `#app`), by the folder
+    /// whose files see them.
+    virtual_modules: Vec<(String, String)>,
     /// Folder → the configs that may apply to its files, best first.
     configs_by_dir: RefCell<HashMap<String, Vec<usize>>>,
 }
@@ -130,11 +134,11 @@ impl Project {
         }
         // Shallower packages first, so a fixture's copy of a name never shadows the real one.
         packages.sort_by_key(|p| (p.dir.matches('/').count(), p.dir.clone()));
-        let mut by_name = HashMap::new();
+        let mut by_name: HashMap<String, Vec<usize>> = HashMap::new();
         let mut deps = HashSet::new();
         for (i, p) in packages.iter().enumerate() {
             if let Some(name) = p.json.get("name").and_then(Value::as_str) {
-                by_name.entry(name.to_string()).or_insert(i);
+                by_name.entry(name.to_string()).or_default().push(i);
             }
             for field in [
                 "dependencies",
@@ -155,6 +159,7 @@ impl Project {
             deps,
             configs: Vec::new(),
             aliases: Vec::new(),
+            virtual_modules: Vec::new(),
             configs_by_dir: RefCell::new(HashMap::new()),
         };
         let mut configs = Vec::new();
@@ -179,6 +184,27 @@ impl Project {
 
     pub fn add_alias(&mut self, alias: Alias) {
         self.aliases.push(alias);
+    }
+
+    /// Specifiers starting `prefix` are a framework's own modules for files under `scope`.
+    pub fn add_virtual(&mut self, scope: &str, prefix: &str) {
+        self.virtual_modules.push((scope.to_string(), prefix.to_string()));
+    }
+
+    /// The package named `name` nearest `from`: the one sharing most of its path, as a
+    /// workspace's own copy beats a template's.
+    fn package_named(&self, name: &str, from: &str) -> Option<usize> {
+        let shared = |dir: &str| {
+            dir.split('/')
+                .zip(from.split('/'))
+                .take_while(|(a, b)| a == b)
+                .count()
+        };
+        self.by_name
+            .get(name)?
+            .iter()
+            .copied()
+            .max_by_key(|&i| (shared(&self.packages[i].dir), std::cmp::Reverse(i)))
     }
 
     /// Files whose name is `stem` with one of `extensions`, sorted.
@@ -222,14 +248,26 @@ impl Project {
         if EXTERNAL_PREFIXES.iter().any(|p| spec.starts_with(p)) {
             return ModuleRes::External;
         }
+        if self
+            .virtual_modules
+            .iter()
+            .any(|(scope, prefix)| spec.starts_with(prefix.as_str()) && within(from, scope))
+        {
+            return ModuleRes::External;
+        }
         if spec.starts_with("./") || spec.starts_with("../") || spec == "." || spec == ".." {
-            return self.found(join(parent(from), spec).and_then(|p| self.probe(&p)));
+            let Some(path) = join(parent(from), spec) else {
+                return ModuleRes::Unresolved;
+            };
+            return self.found(self.probe(&path).or_else(|| self.built_entry(&path)));
         }
         if let Some(abs) = spec.strip_prefix('/') {
+            // From the project root a bundler serves, or the `public/` folder it copies.
             let root = self.package_root(from);
-            let found = join(root, abs)
-                .and_then(|p| self.probe(&p))
-                .or_else(|| self.probe(abs));
+            let found = [join(root, abs), join(root, &format!("public/{abs}")), Some(abs.to_string())]
+                .into_iter()
+                .flatten()
+                .find_map(|p| self.probe(&p));
             return self.found(found);
         }
         if spec.starts_with('#') {
@@ -257,7 +295,7 @@ impl Project {
             return ModuleRes::Unresolved;
         }
         let (name, sub) = split_package(spec);
-        if let Some(&pkg) = self.by_name.get(name) {
+        if let Some(pkg) = self.package_named(name, from) {
             return self.found(self.resolve_package(pkg, &sub));
         }
         if self.deps.contains(name) || NODE_BUILTINS.contains(&name) {
@@ -374,7 +412,22 @@ impl Project {
                 return Some(found);
             }
         }
+        if sub != "." {
+            // `vue/dist/vue.runtime.esm-browser.js`: a bundle of the package, which isn't
+            // committed — its entry is what it bundles.
+            return join(&p.dir, &sub).and_then(|path| self.built_entry(&path));
+        }
         None
+    }
+
+    /// A path into a package's build output that isn't there: the package's entry, which
+    /// the build bundles (`packages/x/dist/x.cjs.js` → `packages/x/src/index.ts`).
+    fn built_entry(&self, path: &str) -> Option<String> {
+        let segments: Vec<&str> = path.split('/').collect();
+        let at = segments.iter().position(|s| BUILD_DIRS.contains(s))?;
+        let dir = segments[..at].join("/");
+        let pkg = self.packages.iter().position(|p| p.dir == dir)?;
+        self.resolve_package(pkg, ".")
     }
 
     /// The source a build output path stands for: `dist/index.js` → `src/index.ts`.
@@ -415,7 +468,7 @@ impl Project {
             }
             // `#db` → `some-package`: an external one, or a workspace one.
             let (name, sub) = split_package(&target);
-            if let Some(&pkg) = self.by_name.get(name) {
+            if let Some(pkg) = self.package_named(name, from) {
                 return self.resolve_package(pkg, &sub);
             }
         }
@@ -458,8 +511,7 @@ impl Project {
     fn via_aliases(&self, from: &str, spec: &str) -> Option<ModuleRes> {
         let mut best: Option<&Alias> = None;
         for alias in &self.aliases {
-            let applies = alias.scope.is_empty()
-                || from.starts_with(&format!("{}/", alias.scope));
+            let applies = within(from, &alias.scope);
             let matches = spec == alias.find
                 || spec
                     .strip_prefix(alias.find.as_str())
@@ -561,7 +613,7 @@ impl Project {
             vec![join(dir, spec)?]
         } else {
             let (name, sub) = split_package(spec);
-            let pkg = &self.packages[*self.by_name.get(name)?];
+            let pkg = &self.packages[self.package_named(name, dir)?];
             let target = if sub == "." { "tsconfig.json".to_string() } else { sub };
             vec![join(&pkg.dir, &target)?]
         };
@@ -727,7 +779,7 @@ pub fn split_package(spec: &str) -> (&str, String) {
 }
 
 /// Whether `name` could be an npm package's name.
-fn is_package_name(name: &str) -> bool {
+pub fn is_package_name(name: &str) -> bool {
     let ok = |s: &str| {
         !s.is_empty()
             && !s.starts_with('.')
@@ -739,6 +791,11 @@ fn is_package_name(name: &str) -> bool {
         Some(scoped) => scoped.split_once('/').is_some_and(|(s, n)| ok(s) && ok(n)),
         None => ok(name),
     }
+}
+
+/// Whether the file `rel` sits under the folder `dir` (`""` holds everything).
+fn within(rel: &str, dir: &str) -> bool {
+    dir.is_empty() || rel.starts_with(&format!("{dir}/"))
 }
 
 /// `a/b/c.ts` → `a/b`; a top-level file → `""`.
@@ -883,6 +940,25 @@ mod tests {
         assert_eq!(p.resolve(from, "virtual:pwa-register"), ModuleRes::External);
         assert_eq!(p.resolve(from, "@/thing"), ModuleRes::Unresolved, "an alias nobody declared");
         assert_eq!(p.resolve(from, "$lib/x"), ModuleRes::Unresolved);
+    }
+
+    #[test]
+    fn nearest_package_of_a_name_and_build_output() {
+        let p = project(&[
+            ("templates/a/packages/ui/package.json", r#"{ "name": "@ws/ui", "exports": { "./*": "./src/*.tsx" } }"#),
+            ("templates/a/packages/ui/src/button.tsx", ""),
+            ("templates/b/packages/ui/package.json", r#"{ "name": "@ws/ui", "exports": { "./*": "./src/*.tsx" } }"#),
+            ("templates/b/packages/ui/src/button.tsx", ""),
+            ("packages/core/package.json", r#"{ "name": "core", "main": "index.js" }"#),
+            ("packages/core/index.js", ""),
+            ("packages/core/src/index.ts", ""),
+            ("web/public/logo.svg", ""),
+            ("web/package.json", "{}"),
+        ]);
+        assert_eq!(p.resolve("templates/b/apps/web/page.tsx", "@ws/ui/button"), file("templates/b/packages/ui/src/button.tsx"));
+        assert_eq!(p.resolve("templates/a/apps/web/page.tsx", "@ws/ui/button"), file("templates/a/packages/ui/src/button.tsx"));
+        assert_eq!(p.resolve("packages/core/bench/x.ts", "../dist/core.esm.prod"), file("packages/core/index.js"));
+        assert_eq!(p.resolve("web/src/App.tsx", "/logo.svg"), file("web/public/logo.svg"));
     }
 
     #[test]

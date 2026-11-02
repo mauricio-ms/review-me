@@ -608,5 +608,92 @@ pub fn occurrences(
     Ok(Some(Occurrences { name, spans }))
 }
 
+/// How well a revision's imports resolve: every module specifier its scripts write,
+/// sorted into the project's own files, the outside world's, and the ones nothing
+/// accounts for — what makes resolution fall back to name matching in a project whose
+/// setup it doesn't read yet.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Audit {
+    pub files: u32,
+    pub imports: u32,
+    pub resolved: u32,
+    pub external: u32,
+    /// Every import nothing accounts for, where it's written.
+    pub unresolved: Vec<XrefResult>,
+    /// The unresolved ones by what they start with (`@/…`, `./…`, a package), most first.
+    pub patterns: Vec<(String, u32)>,
+}
+
+pub fn audit(
+    repo: &Repository,
+    root: &Path,
+    source: &ProjectSource,
+    rel_files: &[String],
+) -> AppResult<Audit> {
+    ensure_index(repo, root, source, rel_files)?;
+    let guard = INDEX.lock().unwrap();
+    let index = guard.as_ref().expect("index built");
+    let mut audit = Audit {
+        files: index.files.len() as u32,
+        imports: 0,
+        resolved: 0,
+        external: 0,
+        unresolved: Vec::new(),
+        patterns: Vec::new(),
+    };
+    let mut patterns: HashMap<String, u32> = HashMap::new();
+    for fi in 0..index.files.len() {
+        let Some(parsed) = index.parsed(fi) else {
+            continue;
+        };
+        for (byte, spec) in &parsed.module.sources {
+            audit.imports += 1;
+            match index.module(fi, spec) {
+                resolve::Module::Indexed(_) | resolve::Module::Other(_) => audit.resolved += 1,
+                resolve::Module::External => audit.external += 1,
+                resolve::Module::Unresolved => {
+                    *patterns.entry(spec_pattern(spec)).or_default() += 1;
+                    let src = &index.files[fi].source;
+                    let (line, col) = position(src, *byte);
+                    audit.unresolved.push(XrefResult {
+                        file: index.files[fi].rel.clone(),
+                        line,
+                        col,
+                        snippet: line_text(src, line as usize - 1),
+                        kind: XrefKind::Reference,
+                        symbol_kind: SymbolKind::Module,
+                        // A fact about the import, not a guess about a name: listed plainly.
+                        confirmed: true,
+                    });
+                }
+            }
+        }
+    }
+    let mut patterns: Vec<(String, u32)> = patterns.into_iter().collect();
+    patterns.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    audit.patterns = patterns;
+    Ok(audit)
+}
+
+/// What a specifier starts with, the way an alias or a package names it: `@/…`, `~/…`,
+/// `$lib/…`, `./…`, `@scope/pkg`, `pkg`.
+fn spec_pattern(spec: &str) -> String {
+    if spec.starts_with("./") || spec.starts_with("../") {
+        return "./…".to_string();
+    }
+    let (name, sub) = project::split_package(spec);
+    if !project::is_package_name(name) {
+        // An alias: its first segment.
+        let first = spec.split('/').next().unwrap_or(spec);
+        return if spec.len() > first.len() { format!("{first}/…") } else { first.to_string() };
+    }
+    if sub == "." {
+        name.to_string()
+    } else {
+        format!("{name}/…")
+    }
+}
+
 #[cfg(test)]
 mod tests;

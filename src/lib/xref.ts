@@ -5,12 +5,14 @@ import type { Occurrences, XrefResult } from "../types/xref";
 import { currentFile } from "./buffers";
 import { recordJump } from "./jumps";
 import { visitFile, type SourceChoice } from "./project";
+import { useProjectStore } from "../state/project";
 import { projectCursor } from "./project-view";
 import {
   findDefinition,
   findReferences,
   symbolAt,
   symbolOccurrences,
+  xrefAudit,
   xrefExtensions,
 } from "./tauri";
 
@@ -110,4 +112,25 @@ export function occurrenceLookup(
     const repo = useRepoStore.getState().repoPath;
     return repo ? symbolOccurrences(repo, source, path, line, col) : Promise.resolve(null);
   };
+}
+
+/**
+ * `M-x xref-audit`: resolve every JavaScript and TypeScript import of the revision the
+ * project buffer reads, and list the ones nothing accounts for — an alias whose config
+ * isn't read, a file that isn't there — which is where navigation falls back to names.
+ */
+export async function auditImports(): Promise<void> {
+  const repo = useRepoStore.getState().repoPath;
+  if (!repo) return;
+  const { source, sourceLabel } = useProjectStore.getState();
+  const audit = await xrefAudit(repo, source);
+  const top = audit.patterns
+    .slice(0, 3)
+    .map(([pattern, n]) => `${pattern} ×${n}`)
+    .join(", ");
+  const title =
+    `imports: ${audit.imports} in ${audit.files} files — ${audit.resolved} in the project, ` +
+    `${audit.external} external, ${audit.unresolved.length} unresolved` +
+    (top ? ` (${top})` : "");
+  useXrefStore.getState().show(title, audit.unresolved, { source, label: sourceLabel });
 }

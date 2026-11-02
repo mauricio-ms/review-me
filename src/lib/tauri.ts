@@ -27,7 +27,7 @@ import type {
   ReviewScope,
   TagStore,
 } from "../types/tags";
-import type { IndexStats, Occurrences, SymbolRef, XrefResult } from "../types/xref";
+import type { IndexStats, ImportAudit, Occurrences, SymbolRef, XrefResult } from "../types/xref";
 
 export function openRepo(path: string): Promise<RepoInfo> {
   return invoke<RepoInfo>("open_repo", { path });
@@ -287,6 +287,11 @@ export function buildSymbolIndex(
   source: ProjectSource,
 ): Promise<IndexStats> {
   return invoke<IndexStats>("build_symbol_index", { repo, source });
+}
+
+/** How well the revision's JavaScript and TypeScript imports resolve. */
+export function xrefAudit(repo: string, source: ProjectSource): Promise<ImportAudit> {
+  return invoke<ImportAudit>("xref_audit", { repo, source });
 }
 
 /** The file extensions cross-references read; the viewer matches the rest by name. */

@@ -203,6 +203,18 @@ pub fn occurrences(
     }
 }
 
+pub use js::Audit;
+
+/// How well the JavaScript and TypeScript imports of `source` resolve.
+pub fn audit(
+    repo: &Repository,
+    root: &Path,
+    source: &ProjectSource,
+    rel_files: &[String],
+) -> AppResult<Audit> {
+    js::audit(repo, root, source, rel_files)
+}
+
 pub(crate) fn line_text(source: &str, row0: usize) -> String {
     source.lines().nth(row0).unwrap_or("").trim().to_string()
 }

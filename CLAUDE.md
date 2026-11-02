@@ -602,6 +602,13 @@ destructured prop or props member. A module specifier resolves to its file
 (`Target::File`), so find-references on a module lists its imports; references also follow
 an import that renames the symbol (`{ x as y }`, a default import).
 
+**`M-x xref-audit`** (`js::audit`) resolves every import, re-export, `require` and `import()`
+of the revision and lists the ones nothing accounts for, grouped by how they start (`@/…`,
+`./…`, a package) — how to see why navigation falls back to names in a project whose setup
+isn't read yet. The same from a terminal, on any checkout:
+`REVIEW_ME_AUDIT=/path/to/repo cargo test audit_from_env -- --ignored --nocapture`;
+`audit_names_from_env` resolves every *name* too and tallies the undecided by syntax.
+
 `find_references` name-matches first (the cheap prefilter) and resolves only the
 survivors. An occurrence proved to be a *different* symbol is **dropped**; one that
 can't be proved either way comes back with `confirmed: false` and is shown in a

@@ -235,3 +235,105 @@ fn occurrences_keep_a_field_apart_from_a_same_named_local() {
     assert_eq!(f.occurrences("src/item.ts", "name =", 0), vec![(2, 2), (4, 9)]);
     assert_eq!(f.occurrences("src/item.ts", "name;", 0), vec![(7, 10), (8, 11)]);
 }
+
+#[test]
+fn audit_sorts_imports_by_where_they_lead() {
+    let f = fixture(&[
+        ("package.json", r#"{ "dependencies": { "react": "18" } }"#),
+        ("src/a.ts", "import x from './b';\nimport y from 'react';\nimport z from '@/missing/thing';\nimport w from './nope';\nconst q = require('@/missing/other');\n"),
+        ("src/b.ts", "export default 1;\n"),
+    ]);
+    let report = audit(&f.repo, f.dir.path(), &ProjectSource::Worktree, &f.rels).unwrap();
+    assert_eq!((report.imports, report.resolved, report.external), (5, 1, 1));
+    assert_eq!(report.unresolved.len(), 3);
+    assert_eq!(report.patterns, vec![("@/…".to_string(), 2), ("./…".to_string(), 1)]);
+}
+
+/// Audit a real checkout: `REVIEW_ME_AUDIT=/path/to/repo cargo test audit_from_env -- --ignored --nocapture`.
+#[test]
+#[ignore]
+fn audit_from_env() {
+    let Ok(path) = std::env::var("REVIEW_ME_AUDIT") else {
+        eprintln!("set REVIEW_ME_AUDIT to a repository to audit");
+        return;
+    };
+    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let repo = Repository::open(&path).unwrap();
+    let root = crate::repo::root(&repo).unwrap();
+    let files = crate::fuzzy::repo_files(&repo, &ProjectSource::Worktree).unwrap();
+    let started = std::time::Instant::now();
+    let report = audit(&repo, &root, &ProjectSource::Worktree, &files).unwrap();
+    eprintln!(
+        "{} files, {} imports: {} in the project, {} external, {} unresolved ({:?})",
+        report.files,
+        report.imports,
+        report.resolved,
+        report.external,
+        report.unresolved.len(),
+        started.elapsed()
+    );
+    for (pattern, n) in report.patterns.iter().take(20) {
+        eprintln!("  {n:5}  {pattern}");
+    }
+    for r in report.unresolved.iter().filter(|r| std::env::var("REVIEW_ME_AUDIT_GREP").map_or(true, |g| r.snippet.contains(&g))).take(40) {
+        eprintln!("  {}:{}  {}", r.file, r.line, r.snippet);
+    }
+}
+
+/// Resolve every name in a real checkout and tally the answers, with samples of the
+/// undecided ones — how to find what the resolver doesn't model yet:
+/// `REVIEW_ME_AUDIT=/path/to/repo cargo test audit_names_from_env -- --ignored --nocapture`.
+#[test]
+#[ignore]
+fn audit_names_from_env() {
+    let Ok(path) = std::env::var("REVIEW_ME_AUDIT") else {
+        eprintln!("set REVIEW_ME_AUDIT to a repository to audit");
+        return;
+    };
+    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let repo = Repository::open(&path).unwrap();
+    let root = crate::repo::root(&repo).unwrap();
+    let files = crate::fuzzy::repo_files(&repo, &ProjectSource::Worktree).unwrap();
+    let index = JsIndex::build(&repo, &root, &ProjectSource::Worktree, &files).unwrap();
+    let mut tally: HashMap<(String, &str), u32> = HashMap::new();
+    let mut samples: Vec<String> = Vec::new();
+    let started = std::time::Instant::now();
+    for fi in 0..index.files.len() {
+        let Some(parsed) = index.parsed(fi) else { continue };
+        let code = index.code(fi);
+        walk(parsed.tree.root_node(), &mut |n| {
+            if !NAME_KINDS.contains(&n.kind()) || is_declaration_name(n) {
+                return;
+            }
+            let ctx = n.parent().map(|p| p.kind()).unwrap_or("");
+            let what = match index.resolve(fi, n) {
+                Resolution::Found(_) => "found",
+                Resolution::Ambiguous(_) => "ambiguous",
+                Resolution::External => "external",
+                Resolution::Unresolved => {
+                    if samples.len() < 60 && fi % 7 == 0 {
+                        let (line, _) = position(&index.files[fi].source, n.start_byte());
+                        samples.push(format!("{}:{} [{}] {} | {}", index.files[fi].rel, line, ctx, text(n, code), line_text(&index.files[fi].source, line as usize - 1)));
+                    }
+                    "unresolved"
+                }
+            };
+            *tally.entry((ctx.to_string(), what)).or_default() += 1;
+        });
+    }
+    let mut by_ctx: HashMap<String, [u32; 4]> = HashMap::new();
+    for ((ctx, what), n) in &tally {
+        let slot = match *what { "found" => 0, "ambiguous" => 1, "external" => 2, _ => 3 };
+        by_ctx.entry(ctx.clone()).or_default()[slot] += n;
+    }
+    let mut rows: Vec<_> = by_ctx.into_iter().collect();
+    rows.sort_by_key(|(_, c)| std::cmp::Reverse(c[3]));
+    let total: [u32; 4] = rows.iter().fold([0; 4], |mut acc, (_, c)| { for i in 0..4 { acc[i] += c[i]; } acc });
+    eprintln!("names in {:?}: found {} ambiguous {} external {} unresolved {}", started.elapsed(), total[0], total[1], total[2], total[3]);
+    for (ctx, c) in rows.iter().take(15) {
+        eprintln!("  {:>28}  found {:6} amb {:5} ext {:6} unres {:6}", ctx, c[0], c[1], c[2], c[3]);
+    }
+    for s in &samples {
+        eprintln!("  {s}");
+    }
+}

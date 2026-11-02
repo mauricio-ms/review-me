@@ -30,7 +30,7 @@ import {
 } from "../lib/windows";
 import { goBack, goForward } from "../lib/history";
 import { recordJump } from "../lib/jumps";
-import { findUsages, gotoDefinition } from "../lib/xref";
+import { auditImports, findUsages, gotoDefinition } from "../lib/xref";
 import { useFilesStore } from "../state/files";
 import { useHistoryStore } from "../state/history";
 import { useLogStore } from "../state/log";
@@ -61,6 +61,7 @@ export type CommandId =
   | "export-notes"
   | "goto-def"
   | "find-refs"
+  | "xref-audit"
   | "swiper"
   | "back"
   | "forward"
@@ -306,6 +307,11 @@ export function useCommands(close: CommandClose): {
     void findUsages();
   }, [close]);
 
+  const handleAuditImports = useCallback(() => {
+    close({ restoreFocus: false });
+    void auditImports();
+  }, [close]);
+
   const handleSwiper = useCallback(() => {
     close({ restoreFocus: false });
     swiperHere();
@@ -452,6 +458,14 @@ export function useCommands(close: CommandClose): {
       buffer: "project",
       enabled: !!openPath,
       run: () => handleGotoDef(false),
+    },
+    {
+      id: "xref-audit",
+      name: "xref-audit",
+      aliases: ["audit-imports", "imports"],
+      label: "list the JavaScript/TypeScript imports cross-references can't follow",
+      enabled: !!repo,
+      run: handleAuditImports,
     },
     {
       id: "definition-other-window",
