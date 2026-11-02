@@ -406,7 +406,7 @@ impl JsIndex {
         }
         let mut out = Vec::new();
         for (fi, f) in self.files.iter().enumerate() {
-            if !f.source.contains(name) {
+            if !f.global_scope || !f.source.contains(name) {
                 continue;
             }
             if let Some(bytes) = self.parsed(fi).and_then(|p| p.module.globals.get(name)) {

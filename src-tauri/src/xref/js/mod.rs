@@ -56,6 +56,19 @@ struct JsFile {
     rel: String,
     source: String,
     parsed: OnceCell<Option<Parsed>>,
+    /// Whether it can declare globals at all — a `.d.ts`, `declare global`, or a script
+    /// without imports or exports — judged from its text, so looking a global up never
+    /// parses the files that can't.
+    global_scope: bool,
+}
+
+/// Whether `source` may declare names visible everywhere.
+fn may_declare_globals(rel: &str, source: &str) -> bool {
+    rel.ends_with(".d.ts")
+        || source.contains("declare global")
+        || !["import ", "import{", "export ", "export{", "require(", "module.exports", "exports."]
+            .iter()
+            .any(|k| source.contains(k))
 }
 
 pub struct JsIndex {
@@ -122,7 +135,10 @@ impl JsIndex {
                 continue;
             };
             file_index.insert(rel.clone(), files.len());
+            // A component's top level is its own, imports or not.
+            let component = matches!(rel.rsplit_once('.').map(|(_, e)| e), Some("vue" | "svelte" | "astro" | "html"));
             files.push(JsFile {
+                global_scope: !component && may_declare_globals(rel, &text),
                 rel: rel.clone(),
                 source: text,
                 parsed: OnceCell::new(),
