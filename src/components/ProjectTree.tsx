@@ -16,7 +16,13 @@ import {
   toggleChangedOnly,
   toggleDir,
 } from "../lib/project";
-import { flagFile, ignoreFile, reviewFile, unmarkFile } from "../lib/project-review";
+import {
+  flagFile,
+  ignoreFile,
+  reviewFile,
+  setTreeFileSource,
+  unmarkFile,
+} from "../lib/project-review";
 import { foldersAbove, TREE_WIDTH_MIN, useProjectStore } from "../state/project";
 import { useRepoStore } from "../state/repo";
 import { useTagsStore } from "../state/tags";
@@ -293,6 +299,15 @@ export default function ProjectTree({ hidden }: { hidden: boolean }) {
       }
     }
   };
+
+  // `M-x note` reads the file at the cursor through this handle, by the same rule.
+  useEffect(() => {
+    setTreeFileSource(() => {
+      const node = nodes[cursor];
+      return node && !node.entry.isDir ? (node.change?.path ?? node.entry.path) : null;
+    });
+  });
+  useEffect(() => () => setTreeFileSource(null), []);
 
   // `r` `f` `i` `u` mark the file at the cursor — in either view, so by its path.
   const markFile = (mark: (path: string) => Promise<void>) => () => {

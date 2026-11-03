@@ -11,7 +11,12 @@ import {
 import { visitCounterpart } from "../lib/counterpart";
 import { contextScope, startDescribeKey } from "../lib/key-dispatch";
 import { showLog } from "../lib/log";
-import { exportNotes, openNoteEditor } from "../lib/notes";
+import {
+  exportNotes,
+  openCommitNoteEditor,
+  openFileNoteEditor,
+  openNoteEditor,
+} from "../lib/notes";
 import { applyComparison, refreshDiff } from "../lib/open-repo";
 import { resizeTree, revealFile, toggleChangedOnly, toggleTree } from "../lib/project";
 import { toggleChangesAtCursor } from "../lib/project-diff";
@@ -45,7 +50,7 @@ import {
   useWindowStore,
   type BufferName,
 } from "../state/windows";
-import { readsCommittedHistory, WORKTREE_SPEC } from "../types/diff";
+import { readsCommittedHistory, shortOid, WORKTREE_SPEC } from "../types/diff";
 
 /** Closes the minibuffer that ran a command (a no-op when a key ran it). */
 export type CommandClose = (options?: { restoreFocus?: boolean }) => void;
@@ -58,6 +63,8 @@ export type CommandId =
   | "diff-mode"
   | "flag"
   | "note"
+  | "note-file"
+  | "note-commit"
   | "export-notes"
   | "goto-def"
   | "find-refs"
@@ -136,6 +143,7 @@ export function useCommands(close: CommandClose): {
   all: AppCommand[];
 } {
   const activeBuffer = useWindowStore(activeBufferOf);
+  const treeFocused = useWindowStore((s) => s.treeFocused);
   // The tree is project mode's: its commands only mean something there.
   const projectMode = useWindowStore(inProjectMode);
   const openPicker = useUIStore((s) => s.openPicker);
@@ -283,11 +291,14 @@ export function useCommands(close: CommandClose): {
     }
   }, [close, requestFocus]);
 
-  const handleNote = useCallback(() => {
-    close({ restoreFocus: false });
-    // Nothing to annotate on a section header: hand focus straight back.
-    if (!openNoteEditor()) requestFocus();
-  }, [close, requestFocus]);
+  const handleNote = useCallback(
+    (open: () => boolean) => {
+      close({ restoreFocus: false });
+      // Nothing to annotate on a section header: hand focus straight back.
+      if (!open()) requestFocus();
+    },
+    [close, requestFocus],
+  );
 
   const handleExportNotes = useCallback(() => {
     close();
@@ -430,17 +441,46 @@ export function useCommands(close: CommandClose): {
         comparison.kind !== "commit"
           ? "note (while reviewing a commit)"
           : activeBuffer === "project"
-            ? openPath
-              ? "note on the selected lines, else the cursor's (a fix for later)"
-              : "note (open a file first)"
-            : "note on the lines at the cursor (a fix for later)",
+            ? treeFocused
+              ? "note on the file at the cursor (a fix for later)"
+              : openPath
+                ? "note on the selected lines, else the cursor's (a fix for later)"
+                : "note (open a file first)"
+            : "note on what's at the cursor — lines, or a file or the commit on its row",
       // `M-x note` only, no key — in keeping with `show` and `export`.
       // A note is exported per commit, so it only exists while reviewing one.
       enabled:
         !!repo &&
         comparison.kind === "commit" &&
-        (activeBuffer === "diff" || (activeBuffer === "project" && !!openPath)),
-      run: handleNote,
+        (activeBuffer === "diff" ||
+          (activeBuffer === "project" && (treeFocused || !!openPath))),
+      run: () => handleNote(openNoteEditor),
+    },
+    {
+      id: "note-file",
+      name: "note-file",
+      aliases: ["file-note", "annotate-file"],
+      label:
+        comparison.kind !== "commit"
+          ? "note on a whole file (while reviewing a commit)"
+          : "note on the whole file at the cursor (a fix for later)",
+      enabled:
+        !!repo &&
+        comparison.kind === "commit" &&
+        (activeBuffer === "diff" ||
+          (activeBuffer === "project" && (treeFocused || !!openPath))),
+      run: () => handleNote(openFileNoteEditor),
+    },
+    {
+      id: "note-commit",
+      name: "note-commit",
+      aliases: ["commit-note", "annotate-commit"],
+      label:
+        comparison.kind !== "commit"
+          ? "note on a whole commit (while reviewing one)"
+          : `note on ${shortOid(comparison.oid)} as a whole (a fix for later)`,
+      enabled: !!repo && comparison.kind === "commit",
+      run: () => handleNote(openCommitNoteEditor),
     },
     {
       id: "export-notes",

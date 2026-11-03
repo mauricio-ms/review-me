@@ -932,6 +932,11 @@ kbd {
   padding-left: 40px;
 }
 
+/* Under the commit, lined up with its subject (past the caret). */
+.diff-note-row.is-commit-note {
+  padding-left: 34px;
+}
+
 .diff-note-row.is-selected {
   background: rgba(var(--accent-violet-rgb), 0.16);
   box-shadow: inset 3px 0 0 var(--accent-amber);
@@ -1950,6 +1955,10 @@ kbd {
 
 .note-target .path-base {
   color: var(--fg-0);
+}
+
+.note-target-oid {
+  color: var(--accent-amber);
 }
 
 .note-editor .note-editor-shell {

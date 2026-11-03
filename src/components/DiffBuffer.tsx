@@ -19,7 +19,8 @@ import type { ShowOptions } from "../lib/buffers";
 import { setDiffMover, setDiffTargetSource } from "../lib/diff-view";
 import { dispatchKey, type KeyHandler } from "../lib/key-dispatch";
 import { KEYMAP, type DiffAction } from "../lib/keymap";
-import { flagTarget, hasNote, openNoteFor } from "../lib/notes";
+import { COMMIT_TARGET, flagTarget, hasNote, openNoteFor } from "../lib/notes";
+import { wholeFileTarget } from "../lib/project-review";
 import { leaveHistory } from "../lib/open-repo";
 import { openFileFromDiff } from "../lib/project";
 import type { SwiperMatcher } from "../lib/swiper";
@@ -30,6 +31,7 @@ import {
   reviewLines,
   reviewWholeFile,
   unmarkLines,
+  unmarkWholeFile,
 } from "../lib/review-actions";
 import { dateTime, timeAgo } from "../lib/time";
 import { refineHunk, type WordSeg } from "../lib/word-diff";
@@ -61,6 +63,8 @@ type CommitComparison = Extract<Comparison, { kind: "commit" }>;
 type Row =
   /** The commit under review, magit-revision style: subject, author, date, body. */
   | { key: string; kind: "commit"; commit: CommitComparison }
+  /** A note on the commit as a whole, under it. */
+  | { key: string; kind: "commitNote"; flag: FlagTag }
   | { key: string; kind: "section"; section: ReviewSection; count: number }
   | { key: string; kind: "file"; section: ReviewSection; file: ChangedFile }
   | {
@@ -121,6 +125,8 @@ function estimatedRowHeight(kind: Row["kind"]): number {
   switch (kind) {
     case "commit":
       return 120;
+    case "commitNote":
+      return 32;
     case "section":
       return 38;
     case "file":
@@ -134,9 +140,12 @@ function estimatedRowHeight(kind: Row["kind"]): number {
   }
 }
 
-/** The file a row is about; null for a section header and the commit's message. */
+/** The file a row is about; null for a section header and the commit's rows. */
 function rowFile(row: Row | undefined): ChangedFile | null {
-  return row && row.kind !== "section" && row.kind !== "commit" ? row.file : null;
+  if (!row || row.kind === "section" || row.kind === "commit" || row.kind === "commitNote") {
+    return null;
+  }
+  return row.file;
 }
 
 // ---------- Swiper (`C-s`) ----------
@@ -160,6 +169,7 @@ function searchText(row: Row): string | null {
     case "line":
       return row.line.content;
     case "note":
+    case "commitNote":
       return row.flag.note ?? "";
     default:
       return null;
@@ -176,6 +186,7 @@ const STATUS_WORD: Record<ChangedFile["status"], string> = {
 /** Where a searched row is, beside it in the minibuffer: `Foo.java:70 +`, `modified`. */
 function searchLabel(row: Row): string {
   if (row.kind === "commit" || row.kind === "section") return "";
+  if (row.kind === "commitNote") return "commit ✎";
   if (row.kind === "file") return STATUS_WORD[row.file.status];
   const name = splitPath(row.file.path)[1];
   if (row.kind === "note") return `${name} ✎`;
@@ -186,7 +197,7 @@ function searchLabel(row: Row): string {
 
 /** `folds`, opened just enough to show `row`: its section, its file, its hunk. */
 function reveal(folds: Folds, row: Row): Folds {
-  if (row.kind === "commit" || row.kind === "section") return folds;
+  if (row.kind === "commit" || row.kind === "commitNote" || row.kind === "section") return folds;
   const without = <T,>(set: Set<T>, item: T) => {
     const next = new Set(set);
     next.delete(item);
@@ -265,7 +276,7 @@ function headerRange(comparison: Comparison | undefined): string {
 /**
  * Where each of a file's notes (flags carrying one) is shown: a note on lines sits
  * under the first hunk it touches; a note on the whole file, or on lines outside every
- * hunk (flagged from project mode), sits under the file row.
+ * hunk (flagged from project mode), sits under the file row — the whole file's first.
  */
 function placeNotes(
   file: ChangedFile,
@@ -275,7 +286,11 @@ function placeNotes(
   const hunkNotes = new Map<string, FlagTag[]>();
   const notes = flags
     .filter((f) => f.anchor.file === file.path && !f.anchor.stale && hasNote(f))
-    .sort((a, b) => a.anchor.startLine - b.anchor.startLine);
+    .sort(
+      (a, b) =>
+        Number(b.anchor.side === "file") - Number(a.anchor.side === "file") ||
+        a.anchor.startLine - b.anchor.startLine,
+    );
   for (const flag of notes) {
     const { kind, side, startLine, endLine } = flag.anchor;
     const hunk =
@@ -349,7 +364,15 @@ function buildRows(
     }
   }
 
-  const rows: Row[] = commit ? [{ key: "c", kind: "commit", commit }] : [];
+  const rows: Row[] = [];
+  if (commit) {
+    rows.push({ key: "c", kind: "commit", commit });
+    for (const flag of flags) {
+      if (flag.anchor.side === "commit" && hasNote(flag)) {
+        rows.push({ key: `n:commit:${flag.id}`, kind: "commitNote", flag });
+      }
+    }
+  }
   // A file recurs once per section it has hunks in; its whole-file notes show once.
   const fileNotesShown = new Set<string>();
   for (const section of SECTION_ORDER) {
@@ -772,7 +795,9 @@ export default function DiffBuffer() {
 
   const cursorScope = (): Scope | null => {
     const row = rows[cursor];
-    if (!row || row.kind === "section" || row.kind === "commit") return null;
+    if (!row || row.kind === "section" || row.kind === "commit" || row.kind === "commitNote") {
+      return null;
+    }
     if (row.kind === "file") {
       const t = fileTarget(row.file);
       return t ? { file: row.file, lo: t.lo, hi: t.hi, kind: "file", side: t.side } : null;
@@ -817,9 +842,15 @@ export default function DiffBuffer() {
   const exitVisual = () => setVisualAnchor(null);
 
   // `M-x note` reads the cursor's target through this handle; re-registered every render
-  // so it always sees the current cursor and selection.
+  // so it always sees the current cursor and selection. A file row's note is on the
+  // whole file, as is a flag on a binary one; the commit's rows', on the commit.
   useEffect(() => {
     setDiffTargetSource(() => {
+      const row = rows[cursor];
+      if (visualAnchor == null && (row?.kind === "commit" || row?.kind === "commitNote")) {
+        return COMMIT_TARGET;
+      }
+      if (visualAnchor == null && row?.kind === "file") return wholeFileTarget(row.file.path);
       const scope = targetScope();
       return scope
         ? {
@@ -961,6 +992,17 @@ export default function DiffBuffer() {
   };
 
   const doUnmark = () => {
+    const row = rows[cursor];
+    // A file row stands for the whole file, as `r` there does; the commit's rows for the
+    // commit's own note.
+    if (visualAnchor == null && row?.kind === "file") {
+      void unmarkWholeFile(row.file.path);
+      return;
+    }
+    if (visualAnchor == null && (row?.kind === "commit" || row?.kind === "commitNote")) {
+      void unmarkLines(COMMIT_TARGET.file, 0, 0, "commit");
+      return;
+    }
     const scope = targetScope();
     if (scope) void unmarkLines(scope.file.path, scope.lo, scope.hi, scope.side);
     exitVisual();
@@ -993,6 +1035,7 @@ export default function DiffBuffer() {
       if (row.commit.body) setMessageFolded((folded) => !folded);
       return;
     }
+    if (row.kind === "commitNote") return;
     if (row.kind === "section") {
       // Fold the whole section; the header stays put, so keep the cursor on it.
       toggleSection(row.section);
@@ -1240,6 +1283,21 @@ export default function DiffBuffer() {
                   </div>
                   {!folded && c.body !== "" && <div className="diff-commit-body">{c.body}</div>}
                 </div>
+              </div>
+            );
+          }
+          if (row.kind === "commitNote") {
+            return (
+              <div
+                key={row.key}
+                ref={ref}
+                className={`diff-row diff-note-row is-commit-note ${cls}`}
+                onClick={() => setCursor(idx)}
+                onDoubleClick={() => openNoteFor(row.flag)}
+              >
+                <span className="diff-note-glyph">✎</span>
+                <span className="diff-note-where">whole commit</span>
+                <span className="diff-note-text">{row.flag.note}</span>
               </div>
             );
           }

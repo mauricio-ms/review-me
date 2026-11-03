@@ -24,17 +24,21 @@ pub enum AnchorKind {
     File,
     Hunk,
     Range,
+    Commit,
 }
 
 /// Which side of the diff an anchor's content lives on. `New` (the default) anchors
 /// to the working-tree file; `Old` anchors to HEAD content (pure-deletion hunks and
-/// deleted text files); `File` anchors a whole binary-file change by blob identity.
+/// deleted text files); `File` anchors a whole file by blob identity (a binary change,
+/// or a note on the whole file); `Commit` anchors the commit itself — a note on the
+/// whole commit, with no file and nothing to hash, its scope being all there is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum AnchorSide {
     New,
     Old,
     File,
+    Commit,
 }
 
 impl Default for AnchorSide {
@@ -438,8 +442,8 @@ pub fn clear_scope(root: &Path, scope: &ReviewScope) -> AppResult<TagStore> {
 
 /// Remove every same-scope, same-side tag in `file` whose range overlaps
 /// `[start, end]`. This is the `u` unmark action: it clears reviewed, flag, and ignore
-/// markers for the target. A `File` side clears every file anchor on the path (line
-/// numbers are unused).
+/// markers for the target. A `File` side clears every file anchor on the path, and a
+/// `Commit` side the commit's own (line numbers are unused by both).
 pub fn unmark_range(
     root: &Path,
     scope: &ReviewScope,
@@ -454,7 +458,7 @@ pub fn unmark_range(
             return false;
         }
         match side {
-            AnchorSide::File => true,
+            AnchorSide::File | AnchorSide::Commit => true,
             _ => anchor.start_line <= end && anchor.end_line >= start,
         }
     };
@@ -529,6 +533,7 @@ fn build_anchor(
                 .unwrap_or_default();
             (hash, Vec::new(), Vec::new())
         }
+        AnchorSide::Commit => (String::new(), Vec::new(), Vec::new()),
         side => match snap.as_ref().and_then(|snap| snap.lines(side, file)) {
             Some(lines) => capture(&lines, start, end),
             None => (String::new(), Vec::new(), Vec::new()),
@@ -572,6 +577,8 @@ fn reanchor(snapshot: Option<&Snapshot>, anchor: &mut Anchor) {
     }
     match anchor.side {
         AnchorSide::File => reanchor_file(snapshot, anchor),
+        // The scope names the commit, and nothing in it can move.
+        AnchorSide::Commit => anchor.stale = false,
         side => reanchor_lines(snapshot.lines(side, &anchor.file), anchor),
     }
 }
@@ -633,16 +640,14 @@ fn reanchor_lines(lines: Option<Vec<String>>, anchor: &mut Anchor) {
     }
 }
 
-/// A file (binary) anchor is live while the path still carries the same (old, new)
-/// blob change it was tagged against. Identical or both-missing oids mean the change
-/// is gone.
+/// A file anchor is live while the path still carries the (old, new) blobs it was
+/// tagged against: the same binary change — once it is reverted or committed, the pair
+/// differs — or, for a note on a file the comparison didn't change, the same file. A
+/// path on neither side is gone.
 fn reanchor_file(snapshot: &Snapshot, anchor: &mut Anchor) {
     let (old, new) = snapshot.blob_oids(&anchor.file);
-    anchor.stale = match (old, new) {
-        (None, None) => true,
-        (a, b) if a == b => true,
-        _ => oid_pair(old, new) != anchor.content_hash,
-    };
+    anchor.stale =
+        (old.is_none() && new.is_none()) || oid_pair(old, new) != anchor.content_hash;
 }
 
 /// HEAD's content for `file`, split into lines, or `None` when the path isn't in HEAD
@@ -1410,6 +1415,67 @@ mod tests {
         // The working tree matches the commit, so worktree scope sees no change —
         // proving the oids came from the two trees.
         assert!(load(root, WT).unwrap().reviewed.is_empty());
+    }
+
+    #[test]
+    fn whole_file_notes_hold_on_changed_and_unchanged_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        init_repo(root);
+        fs::write(root.join("a.txt"), "one\ntwo\n").unwrap();
+        fs::write(root.join("b.txt"), "untouched\n").unwrap();
+        git(root, &["add", "."]);
+        git(root, &["commit", "-qm", "init"]);
+        fs::write(root.join("a.txt"), "one\nTWO\n").unwrap();
+        git(root, &["commit", "-qam", "edit"]);
+        let scope = commit_scope(root, "HEAD");
+
+        let note = |file: &str| {
+            add_flag(root, &scope, file, 0, 0, AnchorKind::File, AnchorSide::File, Some("x".into()), None)
+                .unwrap()
+        };
+        note("a.txt");
+        let store = note("b.txt");
+        assert_eq!(store.flags.len(), 2);
+        // A file the commit didn't change has one blob on both sides, and that is what
+        // the note was made against.
+        assert!(store.flags.iter().all(|f| !f.anchor.stale), "{:?}", store.flags);
+
+        // A path on neither side is gone.
+        let mut raw = read(root).unwrap();
+        raw.flags[1].anchor.file = "nowhere.txt".into();
+        write(root, &raw).unwrap();
+        let store = load(root, &scope).unwrap();
+        assert!(!store.flags[0].anchor.stale);
+        assert!(store.flags[1].anchor.stale);
+    }
+
+    #[test]
+    fn a_commit_note_belongs_to_its_commit_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        branchy_repo(root);
+        let scope = commit_scope(root, "refs/heads/feature");
+        let add = |note: &str| {
+            add_flag(root, &scope, "", 0, 0, AnchorKind::Commit, AnchorSide::Commit, Some(note.into()), None)
+                .unwrap()
+        };
+        add("split this");
+        // One note on the commit: a second replaces it, as on the same lines.
+        let store = add("split this in two");
+        assert_eq!(store.flags.len(), 1);
+        let anchor = &store.flags[0].anchor;
+        assert!(!anchor.stale);
+        assert!(anchor.content_hash.is_empty());
+        assert!(load(root, &commit_scope(root, "refs/heads/other")).unwrap().flags.is_empty());
+
+        // `u` on a file's whole-file marks leaves the commit's note alone, and back.
+        add_flag(root, &scope, "a.txt", 0, 0, AnchorKind::File, AnchorSide::File, None, None).unwrap();
+        let store = unmark_range(root, &scope, "a.txt", 0, 0, AnchorSide::File).unwrap();
+        assert_eq!(store.flags.len(), 1);
+        assert_eq!(store.flags[0].anchor.side, AnchorSide::Commit);
+        let store = unmark_range(root, &scope, "", 0, 0, AnchorSide::Commit).unwrap();
+        assert!(store.flags.is_empty());
     }
 
     #[test]

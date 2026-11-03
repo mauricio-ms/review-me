@@ -106,15 +106,16 @@ function yOrN(prompt: string): Promise<boolean> {
  * Whether an unmark that takes `notes` with it may go ahead: at once when it takes
  * none, else only on a `y` — a note is writing nothing can bring back.
  */
-function mayDeleteNotes(notes: FlagTag[], file: string): Promise<boolean> {
+function mayDeleteNotes(notes: FlagTag[], where: string): Promise<boolean> {
   if (notes.length === 0) return Promise.resolve(true);
   const what = notes.length === 1 ? "the note" : `${notes.length} notes`;
-  return yOrN(`Unmark and delete ${what} on ${file}?`);
+  return yOrN(`Unmark and delete ${what} on ${where}?`);
 }
 
 /**
- * Take every mark on `side` that touches the lines (`unmark_range`'s rule), asking
- * first when that deletes a note.
+ * Take every mark on `side` that touches the lines (`unmark_range`'s rule) — on a
+ * whole-file side the file's, on the commit side the commit's — asking first when that
+ * deletes a note.
  */
 export async function unmarkLines(
   file: string,
@@ -129,9 +130,11 @@ export async function unmarkLines(
         hasNote(f) &&
         f.anchor.file === file &&
         (f.anchor.side ?? "new") === side &&
-        (side === "file" || (f.anchor.startLine <= hi && f.anchor.endLine >= lo)),
+        (side === "file" ||
+          side === "commit" ||
+          (f.anchor.startLine <= hi && f.anchor.endLine >= lo)),
     );
-  if (!(await mayDeleteNotes(notes, file))) return;
+  if (!(await mayDeleteNotes(notes, side === "commit" ? "the commit" : file))) return;
   const t = target();
   if (!t) return;
   apply(await unmarkRange(t.repo, t.scope, file, lo, hi, side));

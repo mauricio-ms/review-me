@@ -6,7 +6,7 @@ import { useUIStore } from "../state/ui";
 import { activeBuffer, useWindowStore } from "../state/windows";
 import { diffTarget, type DiffTarget } from "./diff-view";
 import { logBase, logRef } from "./log";
-import { viewerNoteTarget } from "./project-review";
+import { projectFileNoteTarget, viewerNoteTarget, wholeFileTarget } from "./project-review";
 import { exportNotes as exportNotesFor } from "./tauri";
 
 /**
@@ -22,9 +22,13 @@ export function hasNote(flag: FlagTag): boolean {
   return (flag.note ?? "").trim() !== "";
 }
 
+/** A note on the commit under review as a whole: it names no file. */
+export const COMMIT_TARGET: DiffTarget = { file: "", lo: 0, hi: 0, kind: "commit", side: "commit" };
+
 /**
  * The flag a note at `target` belongs to: one on exactly those lines, else the first
- * that touches them — so `M-x note` on any line of a flagged hunk edits that flag.
+ * that touches them — so `M-x note` on any line of a flagged hunk edits that flag. A
+ * whole file, or the commit, has one.
  */
 export function flagAt(flags: FlagTag[], target: DiffTarget): FlagTag | null {
   const candidates = flags.filter(
@@ -33,7 +37,7 @@ export function flagAt(flags: FlagTag[], target: DiffTarget): FlagTag | null {
       f.anchor.file === target.file &&
       (f.anchor.side ?? "new") === target.side,
   );
-  if (target.side === "file") return candidates[0] ?? null;
+  if (target.side === "file" || target.side === "commit") return candidates[0] ?? null;
   return (
     candidates.find(
       (f) => f.anchor.startLine === target.lo && f.anchor.endLine === target.hi,
@@ -65,15 +69,11 @@ export function openNoteFor(flag: FlagTag): void {
 }
 
 /**
- * Open the note editor for the cursor's lines (`M-x note`) — the diff buffer's, or the
- * selected window's file's, where a visual selection is the lines: on the flag already
- * there, else on the lines themselves — the first save flags them.
+ * Open the note editor on `target`: on the flag already there, else on the target
+ * itself — the first save flags it. Says whether it opened.
  */
-export function openNoteEditor(): boolean {
-  if (!notesAvailable()) return false;
-  const target =
-    activeBuffer(useWindowStore.getState()) === "project" ? viewerNoteTarget() : diffTarget();
-  if (!target) return false;
+function openNoteOn(target: DiffTarget | null): boolean {
+  if (!notesAvailable() || !target) return false;
   const flag = flagAt(useTagsStore.getState().flags, target);
   useNotesStore.getState().open(
     flag
@@ -81,6 +81,33 @@ export function openNoteEditor(): boolean {
       : { target, flagId: null, saved: "" },
   );
   return true;
+}
+
+/**
+ * `M-x note`: a note on what's at the cursor. In the diff buffer, the selected lines, a
+ * line's or a hunk's — or the whole file on its row, the commit on its own. In the
+ * project buffer, the selected window's selection or cursor line, or in the tree its
+ * file.
+ */
+export function openNoteEditor(): boolean {
+  const ws = useWindowStore.getState();
+  if (activeBuffer(ws) !== "project") return openNoteOn(diffTarget());
+  return openNoteOn(ws.treeFocused ? projectFileNoteTarget() : viewerNoteTarget());
+}
+
+/** `M-x note-file`: a note on the whole file at the cursor, wherever in it the cursor is. */
+export function openFileNoteEditor(): boolean {
+  if (activeBuffer(useWindowStore.getState()) === "project") {
+    return openNoteOn(projectFileNoteTarget());
+  }
+  const path = useUIStore.getState().diffCursor?.path;
+  if (!path) useUIStore.getState().showFlash("No file here");
+  return openNoteOn(path ? wholeFileTarget(path) : null);
+}
+
+/** `M-x note-commit`: a note on the commit under review as a whole. */
+export function openCommitNoteEditor(): boolean {
+  return openNoteOn(COMMIT_TARGET);
 }
 
 /**

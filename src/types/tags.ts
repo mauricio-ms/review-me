@@ -1,6 +1,6 @@
 import type { DiffSpec } from "./diff";
 
-export type AnchorKind = "file" | "hunk" | "range";
+export type AnchorKind = "file" | "hunk" | "range" | "commit";
 
 /**
  * Which comparison a tag was made against. Marks are scoped so reviewing
@@ -36,10 +36,11 @@ export function scopeForSpec(spec: DiffSpec): ReviewScope {
 /**
  * Which side of the diff an anchor's content lives on. `new` anchors to the
  * working-tree file (added/modified hunks); `old` anchors to HEAD content
- * (pure-deletion hunks and deleted text files); `file` anchors a whole binary-file
- * change by blob identity.
+ * (pure-deletion hunks and deleted text files); `file` anchors a whole file by blob
+ * identity (a binary change, or a note on the whole file); `commit` anchors the commit
+ * itself — a note on the whole commit, whose `file` is empty.
  */
-export type AnchorSide = "new" | "old" | "file";
+export type AnchorSide = "new" | "old" | "file" | "commit";
 
 export interface Anchor {
   file: string;

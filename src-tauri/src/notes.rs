@@ -57,6 +57,8 @@ struct CommitNotes {
     message: String,
     author: String,
     timestamp: i64,
+    /// Notes on the commit as a whole.
+    whole: Vec<String>,
     /// Files in diff order, then files the commit didn't change (notes made from
     /// project mode) by path.
     files: Vec<FileNotes>,
@@ -64,7 +66,7 @@ struct CommitNotes {
 
 impl CommitNotes {
     fn note_count(&self) -> usize {
-        self.files.iter().map(|f| f.notes.len()).sum()
+        self.whole.len() + self.files.iter().map(|f| f.notes.len()).sum::<usize>()
     }
 }
 
@@ -249,12 +251,12 @@ struct IndexEntry {
 /// Collect `oid`'s notes, or `None` when it has none.
 fn gather(repo: &Repository, root: &Path, oid: &str) -> AppResult<Option<CommitNotes>> {
     let store = tags::load(root, &ReviewScope::Commit { oid: oid.to_string() })?;
-    let mut flags: Vec<FlagTag> = store
+    let (whole, mut flags): (Vec<FlagTag>, Vec<FlagTag>) = store
         .flags
         .into_iter()
         .filter(|f| has_note(f.note.as_deref()))
-        .collect();
-    if flags.is_empty() {
+        .partition(|f| f.anchor.side == AnchorSide::Commit);
+    if whole.is_empty() && flags.is_empty() {
         return Ok(None);
     }
     let resolved = commits::resolve(repo, oid)?;
@@ -269,7 +271,8 @@ fn gather(repo: &Repository, root: &Path, oid: &str) -> AppResult<Option<CommitN
         None => None,
     };
 
-    // Diff order for changed files, then the rest by path; notes by side and line.
+    // Diff order for changed files, then the rest by path; notes on the whole file
+    // first, then by side and line.
     let position: HashMap<&str, usize> = changed
         .iter()
         .enumerate()
@@ -280,7 +283,11 @@ fn gather(repo: &Repository, root: &Path, oid: &str) -> AppResult<Option<CommitN
             (
                 position.get(f.anchor.file.as_str()).copied().unwrap_or(usize::MAX),
                 f.anchor.file.clone(),
-                f.anchor.side != AnchorSide::New,
+                match f.anchor.side {
+                    AnchorSide::File | AnchorSide::Commit => 0,
+                    AnchorSide::New => 1,
+                    AnchorSide::Old => 2,
+                },
                 f.anchor.start_line,
                 f.anchor.end_line,
             )
@@ -293,7 +300,7 @@ fn gather(repo: &Repository, root: &Path, oid: &str) -> AppResult<Option<CommitN
         let anchor = &flag.anchor;
         let file = changed.iter().find(|f| f.path == anchor.file);
         let excerpt = match anchor.side {
-            AnchorSide::File => None,
+            AnchorSide::File | AnchorSide::Commit => None,
             side => file
                 .and_then(|f| diff_excerpt(f, side, anchor.start_line, anchor.end_line))
                 .or_else(|| {
@@ -337,6 +344,10 @@ fn gather(repo: &Repository, root: &Path, oid: &str) -> AppResult<Option<CommitN
         message: resolved.message,
         author: info.author_name,
         timestamp: info.timestamp,
+        whole: whole
+            .into_iter()
+            .map(|f| f.note.unwrap_or_default().trim().to_string())
+            .collect(),
         files,
     }))
 }
@@ -487,14 +498,21 @@ fn render_bundle(branch: &str, tip: &str, commits: &[CommitNotes]) -> String {
     md
 }
 
-/// The commit message, then each file's notes. `level` is the heading level of the
-/// sections; notes sit one below, and headings inside a note one below that.
+/// The commit message, the notes on the commit as a whole, then each file's notes.
+/// `level` is the heading level of the sections; notes sit one below, and headings
+/// inside a note one below that.
 fn render_body(md: &mut String, c: &CommitNotes, level: usize) {
     let h = |n: usize| "#".repeat(n.min(6));
     let message = c.message.trim_end();
     let fence = fence_for(message.lines());
     let _ = writeln!(md, "{} Commit message\n", h(level));
     let _ = writeln!(md, "{fence}text\n{message}\n{fence}\n");
+    if !c.whole.is_empty() {
+        let _ = writeln!(md, "{} The commit as a whole\n", h(level));
+        for body in &c.whole {
+            let _ = writeln!(md, "{}\n", demote_headings(body, level));
+        }
+    }
     for file in &c.files {
         let _ = writeln!(md, "{} `{}`\n", h(level), file.path);
         let _ = writeln!(md, "{}\n", describe_change(file.change.as_ref()));
@@ -761,10 +779,10 @@ mod tests {
 
     fn flag(root: &Path, oid: &str, file: &str, lo: u32, hi: u32, side: AnchorSide, note: &str) {
         let scope = ReviewScope::Commit { oid: oid.to_string() };
-        let kind = if side == AnchorSide::File {
-            AnchorKind::File
-        } else {
-            AnchorKind::Range
+        let kind = match side {
+            AnchorSide::File => AnchorKind::File,
+            AnchorSide::Commit => AnchorKind::Commit,
+            _ => AnchorKind::Range,
         };
         tags::add_flag(root, &scope, file, lo, hi, kind, side, Some(note.into()), None).unwrap();
     }
@@ -809,6 +827,9 @@ mod tests {
         flag(root, &oid, "notes.txt", 2, 3, AnchorSide::Old, "Keep `two`.");
         flag(root, &oid, "logo.bin", 0, 0, AnchorSide::File, "Use the SVG.");
         flag(root, &oid, "Untouched.java", 2, 2, AnchorSide::New, "Rename `x`.");
+        flag(root, &oid, "Account.java", 0, 0, AnchorSide::File, "Split by concern.");
+        flag(root, &oid, "Untouched.java", 0, 0, AnchorSide::File, "Delete it.");
+        flag(root, &oid, "", 0, 0, AnchorSide::Commit, "Add tests.\n\n# Which\nWithdrawals.");
         sync_commit(root, &oid).unwrap();
 
         let md = read(commit_path(root, &oid));
@@ -817,9 +838,17 @@ mod tests {
         assert!(md.contains(&format!("parent: {base}\n")));
         assert!(md.contains("subject: \"Add withdrawals\"\n"));
         assert!(md.contains("date: 2026-03-01T09:02:00Z\n"));
-        assert!(md.contains("notes: 4\n"));
+        assert!(md.contains("notes: 7\n"));
         assert!(md.contains(&format!("# {} Add withdrawals\n", &oid[..7])));
         assert!(md.contains("```text\nAdd withdrawals\n\nNo overdraft checks yet.\n```"));
+
+        // The commit's own note, after its message and before any file.
+        let message = md.find("## Commit message").unwrap();
+        let whole = md.find("## The commit as a whole\n\nAdd tests.\n\n### Which\nWithdrawals.\n").unwrap();
+        assert!(message < whole && whole < md.find("## `Account.java`").unwrap());
+        // A file's whole-file note comes first under it, with no excerpt.
+        assert!(md.contains("*Modified by this commit.*\n\n### Whole file\n\nSplit by concern.\n\n### Lines 4–6"));
+        assert!(md.contains("*Not changed by this commit.*\n\n### Whole file\n\nDelete it.\n\n### Line 2"));
 
         // Files in diff order; the untouched file last, said to be untouched.
         let account = md.find("## `Account.java`").unwrap();
@@ -844,7 +873,7 @@ mod tests {
         // The index lists it.
         let index = read(notes_dir(root).join("README.md"));
         assert!(index.contains(&format!(
-            "| [`{}`](commits/{oid}.md) | 2026-03-01 | 4 | Add withdrawals |",
+            "| [`{}`](commits/{oid}.md) | 2026-03-01 | 7 | Add withdrawals |",
             &oid[..7]
         )));
     }

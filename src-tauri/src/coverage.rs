@@ -97,12 +97,14 @@ pub fn summarize(files: &[ChangedFile], store: &TagStore) -> Coverage {
             );
             continue;
         }
+        // A note on the whole file flags every unit of it.
+        let file_flagged = names_file(flags(), &file.path);
         for hunk in &file.hunks {
             let Some((side, lo, hi)) = hunk_target(hunk) else {
                 continue;
             };
             count(
-                overlaps(flags(), side, &file.path, lo, hi),
+                file_flagged || overlaps(flags(), side, &file.path, lo, hi),
                 overlaps(ignored(), side, &file.path, lo, hi),
                 covers(&store.reviewed, side, &file.path, lo, hi),
             );
@@ -179,6 +181,11 @@ pub fn covers_file(tags: &[ReviewedTag], file: &str) -> bool {
     tags.iter().any(|tag| {
         !tag.anchor.stale && tag.anchor.side == AnchorSide::File && tag.anchor.file == file
     })
+}
+
+/// A whole-file anchor names `file`: a binary file's mark, or a note on the whole file.
+pub fn names_file<'a>(mut anchors: impl Iterator<Item = &'a Anchor>, file: &str) -> bool {
+    anchors.any(|anchor| !anchor.stale && anchor.side == AnchorSide::File && anchor.file == file)
 }
 
 /// File-scope flag/ignore check for binary files: any non-stale anchor on the path.
@@ -387,6 +394,23 @@ mod tests {
             }
         );
         assert_eq!((review.flags, review.notes), (2, 1), "a blank note is no note");
+    }
+
+    #[test]
+    fn a_whole_file_note_flags_every_hunk_and_a_commit_note_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let oid = commit_with_four_units(root);
+        let files = files(root, &oid);
+        let scope = ReviewScope::Commit { oid };
+        let note = |file: &str, kind, side| {
+            tags::add_flag(root, &scope, file, 0, 0, kind, side, Some("x".into()), None).unwrap()
+        };
+        note("", AnchorKind::Commit, AnchorSide::Commit);
+        assert_eq!(summarize(&files, &tags::load(root, &scope).unwrap()).flagged, 0);
+        // `a.txt`'s two hunks.
+        let store = note("a.txt", AnchorKind::File, AnchorSide::File);
+        assert_eq!(summarize(&files, &store).flagged, 2);
     }
 
     #[test]

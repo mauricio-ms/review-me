@@ -1,5 +1,7 @@
+import { useProjectStore } from "../state/project";
 import { useRepoStore } from "../state/repo";
 import { useUIStore } from "../state/ui";
+import { useWindowStore } from "../state/windows";
 import type { ChangedFile, Comparison } from "../types/diff";
 import { sameSource, type ProjectSource } from "../types/repo";
 import type { AnchorSide } from "../types/tags";
@@ -126,6 +128,40 @@ function viewerLines(): { path: string; side: AnchorSide; lo: number; hi: number
 export function viewerNoteTarget(): DiffTarget | null {
   const at = viewerLines();
   return at && { file: at.path, lo: at.lo, hi: at.hi, kind: "range", side: at.side };
+}
+
+// The file at the tree's cursor, registered by `ProjectTree` (its rows say which paths
+// are files), so a note can be put on it.
+let treeFileSource: (() => string | null) | null = null;
+
+export function setTreeFileSource(next: (() => string | null) | null): void {
+  treeFileSource = next;
+}
+
+/** A note on the whole of `path`. */
+export function wholeFileTarget(path: string): DiffTarget {
+  return { file: path, lo: 0, hi: 0, kind: "file", side: "file" };
+}
+
+/**
+ * `M-x note-file`, and `M-x note` in the tree: the whole file — the tree's at its
+ * cursor while the tree has the keyboard, else the selected window's — or null, having
+ * said why. It has to be a revision the comparison reads, like any mark.
+ */
+export function projectFileNoteTarget(): DiffTarget | null {
+  const inTree = useWindowStore.getState().treeFocused;
+  const file = inTree ? null : currentFile();
+  const path = inTree ? (treeFileSource?.() ?? null) : (file?.path ?? null);
+  const source = file ? file.source : useProjectStore.getState().source;
+  if (!path) {
+    flash(inTree ? "Not on a file" : "No file here");
+    return null;
+  }
+  if (!sideRead(useRepoStore.getState().diff?.comparison, source)) {
+    flash(`Marks go on the revision under review, not ${file?.sourceLabel ?? "this one"}`);
+    return null;
+  }
+  return wholeFileTarget(path);
 }
 
 /** `r` in a file: the whole file reviewed. */

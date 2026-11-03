@@ -7,7 +7,7 @@ use git2::{
 };
 use serde::Serialize;
 
-use crate::coverage::{covers, covers_file, file_tagged, overlaps};
+use crate::coverage::{covers, covers_file, file_tagged, names_file, overlaps};
 use crate::error::{AppError, AppResult};
 use crate::repo;
 use crate::tags::{self, AnchorSide, ReviewScope, TagStore};
@@ -252,7 +252,8 @@ fn reviewed_hunks(repo: &Repository, root: &Path) -> AppResult<Eligibility> {
             };
 
             let reviewed = covers(&store.reviewed, side, &path, lo, hi);
-            let flagged = overlaps(store.flags.iter().map(|t| &t.anchor), side, &path, lo, hi);
+            let flagged = names_file(store.flags.iter().map(|t| &t.anchor), &path)
+                || overlaps(store.flags.iter().map(|t| &t.anchor), side, &path, lo, hi);
             let ignored = overlaps(store.ignored.iter().map(|t| &t.anchor), side, &path, lo, hi);
 
             if reviewed && (flagged || ignored) {

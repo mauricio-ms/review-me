@@ -13,6 +13,7 @@ import { dispatchKey, type KeyHandler } from "../lib/key-dispatch";
 import { KEYMAP, type EditorAction } from "../lib/keymap";
 import { saveNote } from "../lib/review-actions";
 import { useNotesStore, type NoteEdit } from "../state/notes";
+import { useRepoStore } from "../state/repo";
 import { useUIStore } from "../state/ui";
 import PathLabel from "./PathLabel";
 import { useModalFocus } from "./useModalFocus";
@@ -47,10 +48,37 @@ function linesLabel(target: DiffTarget): string {
   return `${lines}${target.side === "old" ? " (removed)" : ""}`;
 }
 
+/** What the note is on: a file's lines, a whole file, or the commit under review. */
+function TargetLabel({ edit }: { edit: NoteEdit }) {
+  const comparison = useRepoStore((s) => s.diff?.comparison);
+  const { target, flagId } = edit;
+  if (target.side === "commit") {
+    return (
+      <div className="note-target">
+        {comparison?.kind === "commit" && (
+          <>
+            <span className="note-target-oid">{comparison.shortOid}</span> {comparison.summary}{" "}
+            ·{" "}
+          </>
+        )}
+        whole commit
+      </div>
+    );
+  }
+  const flags = target.side === "file" ? "the file" : "these lines";
+  return (
+    <div className="note-target">
+      <PathLabel path={target.file} /> · {linesLabel(target)}
+      {flagId ? "" : ` · saving flags ${flags}`}
+    </div>
+  );
+}
+
 /**
- * The review-note editor (`M-x note`): Markdown in a vim buffer, saved onto the flag at
- * the cursor — or, on unflagged lines, flagging them with the note on first save. The
- * note is a fix left for later; the commit's notes are exported for an LLM to act on.
+ * The review-note editor (`M-x note`, `note-file`, `note-commit`): Markdown in a vim
+ * buffer, saved onto the flag at the cursor — or, on unflagged lines (a file, the
+ * commit), flagging them with the note on first save. The note is a fix left for later;
+ * the commit's notes are exported for an LLM to act on.
  */
 export default function NoteEditorHost() {
   const editing = useNotesStore((s) => s.editing);
@@ -180,10 +208,7 @@ function NoteEditor({
         onKeyDownCapture={(e) => dispatchKey("editor", e, KEYMAP.editor, keyHandlers)}
       >
         <div className="neo-title">Note</div>
-        <div className="note-target">
-          <PathLabel path={edit.target.file} /> · {linesLabel(edit.target)}
-          {edit.flagId ? "" : " · saving flags these lines"}
-        </div>
+        <TargetLabel edit={edit} />
         <div className="commit-editor-shell note-editor-shell">
           <CodeMirror
             value={initial}

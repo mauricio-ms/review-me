@@ -313,8 +313,12 @@ lines + context lines. Each anchor carries a **`side`** (`AnchorSide`) and a
 **`scope`** (`ReviewScope`).
 
 `side`: `new` anchors to the new side (added/modified hunks, the default), `old` to the
-old side (pure-deletion hunks + deleted text files), `file` to a whole binary-file change
-identified by `old:new` blob oids (line numbers unused).
+old side (pure-deletion hunks + deleted text files), `file` to a whole file identified by
+`old:new` blob oids (line numbers unused) — a binary change, or a note on the whole file,
+which stays live while the path has the blobs it was made against (so `X:X` on a file the
+commit didn't change) — and `commit` to the commit itself: a note on the whole commit,
+with an empty `file` and nothing to hash. A `file` flag claims every hunk of its file
+(`isHunkFlagged`, `coverage::names_file`) without tinting its lines.
 
 `scope`: `worktree`, `{branches, baseRef, targetRef}`, or `{commit, oid}` — **which
 comparison the mark belongs to**. `tags::load(root, scope)` returns *only* that scope's
@@ -345,7 +349,7 @@ precedence **flagged > ignored > reviewed > to-review** (`sectionForHunk`/
 scope. **Project mode reviews whole files only** (`lib/project-review.ts`): `r` `f` `i`
 `u` in the tree and `r` / `u` in the viewer act on the file — `reviewWholeFile` /
 `ignoreWholeFile` mark it unit by unit, a flag spans `fileTarget`, `unmarkWholeFile` takes
-every mark on either side — while the viewer's `!` (and `M-x flag`, `M-x note`) flags lines and `u` on
+every mark on either side, as `u` on a diff file row does — while the viewer's `!` (and `M-x flag`, `M-x note`) flags lines and `u` on
 a visual selection unmarks lines; taking the selection ends vim's visual mode
 (`endVisualSelection`). Lines are marked only on the side the buffer reads
 (`sideRead`: the new side, or the old one for a deleted file); the flag tint follows the
@@ -369,23 +373,31 @@ also skips untracked paths under it for repos marked before that existed.
 
 A **note** is a flag's `note`: a fix left for later, written while reviewing a commit.
 There is no separate store — notes ride on flags, so they get anchoring, the Flagged
-section and `u` for free. `M-x note` (`lib/notes.ts`) reads the diff buffer's cursor or
-selection through `lib/diff-view.ts` (the diff-buffer twin of `project-view.ts`) — in the
-project buffer, the selected window's visual selection or cursor line, on the side it
-reads (`project-review.ts`'s `viewerNoteTarget`) — and opens
+section and `u` for free. A note is on lines, on a whole file (a `file`-side flag) or on
+the commit as a whole (`commit` side, `COMMIT_TARGET`) — one per file and one per commit,
+since `add_flag` replaces a flag on the same range. `M-x note` (`lib/notes.ts`) reads the
+diff buffer's cursor or selection through `lib/diff-view.ts` (the diff-buffer twin of
+`project-view.ts`): lines, or the whole file on a file row, the commit on the commit's
+rows. In the project buffer it reads the selected window's visual selection or cursor
+line, on the side it reads (`project-review.ts`'s `viewerNoteTarget`), or in the tree the
+file at its cursor (`setTreeFileSource`). `M-x note-file` notes the whole file at point
+from any row or window, `M-x note-commit` the commit from anywhere. Each opens
 `NoteEditorHost` on the flag found there (`flagAt`: same range, else overlapping), or on
-bare lines that its first save flags (`review-actions.ts`'s `saveNote`). Existing notes
+a bare target that its first save flags (`review-actions.ts`'s `saveNote`). Existing notes
 are edited in place by `set_flag_note` (same id/anchor/`createdAt`; blank clears). Notes
 are commit-scope only (`notesAvailable`). The diff buffer renders each as a `note` row
-under the first hunk it touches (or under the file row), and a note row's scope is its
-flag's lines.
+under the first hunk it touches (or under the file row, a whole-file note first), and the
+commit's as a `commitNote` row under the commit; a note row's scope is its flag's
+target, so `u` there (or on the commit row) asks, then takes it.
 
 `notes.rs` exports them as Markdown, a **projection** never read back: every command
 that can change a commit's flags (`add_flag_tag`, `set_flag_note`, `remove_tag`,
 `clear_tags`, `unmark_range`) calls `commands.rs`'s `sync_notes`, which rewrites
 `.review-me/notes/commits/<full-oid>.md` (or removes it) and `notes/README.md`; a failed
 export is logged, never fatal. `M-x export` writes `notes/branches/<branch>.md` — every note
-reachable from the review branch, oldest first. Rendering must stay **deterministic**
+reachable from the review branch, oldest first. The commit's own notes come first, as
+"The commit as a whole" after its message; a file's whole-file note heads its file, with no
+excerpt. Rendering must stay **deterministic**
 (dates from the commit, write only when content changes) so an unchanged review never
 churns; excerpts are the commit's own diff lines over the note's range, or tree lines for
 code the commit didn't touch, because the reader works at a later HEAD where line numbers

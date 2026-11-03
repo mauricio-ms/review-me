@@ -166,7 +166,7 @@ function overlapsSide(
   );
 }
 
-/** A whole-file (binary) anchor on the path. */
+/** A whole-file anchor on the path: a binary file's mark, or a note on the whole file. */
 function coversFile(tags: Tagged[], file: string): boolean {
   return tags.some(
     (t) => !t.anchor.stale && sideOf(t.anchor) === "file" && t.anchor.file === file,
@@ -218,9 +218,11 @@ export function isLineFlagged(
   return coversSide(flags, file, line, line, side);
 }
 
+/** A flag on any of the hunk's lines claims it — as does a note on the whole file. */
 export function isHunkFlagged(flags: FlagTag[], file: string, hunk: Hunk): boolean {
   const t = hunkTarget(hunk);
-  return t ? overlapsSide(flags, file, t.lo, t.hi, t.side) : false;
+  if (!t) return false;
+  return overlapsSide(flags, file, t.lo, t.hi, t.side) || coversFile(flags, file);
 }
 
 export function isLineIgnored(
