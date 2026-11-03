@@ -300,6 +300,27 @@ export function fileReviewState(
   return sections.every((s) => s === "reviewed" || s === "ignored") ? "done" : "open";
 }
 
+/**
+ * A changed file's first unit still in To review — a reviewable hunk, or `"file"` for a
+ * file reviewed whole — or null when nothing in it is. Units as `fileReviewState` counts
+ * them, but a flag only takes its own unit out: the file's other hunks still wait.
+ */
+export function firstToReview(
+  reviewed: ReviewedTag[],
+  flags: FlagTag[],
+  ignored: IgnoredTag[],
+  file: ChangedFile,
+): Hunk | "file" | null {
+  const hunks = file.binary ? [] : file.hunks.filter((h) => hunkTarget(h) != null);
+  if (hunks.length === 0) {
+    return sectionForFile(reviewed, flags, ignored, file.path) === "toReview" ? "file" : null;
+  }
+  return (
+    hunks.find((h) => sectionForHunk(reviewed, flags, ignored, file.path, h) === "toReview") ??
+    null
+  );
+}
+
 /** reviewed unit count / total reviewable unit count (text hunks + binary files). */
 export function reviewProgress(
   files: ChangedFile[],

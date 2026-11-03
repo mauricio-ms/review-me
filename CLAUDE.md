@@ -145,7 +145,7 @@ buffer (`C-h b`, `C-h m`; `C-h k` describes a key in the echo area). Dispatch li
   fails the build; a handler returning `false` lets the key go on.
 - The viewer's keys are a CodeMirror keymap built from the table
   (`editor/viewer-keymap.ts`) — except `vim: true` entries (`q`, `] c`, `[ c`, `] f`,
-  `[ f`, `r`, `!`, `u`), which `editor/vim-nav.ts` maps as vim commands, because a
+  `[ f`, `] u`, `[ u`, `r`, `!`, `u`), which `editor/vim-nav.ts` maps as vim commands, because a
   sequence vim also uses (`]]`, `[(`) must reach vim whole; they stay in the table for
   help and `C-h k`, and get vim's count (`3]c`). `visual: true` ones are mapped in visual
   mode too: the handler is told so, reads the selection, and vim-nav then ends it. The note and commit editors read `C-c C-c` / `C-c C-k` in a
@@ -451,7 +451,10 @@ and while its row isn't shown it sits on the nearest folder above. `c` / `M-x ch
 (`toggleChangedOnly`) and `C-x C-j` / `M-x reveal` (`revealFile`, Emacs's dired-jump) put
 it on the file on screen, opening its folders; `reveal` takes the diff cursor's file from
 the diff (entering project mode, previewing it) and switches to all files for a file the
-changed view doesn't list.
+changed view doesn't list. Otherwise the cursor **follows the selected window's file**
+(treemacs's follow mode: a `useWindowStore` subscription in `lib/project.ts`), however it
+got there — opened, jumped to, `C-x o` — opening its folders, in the changed view only for
+a file it lists; while the tree has the keyboard it waits, and follows once it lets go.
 
 **The tree previews; it doesn't open.** Moving its cursor onto a file (after a 60ms rest,
 so holding `j` reads nothing) or clicking one calls `lib/project.ts`'s `previewFile`, and
@@ -489,7 +492,10 @@ the merge base shows no marks). A deletion has no new side: read at the old side
 (`deletionForFile`), every line is tinted and signed as removed (`setDeletedFile`).
 `] c` / `[ c` (`gotoChange`) walk a file's blocks by their first line, `] f` / `[ f`
 (`gotoChangedFile`) the comparison's files in the changed-files
-tree's order (`lib/changed-tree.ts`), opened at their first change; the mode line says
+tree's order (`lib/changed-tree.ts`), opened at their first change, and `] u` / `[ u`
+(`gotoFileToReview`, the tree's too) only the files with a unit still in To review
+(`coverage.ts`'s `firstToReview`: a flag takes only its own unit out), at that unit, from
+the file at hand and wrapping — in the tree from its cursor, previewing; the mode line says
 `change i/n` from each window's published cursor line (`useUIStore.fileLines`).
 `changeBlocks` is cached per `ChangedFile`. `editor/overview-ruler.ts` draws the same
 blocks (`markedBlocks`) and the flags (`flaggedLines`) on a strip beside the scrollbar,

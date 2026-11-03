@@ -14,6 +14,7 @@ import {
   onScreen,
   selectedBuffer,
   useWindowStore,
+  type BufferKey,
   type FileBufferId,
   type WindowId,
 } from "../state/windows";
@@ -177,7 +178,7 @@ function changeAt(path: string | undefined): ChangedFile | undefined {
 }
 
 /** Put the tree's cursor on `path`, opening the folders it's in. */
-function revealInTree(path: string): void {
+export function revealInTree(path: string): void {
   const ps = useProjectStore.getState();
   ps.openFolders(foldersAbove(path));
   ps.setTreeCursor(path);
@@ -319,15 +320,41 @@ useWindowStore.subscribe(() => {
   if (fresh && useWindowStore.getState().preview?.key !== fresh.id) dropPreviewBuffer();
 });
 
+// The tree's cursor follows the file in the selected window, however it came to be
+// shown there — a file opened, a jump, `C-x o` to another window — as treemacs's follow
+// mode does; the changed-files view only to a file it lists. While the tree has the
+// keyboard its cursor leads instead; what's on screen when it lets go is followed then,
+// whatever it is (`display` shows a buffer before `select` takes the keyboard from the
+// tree).
+let followed: BufferKey | undefined;
+useWindowStore.subscribe((ws) => {
+  if (ws.treeFocused) {
+    followed = undefined;
+    return;
+  }
+  const key = onScreen(ws, ws.selected);
+  if (key === followed) return;
+  followed = key;
+  if (!key || !isFileKey(key)) return;
+  const path = bufferOnScreen(useFilesStore.getState(), key)?.path;
+  if (path && (useProjectStore.getState().filter === "all" || changeAt(path))) {
+    revealInTree(path);
+  }
+});
+
 /**
  * The tree's cursor resting on a file: show it where opening it would (`targetWindow`)
  * without opening it, the tree keeping the keyboard. A buffer already open for it is
  * shown as it stands; otherwise the file is read into the one preview buffer, which no
  * buffer list sees and the next preview replaces. When the tree lets go, the window goes
  * back to what it showed — unless it's the window that takes the keyboard
- * (`openPreview`), or the file was opened.
+ * (`openPreview`), or the file was opened. With `at`, the file shows at that line.
  */
-export async function previewFile(path: string, choice: SourceChoice): Promise<void> {
+export async function previewFile(
+  path: string,
+  choice: SourceChoice,
+  at?: { line: number },
+): Promise<void> {
   const seq = ++previewSeq;
   const repo = useRepoStore.getState().repoPath;
   if (!repo || !treeBrowsing()) return;
@@ -350,6 +377,7 @@ export async function previewFile(path: string, choice: SourceChoice): Promise<v
   const ws = useWindowStore.getState();
   const under = ws.shown[win];
   ws.setPreview(under === key ? null : { win, key, under });
+  if (at) placeCursor(win, key, at.line);
 }
 
 /**

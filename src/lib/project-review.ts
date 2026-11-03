@@ -1,14 +1,24 @@
 import { useProjectStore } from "../state/project";
 import { useRepoStore } from "../state/repo";
+import { useTagsStore } from "../state/tags";
 import { useUIStore } from "../state/ui";
 import { useWindowStore } from "../state/windows";
-import type { ChangedFile, Comparison } from "../types/diff";
+import type { ChangedFile, Comparison, Hunk } from "../types/diff";
 import { sameSource, type ProjectSource } from "../types/repo";
 import type { AnchorSide } from "../types/tags";
 import { currentFile } from "./buffers";
-import { fileTarget, hunkTarget } from "./coverage";
+import { changedFileOrder } from "./changed-tree";
+import { fileTarget, firstToReview, hunkTarget } from "./coverage";
 import type { DiffTarget } from "./diff-view";
-import { ambientSource, baseSource } from "./project";
+import {
+  ambientSource,
+  baseSource,
+  openFileFromDiff,
+  previewFile,
+  revealInTree,
+  sideChoice,
+} from "./project";
+import { blockStart, changeBlocks } from "./project-diff";
 import { endVisualSelection, projectSelectionRange } from "./project-view";
 import {
   addFlag,
@@ -62,7 +72,7 @@ export async function reviewFile(path: string): Promise<void> {
     return;
   }
   await reviewWholeFile(change);
-  flash(`Reviewed ${path}`);
+  flash(`Reviewed ${path}${leftHint()}`);
 }
 
 /** `i` in the tree: every unit of the file's change, ignored. */
@@ -74,7 +84,7 @@ export async function ignoreFile(path: string): Promise<void> {
     return;
   }
   await ignoreWholeFile(change);
-  flash(`Ignored ${path}`);
+  flash(`Ignored ${path}${leftHint()}`);
 }
 
 /** `f` in the tree: the file flagged, as the diff buffer's `f` on its file row does. */
@@ -98,6 +108,80 @@ export async function unmarkFile(path: string): Promise<void> {
   const result = await unmarkWholeFile(path);
   if (result === "none") flash(`No marks on ${path}`);
   else if (result === "unmarked") flash(`Unmarked ${path}`);
+}
+
+/**
+ * The comparison's files in the changed-files tree's order (the order `] f` walks),
+ * and those with something still to review, each with its first unit still to review.
+ */
+function filesToReview(): {
+  order: ChangedFile[];
+  open: { at: number; file: ChangedFile; unit: Hunk | "file" }[];
+} {
+  const order = changedFileOrder(useRepoStore.getState().diff?.files ?? []);
+  const { reviewed, flags, ignored } = useTagsStore.getState();
+  const open = order.flatMap((file, at) => {
+    const unit = firstToReview(reviewed, flags, ignored, file);
+    return unit ? [{ at, file, unit }] : [];
+  });
+  return { order, open };
+}
+
+/** What `r` and `i` add to their echo: how far the review has left to go. */
+function leftHint(): string {
+  const left = filesToReview().open.length;
+  return left === 0 ? " — nothing left to review" : ` — ] u for the next (${left} left)`;
+}
+
+/** The line `] u` lands on in a file: where `unit` starts, as `] c` would put it. */
+function unitLine(file: ChangedFile, unit: Hunk | "file"): number | undefined {
+  if (unit === "file") return undefined;
+  if (file.status === "deleted") return hunkTarget(unit)?.lo;
+  const block = changeBlocks(file).find((b) => b.id.startsWith(`${unit.id}:`));
+  return block ? blockStart(block) : unit.newStart;
+}
+
+/**
+ * `] u` / `[ u` — the next or previous file with something still to review, `count`
+ * on, at its first unit still to review. Files come in the changed-files tree's order,
+ * walked from the file at hand (reviewed or not) — in the tree from its cursor, a folder
+ * standing just above its first file — and past the last it wraps, since a file skipped
+ * earlier is still waiting. The tree's cursor goes there and previews it; in a file,
+ * the file opens.
+ */
+export function gotoFileToReview(step: 1 | -1, count = 1): void {
+  const inTree = useWindowStore.getState().treeFocused;
+  const from = inTree ? useProjectStore.getState().treeCursor : (currentFile()?.path ?? null);
+  const { order, open } = filesToReview();
+  if (open.length === 0) {
+    flash(
+      order.length === 0 ? "The comparison on screen changes no files" : "Nothing left to review",
+    );
+    return;
+  }
+  let here = order.findIndex((f) => f.path === from);
+  if (here < 0) {
+    const under = from ? order.findIndex((f) => f.path.startsWith(`${from}/`)) : -1;
+    here = under >= 0 ? under - 0.5 : step > 0 ? -1 : order.length;
+  }
+  const ahead =
+    step > 0 ? open.filter((o) => o.at > here) : open.filter((o) => o.at < here).reverse();
+  const behind =
+    step > 0 ? open.filter((o) => o.at <= here) : open.filter((o) => o.at >= here).reverse();
+  const n = (count - 1) % open.length;
+  const { file, unit } = [...ahead, ...behind][n];
+  const side = file.status === "deleted" ? "old" : "new";
+  const line = unitLine(file, unit);
+  if (inTree) {
+    revealInTree(file.path);
+    void previewFile(file.path, sideChoice(side), line != null ? { line } : undefined);
+  } else {
+    openFileFromDiff(file.path, side, line);
+  }
+  const left =
+    open.length === 1 ? "the last file to review" : `${open.length} files left to review`;
+  const wrapped = n < ahead.length ? "" : step > 0 ? ", on from the top" : ", on from the bottom";
+  flash(`${file.path} — ${left}${wrapped}`);
 }
 
 /**

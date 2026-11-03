@@ -18,6 +18,7 @@ import {
 } from "../lib/project";
 import {
   flagFile,
+  gotoFileToReview,
   ignoreFile,
   reviewFile,
   setTreeFileSource,
@@ -324,6 +325,14 @@ export default function ProjectTree({ hidden }: { hidden: boolean }) {
     up: () => moveTo(cursor - 1),
     first: () => moveTo(0),
     last: () => moveTo(nodes.length - 1),
+    "next-to-review": () => {
+      window.clearTimeout(previewTimer.current);
+      gotoFileToReview(1);
+    },
+    "prev-to-review": () => {
+      window.clearTimeout(previewTimer.current);
+      gotoFileToReview(-1);
+    },
     // Fold the folder under the cursor (no-op on files).
     toggle: () => {
       const node = nodes[cursor];

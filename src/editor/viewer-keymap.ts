@@ -5,7 +5,7 @@ import { quitFile } from "../lib/buffers";
 import { recordJump } from "../lib/jumps";
 import { KEYMAP, type ViewerAction } from "../lib/keymap";
 import { gotoChange, gotoChangedFile } from "../lib/project-diff";
-import { flagHere, reviewHere, unmarkHere } from "../lib/project-review";
+import { flagHere, gotoFileToReview, reviewHere, unmarkHere } from "../lib/project-review";
 import { setProjectCursor } from "../lib/project-view";
 import { findUsages, gotoDefinition } from "../lib/xref";
 import { useMinibufferStore } from "../state/minibuffer";
@@ -51,6 +51,8 @@ export const VIEWER_HANDLERS: Record<ViewerAction, ViewerHandler> = {
   "prev-change": (count) => gotoChange(-1, count),
   "next-file": (count) => gotoChangedFile(1, count),
   "prev-file": (count) => gotoChangedFile(-1, count),
+  "next-to-review": (count) => gotoFileToReview(1, count),
+  "prev-to-review": (count) => gotoFileToReview(-1, count),
   review: () => void reviewHere(),
   flag: () => void flagHere(),
   unmark: (_count, visual) => void unmarkHere(visual),

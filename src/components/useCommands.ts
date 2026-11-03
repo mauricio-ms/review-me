@@ -20,7 +20,7 @@ import {
 import { applyComparison, refreshDiff } from "../lib/open-repo";
 import { resizeTree, revealFile, toggleChangedOnly, toggleTree } from "../lib/project";
 import { toggleChangesAtCursor } from "../lib/project-diff";
-import { flagHere } from "../lib/project-review";
+import { flagHere, gotoFileToReview } from "../lib/project-review";
 import { ignoreGeneratedFiles } from "../lib/review-actions";
 import { adjustTextScale } from "../lib/text-scale";
 import { versionLine } from "../lib/version";
@@ -75,6 +75,8 @@ export type CommandId =
   | "changed"
   | "hunk"
   | "hunks"
+  | "next-unreviewed"
+  | "prev-unreviewed"
   | "close"
   | "checkout"
   | "compare"
@@ -589,6 +591,30 @@ export function useCommands(close: CommandClose): {
       buffer: "project",
       enabled: !!repo,
       run: handleToggleAllChanges,
+    },
+    {
+      id: "next-unreviewed",
+      name: "next-unreviewed",
+      aliases: ["next-to-review", "unreviewed"],
+      label: "next file still to review, at what's left in it",
+      buffer: "project",
+      enabled: !!repo,
+      run: () => {
+        close();
+        gotoFileToReview(1);
+      },
+    },
+    {
+      id: "prev-unreviewed",
+      name: "prev-unreviewed",
+      aliases: ["previous-unreviewed", "prev-to-review"],
+      label: "previous file still to review, at what's left in it",
+      buffer: "project",
+      enabled: !!repo,
+      run: () => {
+        close();
+        gotoFileToReview(-1);
+      },
     },
     {
       id: "close",
