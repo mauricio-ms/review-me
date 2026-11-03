@@ -6,6 +6,9 @@ import "./styles.css";
 
 initTextScale();
 
+// WebKit's own menu (Back, Reload, Inspect Element) has nothing for a reviewer.
+window.addEventListener("contextmenu", (e) => e.preventDefault());
+
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <App />
