@@ -160,8 +160,11 @@ or `--fg-3` for text. Three sizes derive from one base, `--fs` (16px), which
 `key-dispatch.ts`'s `armRepeat`) and remembers in `localStorage`: `--fs` for what you read
 (diff, log, viewer, minibuffer), `--fs-ui` (0.875×) for the chrome around it (tree, mode
 line, headers, gutters, annotations), `--fs-sm` (0.75×) for section labels and key hints.
-Nothing is bigger than the code. Dim text is `--fg-faint` (≥4.5:1 on `--bg-0`/`--bg-deep`)
+Nothing is bigger than the code — a rendered Markdown heading included: it stands out by
+weight, colour and a rule, never size. Dim text is `--fg-faint` (≥4.5:1 on `--bg-0`/`--bg-deep`)
 or `--fg-dim` (also on `--bg-1`: the tree, headers, pickers); `--fg-3` is 2:1, for rules.
+Faces are `--mono` everywhere but rendered Markdown's prose, which is `--prose` (Inter, else
+the desktop's sans).
 
 **Paths** are what a reviewer reads, and the file name is the part that matters, so a
 path is never cut on the right. `components/PathLabel.tsx` draws one with the folders
@@ -298,7 +301,9 @@ row's file through `rowFile` rather than assuming every non-section row has one.
 **file viewer** (`FileView.tsx`) uses CodeMirror (read-only + vim + per-file syntax
 highlighting lazy-loaded by extension via `@codemirror/language-data`, which
 `editor/languages.ts` extends with Svelte (Replit's grammar) and Astro — HTML with TypeScript
-mixed over the frontmatter and each `{…}` by `parseMixed` overlays).
+mixed over the frontmatter and each `{…}` by `parseMixed` overlays — and overrides for
+Markdown: GitHub's flavour (tables, task lists, strikethrough) with fenced code highlighted
+in its own language, where language-data's is bare CommonMark).
 
 **One row ≠ one visual line.** Line content wraps (`pre-wrap` + `overflow-wrap: anywhere`
 in `styles.css`) rather than truncating, so a row can be several lines tall: keep gutters
@@ -506,6 +511,31 @@ the comparison changes). The changed-files view (`filter === "changed"`) always 
 removed lines (`ShownBlock.showRemoved`); the full diff — green new lines, word marks —
 still follows `M-x hunk`/`M-x hunks`. Block widgets must come from a `StateField`, never a view
 plugin — CodeMirror rejects them there.
+
+**Markdown renders in place** (`editor/markdown-view.ts`, on for `.md`/`.markdown`/`.mkd`
+unless `M-x markdown-markup` put the buffer in `useFilesStore.rawMarkup`). The document stays
+the file's text — line 42 is still line 42 — so everything line-anchored (change marks,
+flags, notes, Swiper, vim, saved places) works untouched; decorations only hide markup and
+draw what it means: headings by weight and a rule, emphasis, inline code, links by their text
+(the address in a tooltip), bullets/numbers/task boxes in a box per nesting level that wrapped
+lines hang under (`padding-left` + negative `text-indent`, so a widget inside sets
+`text-indent: 0`), quotes and GitHub's `> [!NOTE]` alerts, tables padded into aligned
+monospace columns (cell widths measured *as shown*, through the same inline walker with a
+counting `Sink`), rules, dimmed frontmatter and link definitions. Prose is `--prose`, wrapping
+at `--md-measure` through `padding-right` so tints and flags still span the line; code,
+tables and the removed-line widgets stay `--mono`. It is a **view plugin** over the viewport,
+rebuilt per update — so it never replaces a line break or draws a block widget. Two lines keep
+their raw markup: **the cursor's (or the selection's) while the editor has the keyboard**
+(`activeElement`, not `hasFocus`, which also asks the window), so what the file says is where
+you are; and **the lines of a change whose diff is shown** (`diff-marks.ts`'s
+`shownChangeLines`), so a markup-only change is never out of sight. Brackets with no
+definition behind them (`[WIP]`) aren't links. The view's marks wrap the syntax highlighter's
+spans, so a colour that must win is written for `.x *` too. Links follow (`lib/markdown.ts`'s
+`followLink`) on `C-c C-o`, `M-.` and Ctrl+click — `gotoDefinitionAt` tries a link first in
+Markdown: a path relative to the file (`/…` from the root) opens at the same revision, at the
+heading its `#…` names (GitHub's slugs, `-1` for repeats), a folder shows in the tree, `#…`
+alone is a jump within, an address outside the repo is copied (there is no browser to hand it
+to); each is a `recordJump`.
 
 **`C-s` is Swiper** (`editor/swiper.ts`; `M-x swiper`), and CodeMirror's own search keymap
 is off in every editor, so `C-f` is vim's page down again rather than a find panel. The

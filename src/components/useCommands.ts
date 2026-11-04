@@ -17,6 +17,7 @@ import {
   openFileNoteEditor,
   openNoteEditor,
 } from "../lib/notes";
+import { isMarkdownPath } from "../lib/markdown";
 import { applyComparison, refreshDiff } from "../lib/open-repo";
 import { resizeTree, revealFile, toggleChangedOnly, toggleTree } from "../lib/project";
 import { toggleChangesAtCursor } from "../lib/project-diff";
@@ -75,6 +76,7 @@ export type CommandId =
   | "changed"
   | "hunk"
   | "hunks"
+  | "markdown-markup"
   | "next-unreviewed"
   | "prev-unreviewed"
   | "close"
@@ -156,7 +158,10 @@ export function useCommands(close: CommandClose): {
   const closeRepo = useRepoStore((s) => s.closeRepo);
   // A branch pair or a single commit: both sides are already committed history.
   const comparingHistory = readsCommittedHistory(comparison);
-  const openPath = useCurrentFile()?.path ?? null;
+  const openFile = useCurrentFile();
+  const openPath = openFile?.path ?? null;
+  const openMarkdown = openPath != null && isMarkdownPath(openPath);
+  const rawMarkup = useFilesStore((s) => (openFile ? s.rawMarkup.has(openFile.id) : false));
   const projectFilter = useProjectStore((s) => s.filter);
   const inlineDiff = useProjectStore((s) => s.inlineDiff);
   const toggleInlineDiff = useProjectStore((s) => s.toggleInlineDiff);
@@ -591,6 +596,20 @@ export function useCommands(close: CommandClose): {
       buffer: "project",
       enabled: !!repo,
       run: handleToggleAllChanges,
+    },
+    {
+      id: "markdown-markup",
+      name: "markdown-markup",
+      aliases: ["markdown-toggle-markup-hiding", "markup", "raw", "render"],
+      label: rawMarkup
+        ? "render this Markdown file in place"
+        : "show this Markdown file's raw markup",
+      buffer: "project",
+      enabled: openMarkdown,
+      run: () => {
+        close();
+        if (openFile) useFilesStore.getState().toggleRawMarkup(openFile.id);
+      },
     },
     {
       id: "next-unreviewed",

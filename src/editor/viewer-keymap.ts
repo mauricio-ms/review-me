@@ -4,6 +4,7 @@ import { EditorView, keymap, type KeyBinding as CmKeyBinding } from "@codemirror
 import { quitFile } from "../lib/buffers";
 import { recordJump } from "../lib/jumps";
 import { KEYMAP, type ViewerAction } from "../lib/keymap";
+import { followLinkAtCursor } from "../lib/markdown";
 import { gotoChange, gotoChangedFile } from "../lib/project-diff";
 import { flagHere, gotoFileToReview, reviewHere, unmarkHere } from "../lib/project-review";
 import { setProjectCursor } from "../lib/project-view";
@@ -45,6 +46,7 @@ type ViewerHandler = (count: number, visual: boolean) => void;
 export const VIEWER_HANDLERS: Record<ViewerAction, ViewerHandler> = {
   definition: () => void gotoDefinition(),
   references: () => void findUsages(),
+  "follow-link": () => void followLinkAtCursor(),
   "goto-line": promptGotoLine,
   swiper: swiperHere,
   "next-change": (count) => gotoChange(1, count),
@@ -86,7 +88,7 @@ const bindings: CmKeyBinding[] = KEYMAP.viewer.flatMap((binding) =>
 /**
  * The viewer's own keys (`keymap.ts`'s `viewer` scope): emacs-xref navigation —
  * `M-.` definition · `M-?` references (`M-,` back is global: history spans every
- * buffer) — `M-g g` go to line, and `C-s` Swiper.
+ * buffer) — `C-c C-o` a Markdown link, `M-g g` go to line, and `C-s` Swiper.
  *
  * Alt chords rather than vim's `C-o`/`C-i` on purpose. codemirror-vim binds those to
  * its own jump list, whose marks are anchored into the document — and each buffer has

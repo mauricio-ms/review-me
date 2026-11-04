@@ -374,6 +374,7 @@ just the current buffer's keys; `C-h k` tells you what a key does.
 | `changed` | Project tree: only the changed files ↔ all files (`c` in the tree); the finder lists changed files first |
 | `hunk` | (project) Show/hide the diff of the change at the cursor or selection |
 | `hunks` | (project) Show/hide the diff of every change, in every file |
+| `markdown-markup` | (project) A Markdown file's raw text ↔ rendered in place |
 | `flag` | (project) Flag the current selection |
 | `diff`, `project` | Switch to that buffer |
 | `toggle-tree` | (project) Hide or show the file tree (`C-x t t`) |
@@ -551,6 +552,16 @@ Rest the cursor on a symbol and its other occurrences in the file light up. In J
 come from the cross-reference index, so a field and a local of the same name stay apart;
 in other files the word is matched by name, leaving out keywords, comments and strings.
 
+**Markdown reads rendered.** A `.md` file shows as it renders, in place: headings, emphasis,
+code, links by their text, bullets and task boxes, quotes and GitHub's `> [!NOTE]` alerts,
+tables lined up, prose in a proportional face. It is still the file's text underneath — the
+line numbers, change marks, flags and notes are the file's lines — and the line under the
+cursor (or the selection) shows its raw markup, as does a change whose diff is open, so a
+change that only touched markup is never hidden. `C-c C-o` (or `M-.`, or Ctrl+click) follows
+a link: another file opens at the same revision, at the heading its `#…` names, a folder shows
+in the tree, and an outside address is copied. `M-x markdown-markup` switches the file to its
+raw text and back.
+
 `C-s` searches the file the way Swiper does: the minibuffer lists the lines that match as
 you type, numbered, and the file follows the selected one, with every match on screen lit.
 Words separated by a space must all match, in order; words after a `!` must not match; it
@@ -566,6 +577,7 @@ search brings back the last one, and `M-n` searches for the symbol at the cursor
 | `M-.` / `M-?` | Go to definition / find references |
 | `C-x 4 .` | Go to definition in the other window |
 | `M-g g` | Go to line |
+| `C-c C-o` | Follow the Markdown link at the cursor (`M-.` too) |
 | `]c` / `[c` | Next / previous **change** in the file (a count works: `3]c`) |
 | `]f` / `[f` | Next / previous **changed file**, at its first change |
 | `Ctrl`/`Cmd` + click | Jump to definition of the symbol clicked |

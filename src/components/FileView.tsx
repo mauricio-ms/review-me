@@ -11,6 +11,7 @@ import { diffMarks, setDeletedFile, setDiffMarks } from "../editor/diff-marks";
 import { flagDecorations, setFlagLines } from "../editor/flag-decorations";
 import { gruberDarkerTheme } from "../editor/gruber-darker";
 import { languages } from "../editor/languages";
+import { markdownView } from "../editor/markdown-view";
 import { occurrenceHighlight } from "../editor/occurrences";
 import { overviewRuler } from "../editor/overview-ruler";
 import { swiperHighlight } from "../editor/swiper";
@@ -18,6 +19,7 @@ import { viewerKeymap } from "../editor/viewer-keymap";
 import { defineNavVim } from "../editor/vim-nav";
 import { visualLines } from "../editor/visual-lines";
 import { xrefClick } from "../editor/xref-click";
+import { isMarkdownPath } from "../lib/markdown";
 import { changeBlocks, changeForFile, deletionForFile } from "../lib/project-diff";
 import { sideRead } from "../lib/project-review";
 import { occurrenceLookup } from "../lib/xref";
@@ -85,8 +87,8 @@ function trackPosition(win: WindowId, buffer: FileBufferId): Extension {
 
 /**
  * One window's view of a file buffer: the path line, then the file read-only in
- * CodeMirror with vim, its syntax, its changes in the comparison under review, and its
- * flags. Keyed by buffer, so each buffer gets a fresh editor that opens at the place
+ * CodeMirror with vim, its syntax (Markdown rendered in place), its changes in the
+ * comparison under review, and its flags. Keyed by buffer, so each buffer gets a fresh editor that opens at the place
  * this window left it — and a preview that gets opened keeps the one it has.
  */
 export default function FileView({ win, bufferId }: { win: WindowId; bufferId: FileBufferId }) {
@@ -100,6 +102,7 @@ export default function FileView({ win, bufferId }: { win: WindowId; bufferId: F
   const inlineFlipped = useProjectStore((s) => s.inlineFlipped);
   const focused = useWindowStore((s) => s.selected === win && !s.treeFocused);
   const focusRequest = useUIStore((s) => s.focusRequest);
+  const rawMarkup = useFilesStore((s) => s.rawMarkup.has(bufferId));
   const setVimMode = useUIStore((s) => s.setVimMode);
 
   // The view exists only once CodeMirror has mounted — after this component's first
@@ -108,6 +111,8 @@ export default function FileView({ win, bufferId }: { win: WindowId; bufferId: F
   const [langExt, setLangExt] = useState<Extension | null>(null);
 
   const path = buffer?.path ?? null;
+  // Markdown renders in place, unless asked for its raw text.
+  const rendered = path != null && isMarkdownPath(path) && !rawMarkup;
   const source = buffer?.source;
   const content = buffer?.content ?? null;
   // This file's changes in the comparison on screen, as the viewer marks them.
@@ -220,8 +225,9 @@ export default function FileView({ win, bufferId }: { win: WindowId; bufferId: F
       EditorView.lineWrapping,
     ];
     if (langExt) ext.push(langExt);
+    if (rendered) ext.push(markdownView);
     return ext;
-  }, [langExt, occurrences, tracker]);
+  }, [langExt, occurrences, rendered, tracker]);
 
   const onCreateEditor = useCallback(
     (created: EditorView) => {

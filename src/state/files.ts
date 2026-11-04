@@ -34,20 +34,28 @@ type FilesState = {
    * all, which keeps the window's view of it.
    */
   preview: FileBuffer | null;
+  /**
+   * The Markdown buffers shown as their raw text (`M-x markdown-markup`) rather than
+   * rendered in place.
+   */
+  rawMarkup: ReadonlySet<FileBufferId>;
   add: (buffer: FileBuffer) => void;
   setPreview: (buffer: FileBuffer | null) => void;
   /** The preview, opened: one of `buffers` from now on. */
   adopt: (id: FileBufferId) => void;
   update: (id: FileBufferId, patch: Partial<Omit<FileBuffer, "id">>) => void;
   remove: (ids: FileBufferId[]) => void;
+  toggleRawMarkup: (id: FileBufferId) => void;
   reset: () => void;
 };
 
 const EMPTY_BUFFERS: FileBuffer[] = [];
+const EMPTY_IDS: ReadonlySet<FileBufferId> = new Set();
 
 export const useFilesStore = create<FilesState>((set) => ({
   buffers: EMPTY_BUFFERS,
   preview: null,
+  rawMarkup: EMPTY_IDS,
   add: (buffer) => set((s) => ({ buffers: [...s.buffers, buffer] })),
   setPreview: (buffer) => set({ preview: buffer }),
   adopt: (id) =>
@@ -60,9 +68,17 @@ export const useFilesStore = create<FilesState>((set) => ({
     set((s) => {
       const gone = new Set(ids);
       const buffers = s.buffers.filter((b) => !gone.has(b.id));
-      return buffers.length === s.buffers.length ? {} : { buffers };
+      if (buffers.length === s.buffers.length) return {};
+      const rawMarkup = new Set([...s.rawMarkup].filter((id) => !gone.has(id)));
+      return { buffers, rawMarkup: rawMarkup.size === s.rawMarkup.size ? s.rawMarkup : rawMarkup };
     }),
-  reset: () => set({ buffers: EMPTY_BUFFERS, preview: null }),
+  toggleRawMarkup: (id) =>
+    set((s) => {
+      const rawMarkup = new Set(s.rawMarkup);
+      if (!rawMarkup.delete(id)) rawMarkup.add(id);
+      return { rawMarkup };
+    }),
+  reset: () => set({ buffers: EMPTY_BUFFERS, preview: null, rawMarkup: EMPTY_IDS }),
 }));
 
 /** A buffer a window can have on screen: an open one, or the file being previewed. */

@@ -49,6 +49,10 @@
      file-type icons in the tree/picker resolve. */
   --mono: "JetBrains Mono", "JetBrainsMono Nerd Font", "Symbols Nerd Font Mono",
     ui-monospace, "Fira Code", monospace;
+  /* Prose in a rendered Markdown file (editor/markdown-view.ts): a sans made for
+     screens — Inter, or GNOME's Adwaita Sans, which is Inter — else the desktop's. */
+  --prose: "Inter", "Adwaita Sans", "Noto Sans", "Ubuntu", "Cantarell", "DejaVu Sans",
+    sans-serif;
 }
 
 * {
@@ -1277,6 +1281,218 @@ kbd {
 .project-viewer > div:last-child {
   flex: 1;
   min-height: 0;
+}
+
+/* ---------- Markdown rendered in the viewer (editor/markdown-view.ts) ----------
+   Before the change marks and flags, which must win over a code block's panel: they
+   share its specificity and come later. Backgrounds stay see-through, as the active
+   line does, because the selection is drawn under the lines. */
+
+.project-viewer .cm-content.cm-md {
+  font-family: var(--prose);
+  /* What a line is measured against before it wraps: prose reads in lines that end. */
+  --md-measure: 40em;
+}
+
+/* The text wraps at the measure, the line (its tints, its flag) still spans the window. */
+.cm-md .cm-line:not(.cm-md-codeblock):not(.cm-md-table) {
+  padding-right: max(2px, calc(100% - var(--md-measure)));
+}
+
+.cm-md .cm-md-codeblock,
+.cm-md .cm-md-table,
+.cm-md .cm-md-code,
+.cm-md .cm-md-frontmatter,
+.cm-md .cm-md-linkdef,
+.cm-md .cm-diff-removed {
+  font-family: var(--mono);
+}
+
+.cm-md-h1 {
+  border-bottom: 1px solid rgba(var(--accent-amber-rgb), 0.35);
+}
+
+.cm-md-h2 {
+  border-bottom: 1px solid var(--bg-3);
+}
+
+.cm-md-codeblock {
+  background: rgba(var(--bg-3-rgb), 0.35);
+}
+
+.cm-md-codeblock-first {
+  border-top-left-radius: 4px;
+  border-top-right-radius: 4px;
+}
+
+.cm-md-codeblock-last {
+  border-bottom-left-radius: 4px;
+  border-bottom-right-radius: 4px;
+}
+
+/* The view's marks wrap the syntax highlighting's spans: what must win over their
+   colours says so for what's inside it too. */
+.cm-md .cm-md-code-info,
+.cm-md .cm-md-code-info * {
+  color: var(--fg-faint);
+  font-size: var(--fs-ui);
+}
+
+/* Brackets that link nowhere (`[WIP]`), an escaped character: plain text. */
+.cm-md .cm-md-plain,
+.cm-md .cm-md-plain * {
+  color: inherit;
+  text-decoration: none;
+}
+
+.cm-md-code {
+  background: rgba(var(--bg-3-rgb), 0.5);
+  border-radius: 3px;
+}
+
+.cm-md-strike {
+  text-decoration: line-through;
+  color: var(--fg-dim);
+}
+
+.cm-md-link {
+  color: var(--accent-teal);
+  text-decoration: underline;
+  text-decoration-color: rgba(var(--accent-teal-rgb), 0.45);
+  text-underline-offset: 2px;
+}
+
+.cm-md-image {
+  color: var(--accent-violet);
+}
+
+.cm-md-image-tag {
+  margin-right: 0.35em;
+  padding: 0 0.3em;
+  border: 1px solid var(--bg-3);
+  border-radius: 3px;
+  color: var(--fg-faint);
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+}
+
+/* Widgets inside a hung line mustn't take its negative indent as their own. */
+.cm-md-list-mark,
+.cm-md-hr,
+.cm-md-task {
+  text-indent: 0;
+}
+
+.cm-md-list-mark {
+  display: inline-block;
+  box-sizing: border-box;
+  white-space: nowrap;
+  padding-right: 0.45em;
+  text-align: right;
+  color: var(--fg-dim);
+}
+
+.cm-md-task {
+  display: inline-block;
+  box-sizing: border-box;
+  width: 0.8em;
+  height: 0.8em;
+  border: 1.5px solid var(--fg-dim);
+  border-radius: 2px;
+  vertical-align: -0.06em;
+}
+
+.cm-md-task.is-done {
+  background: var(--accent-green);
+  border-color: var(--accent-green);
+}
+
+.cm-md-task.is-done::after {
+  content: "";
+  display: block;
+  width: 0.2em;
+  height: 0.42em;
+  margin: 0.03em auto 0;
+  border: solid var(--bg-0);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+.cm-md-quote {
+  border-left: 2px solid var(--bg-4);
+  color: var(--fg-dim);
+}
+
+.cm-md-alert {
+  color: var(--fg-0);
+}
+
+.cm-md-alert-label {
+  font-weight: bold;
+}
+
+.cm-md-alert-note {
+  border-left-color: var(--accent-teal);
+}
+
+.cm-md-alert-note .cm-md-alert-label {
+  color: var(--accent-teal);
+}
+
+.cm-md-alert-tip {
+  border-left-color: var(--accent-green);
+}
+
+.cm-md-alert-tip .cm-md-alert-label {
+  color: var(--accent-green);
+}
+
+.cm-md-alert-important {
+  border-left-color: var(--accent-violet);
+}
+
+.cm-md-alert-important .cm-md-alert-label {
+  color: var(--accent-violet);
+}
+
+.cm-md-alert-warning {
+  border-left-color: var(--accent-amber);
+}
+
+.cm-md-alert-warning .cm-md-alert-label {
+  color: var(--accent-amber);
+}
+
+.cm-md-alert-caution {
+  border-left-color: var(--accent-red);
+}
+
+.cm-md-alert-caution .cm-md-alert-label {
+  color: var(--accent-red);
+}
+
+.cm-md-hr {
+  display: inline-block;
+  width: 100%;
+  vertical-align: middle;
+  border-top: 1px solid var(--bg-4);
+}
+
+.cm-md .cm-md-table-pipe,
+.cm-md .cm-md-table-pipe *,
+.cm-md .cm-md-table-rule {
+  color: var(--fg-3);
+  font-weight: normal;
+}
+
+/* Metadata, not prose: dim, whatever the parser made of it. */
+.cm-md .cm-md-frontmatter,
+.cm-md .cm-md-frontmatter span,
+.cm-md .cm-md-linkdef,
+.cm-md .cm-md-linkdef span {
+  color: var(--fg-faint);
+  font-weight: normal;
+  text-decoration: none;
 }
 
 /* ---------- change marks in the project viewer (editor/diff-marks.ts) ---------- */

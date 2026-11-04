@@ -271,8 +271,18 @@ const VIEWER_KEYS = [
     visual: true,
     doc: "unmark the selected lines, else the whole file (asks before deleting a note)",
   },
-  { keys: ["M-."], action: "definition", command: "goto-def", doc: "go to definition" },
+  {
+    keys: ["M-."],
+    action: "definition",
+    command: "goto-def",
+    doc: "go to definition (in Markdown, where the link points)",
+  },
   { keys: ["M-?"], action: "references", command: "find-refs", doc: "find references" },
+  {
+    keys: ["C-c C-o"],
+    action: "follow-link",
+    doc: "follow the Markdown link at the cursor: a file, a heading, a folder in the tree",
+  },
   { keys: ["M-g g"], action: "goto-line", doc: "go to line" },
   {
     keys: ["C-s"],
@@ -280,7 +290,12 @@ const VIEWER_KEYS = [
     command: "swiper",
     doc: "search the file and its removed lines (Swiper), the file following",
   },
-  { keys: ["C-<mouse-1>"], label: "C-click", external: true, doc: "go to definition" },
+  {
+    keys: ["C-<mouse-1>"],
+    label: "C-click",
+    external: true,
+    doc: "go to definition (in Markdown, follow the link)",
+  },
   {
     keys: ["q"],
     action: "quit",

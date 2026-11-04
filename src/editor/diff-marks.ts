@@ -242,6 +242,20 @@ export function markedBlocks(state: EditorState): readonly ShownBlock[] {
   return state.field(diffMarksField, false)?.blocks ?? [];
 }
 
+/**
+ * The lines (1-based) of the change blocks whose diff is shown inline — `M-x hunk`,
+ * `M-x hunks`, or Swiper revealing one: what the comparison wrote, word marks and all.
+ */
+export function shownChangeLines(state: EditorState): Set<number> {
+  const marks = state.field(diffMarksField, false);
+  const lines = new Set<number>();
+  for (const block of marks?.blocks ?? []) {
+    if (!block.shown && block.id !== marks?.revealed) continue;
+    for (const ln of [...block.modified, ...block.added]) lines.add(ln);
+  }
+  return lines;
+}
+
 /** The removed lines drawn in `view` — only `block`'s, when given — top to bottom. */
 export function removedLineElements(view: EditorView, block?: string): HTMLElement[] {
   const out: HTMLElement[] = [];

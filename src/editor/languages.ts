@@ -5,9 +5,19 @@ import { parseMixed, type Input, type SyntaxNodeRef } from "@lezer/common";
 /**
  * The viewer's languages: `@codemirror/language-data`'s, plus the component formats it
  * lacks — Svelte (Replit's grammar) and Astro (HTML with TypeScript mixed in over the
- * frontmatter and every `{…}` expression), loaded lazily like the rest.
+ * frontmatter and every `{…}` expression), loaded lazily like the rest — and Markdown as
+ * GitHub writes it: language-data's is plain CommonMark, which reads no tables, task
+ * lists or strikethrough and leaves fenced code unhighlighted.
  */
 const extra = [
+  LanguageDescription.of({
+    name: "Markdown",
+    extensions: ["md", "markdown", "mkd"],
+    load: () =>
+      import("@codemirror/lang-markdown").then((m) =>
+        m.markdown({ base: m.markdownLanguage, codeLanguages: languages }),
+      ),
+  }),
   LanguageDescription.of({
     name: "Svelte",
     extensions: ["svelte"],

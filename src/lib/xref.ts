@@ -4,9 +4,10 @@ import type { ProjectSource } from "../types/repo";
 import type { Occurrences, XrefResult } from "../types/xref";
 import { currentFile } from "./buffers";
 import { recordJump } from "./jumps";
+import { followLink, isMarkdownPath } from "./markdown";
 import { visitFile, type SourceChoice } from "./project";
 import { useProjectStore } from "../state/project";
-import { projectCursor } from "./project-view";
+import { activeView, projectCursor } from "./project-view";
 import {
   findDefinition,
   findReferences,
@@ -46,10 +47,16 @@ export function navigateTo(result: XrefResult, choice: SourceChoice, other = fal
  * Resolve and jump to the definition of the symbol at an explicit viewer position
  * (1-based line, 0-based col) — in this window, or the other one (`C-x 4 .`, where the
  * file you came from stays in view). Shared by `M-.` and the Ctrl/Cmd+click handler.
+ * In Markdown, a link's definition is where it points.
  */
 export async function gotoDefinitionAt(line: number, col: number, other = false): Promise<void> {
   const c = ctx();
   if (!c) return;
+  const view = activeView();
+  if (view && isMarkdownPath(c.path) && line <= view.state.doc.lines) {
+    const pos = Math.min(view.state.doc.line(line).from + col, view.state.doc.line(line).to);
+    if (await followLink(view.state, pos, other)) return;
+  }
   const symbol = await symbolAt(c.repo, c.source, c.path, line, col);
   if (!symbol) return;
   const defs = await findDefinition(c.repo, c.source, symbol);
