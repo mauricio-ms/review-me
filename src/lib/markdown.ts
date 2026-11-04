@@ -1,4 +1,4 @@
-import { syntaxTree } from "@codemirror/language";
+import { ensureSyntaxTree, syntaxTree } from "@codemirror/language";
 import type { EditorState } from "@codemirror/state";
 import type { SyntaxNode, Tree } from "@lezer/common";
 
@@ -48,9 +48,8 @@ const NO_DEFINITIONS = new Set([
 
 const definitionsByTree = new WeakMap<Tree, Map<string, string>>();
 
-/** The document's link reference definitions (`[label]: url`): label → url. */
-function definitions(state: EditorState): Map<string, string> {
-  const tree = syntaxTree(state);
+/** The document's link reference definitions (`[label]: url`) in `tree`: label → url. */
+function definitions(state: EditorState, tree: Tree): Map<string, string> {
   let defs = definitionsByTree.get(tree);
   if (defs) return defs;
   const found = new Map<string, string>();
@@ -75,10 +74,14 @@ function definitions(state: EditorState): Map<string, string> {
 
 /**
  * Where a link node points, as written — null when it isn't one. A reference link
- * (`[text][ref]`, `[ref]`) is a link only when its label is defined: otherwise it is
- * just text in brackets, `[WIP]`.
+ * (`[text][ref]`, `[ref]`) is a link only when its label is defined in `tree`: otherwise
+ * it is just text in brackets, `[WIP]`.
  */
-export function linkHref(state: EditorState, node: SyntaxNode): string | null {
+export function linkHref(
+  state: EditorState,
+  node: SyntaxNode,
+  tree: Tree = syntaxTree(state),
+): string | null {
   switch (node.name) {
     case "Link":
     case "Image": {
@@ -92,7 +95,7 @@ export function linkHref(state: EditorState, node: SyntaxNode): string | null {
           : marks.length >= 2
             ? state.sliceDoc(marks[0].to, marks[1].from)
             : null;
-      return key == null ? null : (definitions(state).get(labelKey(key)) ?? null);
+      return key == null ? null : (definitions(state, tree).get(labelKey(key)) ?? null);
     }
     case "Autolink":
     case "LinkReference": {
@@ -109,12 +112,16 @@ export function linkHref(state: EditorState, node: SyntaxNode): string | null {
   }
 }
 
-/** The link at `pos` — where it points, as written — or null. */
+/**
+ * The link at `pos` — where it points, as written — or null. The whole file is parsed
+ * first: the parser works lazily from the top, and a reference link's definition is
+ * usually at the bottom.
+ */
 export function linkAt(state: EditorState, pos: number): string | null {
-  const tree = syntaxTree(state);
+  const tree = ensureSyntaxTree(state, state.doc.length, 500) ?? syntaxTree(state);
   for (const side of [1, -1] as const) {
     for (let node: SyntaxNode | null = tree.resolveInner(pos, side); node; node = node.parent) {
-      const href = linkHref(state, node);
+      const href = linkHref(state, node, tree);
       if (href != null) return href;
     }
   }
