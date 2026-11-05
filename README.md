@@ -682,12 +682,30 @@ See [`CLAUDE.md`](./CLAUDE.md) for a deeper architecture tour.
 
 ```bash
 npm run build                 # frontend gate (tsc strict → vite build)
-npm run test:resolve          # Chromium keyboard/confirmation regressions (mocked IPC)
+npm run test:frontend         # type-check tests and run every frontend suite (Chromium)
+npm run test:navigation       # one suite: windows, buffers and jump history
+npm run test:loading          # one suite: comparison/file loading and async races
 cd src-tauri && cargo test    # backend unit tests (tempfile git fixtures)
 cd src-tauri && cargo check   # fast backend typecheck
 ```
 
 Logic is unit-tested in Rust against temporary git fixtures.
+
+Frontend suites use Vite and headless Chromium, with no additional test dependencies.
+Set `CHROME_BIN` if Chromium has a different executable name. The shared runner serves
+each suite on an ephemeral loopback port and uses real browser time so layout and focus
+effects run normally. Each suite has a 30-second deadline and an isolated browser profile.
+
+`test:coverage` checks review classification and progress (it does not measure code
+coverage); `test:algorithms` checks word diffs, change blocks and changed-file trees;
+`test:keyboard` checks dispatch and Vim integration; `test:review` checks review actions,
+prompts, notes and focus. The existing `test:jsdoc`, `test:markdown` and `test:resolve`
+commands remain available. `test:typecheck` checks both application and test TypeScript.
+
+New suites share `tests/support.ts` and `tests/fixtures.ts`. They use real functions,
+stores and components, mocking only Tauri IPC. Unexpected IPC and uncaught browser
+errors fail the suite. Async regressions control promise completion explicitly;
+UI tests wait for observable state or DOM conditions.
 
 ---
 

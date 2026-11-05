@@ -835,6 +835,22 @@ clears the history whenever the comparison (or its revision) changes.
 
 ## Testing
 
+`npm run test:frontend` type-checks application and test sources, then runs all frontend
+suites through `scripts/browser-tests.mjs` (Vite + Chromium, real browser time, an
+ephemeral loopback server and isolated profiles; `CHROME_BIN` overrides Chromium).
+`tests/support.ts` provides assertions, lifecycle hooks, condition waits, deferred
+promises and a strict IPC mock; `tests/fixtures.ts` provides domain fixtures and store
+reset. Mock the IPC boundary, use real application logic/stores, and wait on observable
+conditions. Keep async regressions deterministic by resolving deferred replies in the
+order the scenario needs. Uncaught errors and unexpected IPC fail tests even if the
+application catches an unexpected background call.
+
+Additional suites: `test:coverage` (review classification/progress, not instrumentation),
+`test:algorithms` (word diffs, change blocks, trees and revision selection),
+`test:navigation` (window layouts, buffers, previews and history), `test:loading`
+(comparison/file reads and stale responses), `test:keyboard` (dispatch and Vim),
+`test:review` (review actions, notes, prompts, focus and pending writes).
+
 Logic is unit-tested in Rust against `tempfile` git fixtures (`diff`, `tags`, `commits`,
 `coverage`, `notes`, `review_dir`, `fuzzy`, `tree`, `xref` (Java and `js`), `repo_library`,
 `generated`), and

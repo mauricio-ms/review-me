@@ -35,11 +35,17 @@ export async function applyComparison(spec: DiffSpec): Promise<void> {
   const path = repoStore.repoPath;
   if (!path) return;
   const ticket = ++requestSeq;
+  const epoch = repoStore.comparisonEpoch;
+  const isCurrent = () => {
+    const now = useRepoStore.getState();
+    return ticket === requestSeq && now.repoPath === path && now.comparisonEpoch === epoch;
+  };
   repoStore.setStatus({ kind: "loading" });
   try {
     const diff = await computeDiff(path, spec);
+    if (!isCurrent()) return;
     const tags = await loadTags(path, scopeForSpec(spec));
-    if (ticket !== requestSeq) return; // a newer selection already won
+    if (!isCurrent()) return; // a newer selection or repository already won
     const before = useRepoStore.getState();
     const prev = before.diff?.comparison;
     const same = sameSpec(before.comparison, spec);
@@ -59,7 +65,7 @@ export async function applyComparison(spec: DiffSpec): Promise<void> {
     reconcileFileBuffers(prev, diff.comparison, same);
     void buildSymbolIndex(path, ambient.source).catch(() => {});
   } catch (e) {
-    if (ticket === requestSeq) {
+    if (isCurrent()) {
       useRepoStore.getState().setStatus({ kind: "error", message: String(e) });
     }
     throw e;

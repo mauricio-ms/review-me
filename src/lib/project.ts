@@ -144,9 +144,15 @@ export function toggleTree(): void {
 export async function loadDir(path: string): Promise<void> {
   const c = ctx();
   if (!c) return;
+  const epoch = useRepoStore.getState().comparisonEpoch;
   const listing = await listRepoDir(c.repo, c.source, path);
-  // A listing of a revision the tree has moved off since belongs to none it shows.
-  if (!sameSource(useProjectStore.getState().source, c.source)) return;
+  // Neither a previous repository nor a previous revision belongs in this tree.
+  const now = useRepoStore.getState();
+  if (
+    now.repoPath !== c.repo ||
+    now.comparisonEpoch !== epoch ||
+    !sameSource(useProjectStore.getState().source, c.source)
+  ) return;
   useProjectStore.getState().setDir(path, listing.entries);
 }
 
@@ -361,12 +367,20 @@ export async function previewFile(
   at?: { line: number },
 ): Promise<void> {
   const seq = ++previewSeq;
-  const repo = useRepoStore.getState().repoPath;
+  const { repoPath: repo, comparisonEpoch: epoch } = useRepoStore.getState();
+  const source = useProjectStore.getState().source;
   if (!repo || !treeBrowsing()) return;
   let key = (findFileBuffer(choice.source, path) ?? previewOf(choice.source, path))?.id;
   if (!key) {
     const content = await readText(repo, choice.source, path);
-    if (seq !== previewSeq || !treeBrowsing()) return;
+    const now = useRepoStore.getState();
+    if (
+      seq !== previewSeq ||
+      !treeBrowsing() ||
+      now.repoPath !== repo ||
+      now.comparisonEpoch !== epoch ||
+      !sameSource(useProjectStore.getState().source, source)
+    ) return;
     dropPreviewBuffer();
     const buffer: FileBuffer = {
       id: newFileBufferId(),

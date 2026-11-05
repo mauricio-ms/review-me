@@ -26,13 +26,20 @@ import type { NoteEdit } from "../state/notes";
  * The repo and the comparison every mark below belongs to. Reading both together
  * keeps a mark from ever landing in a scope other than the one on screen.
  */
-function target(): { repo: string; scope: ReviewScope } | null {
-  const { repoPath, comparison } = useRepoStore.getState();
-  return repoPath ? { repo: repoPath, scope: scopeForSpec(comparison) } : null;
+type Target = { repo: string; scope: ReviewScope; epoch: number };
+
+function target(): Target | null {
+  const { repoPath, comparison, comparisonEpoch } = useRepoStore.getState();
+  return repoPath ? { repo: repoPath, scope: scopeForSpec(comparison), epoch: comparisonEpoch } : null;
 }
 
-function apply(store: TagStore) {
-  useTagsStore.getState().setStore(store);
+function isCurrent(t: Target): boolean {
+  const now = useRepoStore.getState();
+  return now.repoPath === t.repo && now.comparisonEpoch === t.epoch;
+}
+
+function apply(t: Target, store: TagStore) {
+  if (isCurrent(t)) useTagsStore.getState().setStore(store);
 }
 
 export async function reviewLines(
@@ -44,7 +51,7 @@ export async function reviewLines(
 ): Promise<void> {
   const t = target();
   if (!t) return;
-  apply(await addReviewedTag(t.repo, t.scope, file, lo, hi, kind, side));
+  apply(t, await addReviewedTag(t.repo, t.scope, file, lo, hi, kind, side));
 }
 
 /**
@@ -59,12 +66,13 @@ async function markEachUnit(file: ChangedFile, add: typeof addReviewedTag): Prom
     store = await add(t.repo, t.scope, file.path, 0, 0, "file", "file");
   } else {
     for (const hunk of file.hunks) {
+      if (!isCurrent(t)) return;
       const target = hunkTarget(hunk);
       if (!target) continue;
       store = await add(t.repo, t.scope, file.path, target.lo, target.hi, "hunk", target.side);
     }
   }
-  if (store) apply(store);
+  if (store) apply(t, store);
 }
 
 /** Mark a whole file reviewed, unit by unit. */
@@ -83,9 +91,12 @@ export function ignoreWholeFile(file: ChangedFile): Promise<void> {
  * How many it ignored.
  */
 export async function ignoreGeneratedFiles(): Promise<number> {
+  const t = target();
+  if (!t) return 0;
   const files = useRepoStore.getState().diff?.files ?? [];
   let count = 0;
   for (const file of files) {
+    if (!isCurrent(t)) break;
     if (!file.generated) continue;
     const { reviewed, flags, ignored } = useTagsStore.getState();
     if (fileReviewState(reviewed, flags, ignored, file) !== "open") continue;
@@ -123,6 +134,8 @@ export async function unmarkLines(
   hi: number,
   side: AnchorSide,
 ): Promise<void> {
+  const t = target();
+  if (!t) return;
   const notes = useTagsStore
     .getState()
     .flags.filter(
@@ -135,9 +148,8 @@ export async function unmarkLines(
           (f.anchor.startLine <= hi && f.anchor.endLine >= lo)),
     );
   if (!(await mayDeleteNotes(notes, side === "commit" ? "the commit" : file))) return;
-  const t = target();
-  if (!t) return;
-  apply(await unmarkRange(t.repo, t.scope, file, lo, hi, side));
+  if (!isCurrent(t)) return;
+  apply(t, await unmarkRange(t.repo, t.scope, file, lo, hi, side));
 }
 
 /**
@@ -146,6 +158,8 @@ export async function unmarkLines(
  * it went.
  */
 export async function unmarkWholeFile(file: string): Promise<"unmarked" | "none" | "kept"> {
+  const t = target();
+  if (!t) return "kept";
   const { reviewed, flags, ignored } = useTagsStore.getState();
   // Per side, the span its marks cover: one `unmark_range` each.
   const spans = new Map<AnchorSide, { lo: number; hi: number }>();
@@ -161,14 +175,14 @@ export async function unmarkWholeFile(file: string): Promise<"unmarked" | "none"
   if (spans.size === 0) return "none";
   const notes = flags.filter((f) => f.anchor.file === file && hasNote(f));
   if (!(await mayDeleteNotes(notes, file))) return "kept";
-  const t = target();
-  if (!t) return "kept";
+  if (!isCurrent(t)) return "kept";
   let store: TagStore | null = null;
   for (const [side, { lo, hi }] of spans) {
+    if (!isCurrent(t)) return "kept";
     store = await unmarkRange(t.repo, t.scope, file, lo, hi, side);
   }
-  if (store) apply(store);
-  return "unmarked";
+  if (store) apply(t, store);
+  return isCurrent(t) ? "unmarked" : "kept";
 }
 
 /**
@@ -194,6 +208,7 @@ export async function addFlag(
         f.anchor.endLine === hi,
     );
   apply(
+    t,
     await addFlagTag(
       t.repo,
       t.scope,
@@ -219,12 +234,13 @@ export async function saveNote(edit: NoteEdit, text: string): Promise<string | n
   const note = text.trim() === "" ? null : text.trimEnd();
   const { file, lo, hi, kind, side } = edit.target;
   if (edit.flagId) {
-    apply(await setFlagNote(t.repo, t.scope, edit.flagId, note));
-    return edit.flagId;
+    apply(t, await setFlagNote(t.repo, t.scope, edit.flagId, note));
+    return isCurrent(t) ? edit.flagId : null;
   }
   if (!note) return null;
   const store = await addFlagTag(t.repo, t.scope, file, lo, hi, kind, side, note, null);
-  apply(store);
+  if (!isCurrent(t)) return null;
+  apply(t, store);
   const created = store.flags.find(
     (f) =>
       f.anchor.file === file &&
@@ -244,12 +260,12 @@ export async function addIgnore(
 ): Promise<void> {
   const t = target();
   if (!t) return;
-  apply(await addIgnoredTag(t.repo, t.scope, file, lo, hi, kind, side));
+  apply(t, await addIgnoredTag(t.repo, t.scope, file, lo, hi, kind, side));
 }
 
 /** Drop every reviewed, flag, and ignore tag in the active comparison. */
 export async function clearActiveComparisonTags(): Promise<void> {
   const t = target();
   if (!t) return;
-  apply(await clearTags(t.repo, t.scope));
+  apply(t, await clearTags(t.repo, t.scope));
 }
