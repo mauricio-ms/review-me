@@ -1290,8 +1290,10 @@ kbd {
   --md-measure: 40em;
 }
 
-/* The text wraps at the measure, the line (its tints, its flag) still spans the window. */
-.cm-md .cm-line:not(.cm-md-codeblock):not(.cm-md-table) {
+/* Flowing prose wraps at the measure; inspected/annotated source rows use the pane
+   width so they don't wrap again just before their written newline. Line tints and
+   flags still span the window. */
+.cm-md .cm-line:not(.cm-md-codeblock):not(.cm-md-table):not(.cm-md-source) {
   padding-right: max(2px, calc(100% - var(--md-measure)));
 }
 

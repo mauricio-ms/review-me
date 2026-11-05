@@ -525,8 +525,18 @@ lines hang under (`padding-left` + negative `text-indent`, so a widget inside se
 monospace columns (cell widths measured *as shown*, through the same inline walker with a
 counting `Sink`), rules, dimmed frontmatter and link definitions. Prose is `--prose`, wrapping
 at `--md-measure` through `padding-right` so tints and flags still span the line; code,
-tables and the removed-line widgets stay `--mono`. It is a **view plugin** over the viewport,
-rebuilt per update — so it never replaces a line break or draws a block widget. Two lines keep
+tables and the removed-line widgets stay `--mono`. A **state field** joins soft newlines
+within paragraphs and tasks with a space, consuming continuation indentation and quote
+prefixes. Explicit hard breaks, block boundaries and alert labels retain their newlines.
+Paragraphs containing the focused cursor/selection, Swiper's current line, change signs
+(including removal anchors and deleted files), or flags keep their source rows, so merging
+cannot lose a gutter sign or misplace a line tint. These rows carry `cm-md-source` and
+use the full pane width instead of `--md-measure`, avoiding short tails wrapped just
+before a source newline. Inline formatting remains a **view plugin**
+over the viewport; it skips prefixes already consumed by the field. Focus is synchronized
+through a state effect from a microtask, reading `activeElement` so app focus changes do
+not flip the layout. `npm run test:markdown` runs the layout and navigation regressions in
+headless Chromium (`CHROME_BIN` overrides the executable). Two kinds of lines keep
 their raw markup: **the cursor's (or the selection's) while the editor has the keyboard**
 (`activeElement`, not `hasFocus`, which also asks the window), so what the file says is where
 you are; and **the lines of a change whose diff is shown** (`diff-marks.ts`'s

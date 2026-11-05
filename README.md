@@ -554,7 +554,11 @@ in other files the word is matched by name, leaving out keywords, comments and s
 
 **Markdown reads rendered.** A `.md` file shows as it renders, in place: headings, emphasis,
 code, links by their text, bullets and task boxes, quotes and GitHub's `> [!NOTE]` alerts,
-tables lined up, prose in a proportional face. It is still the file's text underneath — the
+tables lined up, prose in a proportional face. Source newlines within a paragraph flow
+as spaces; blank lines and explicit Markdown hard breaks remain. Paragraphs being inspected,
+searched, changed or flagged keep their source rows and use the pane width so line
+annotations stay accurate without an extra reading-width wrap.
+It is still the file's text underneath — the
 line numbers, change marks, flags and notes are the file's lines — and the line under the
 cursor (or the selection) shows its raw markup, as does a change whose diff is open, so a
 change that only touched markup is never hidden. `C-c C-o` (or `M-.`, or Ctrl+click) follows

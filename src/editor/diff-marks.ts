@@ -233,6 +233,21 @@ export function markedBlocks(state: EditorState): readonly ShownBlock[] {
   return state.field(diffMarksField, false)?.blocks ?? [];
 }
 
+/** Source lines with change signs, including removal anchors and deleted files. */
+export function markedChangeLines(state: EditorState): Set<number> {
+  const lines = new Set<number>();
+  for (const signs of [
+    state.field(diffMarksField, false)?.signs,
+    state.field(deletedField, false)?.signs,
+  ]) {
+    if (!signs) continue;
+    for (const cursor = signs.iter(); cursor.value; cursor.next()) {
+      lines.add(state.doc.lineAt(cursor.from).number);
+    }
+  }
+  return lines;
+}
+
 /**
  * The new-side lines (1-based) whose diff is shown inline while `changed` is on.
  */

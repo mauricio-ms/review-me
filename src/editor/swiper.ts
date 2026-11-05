@@ -41,6 +41,11 @@ const swiperField = StateField.define<Shown | null>({
   },
 });
 
+/** The source line Swiper is displaying, even while the minibuffer has focus. */
+export function swiperLine(state: EditorState): number | null {
+  return state.field(swiperField, false)?.line ?? null;
+}
+
 const matchMark = Decoration.mark({ class: "cm-swiper-match" });
 const currentMark = Decoration.mark({ class: "cm-swiper-match cm-swiper-current" });
 const currentLine = Decoration.line({ class: "cm-swiper-line" });

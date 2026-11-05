@@ -1,5 +1,12 @@
 import { syntaxTree } from "@codemirror/language";
-import type { EditorState, Extension, Range, Text } from "@codemirror/state";
+import {
+  type EditorState,
+  type Extension,
+  type Range,
+  StateEffect,
+  StateField,
+  type Text,
+} from "@codemirror/state";
 import {
   Decoration,
   type DecorationSet,
@@ -11,7 +18,9 @@ import {
 import type { SyntaxNode } from "@lezer/common";
 
 import { linkHref } from "../lib/markdown";
-import { shownChangeLines } from "./diff-marks";
+import { markedChangeLines, shownChangeLines } from "./diff-marks";
+import { flaggedLines } from "./flag-decorations";
+import { swiperLine } from "./swiper";
 
 /** Text drawn in place of markup: an image's tag, an alert's name. */
 class TextWidget extends WidgetType {
@@ -134,6 +143,8 @@ class RuleWidget extends WidgetType {
 const HIDE = Decoration.replace({});
 const RULE = new RuleWidget();
 const IMAGE_TAG = new TextWidget("image", "cm-md-image-tag");
+const SOFT_BREAK = Decoration.replace({ widget: new TextWidget(" ", "cm-md-softbreak") });
+const SOURCE_LINE = Decoration.line({ class: "cm-md-source" });
 const CODE = Decoration.mark({ class: "cm-md-code" });
 const CODE_INFO = Decoration.mark({ class: "cm-md-code-info" });
 const STRIKE = Decoration.mark({ class: "cm-md-strike" });
@@ -181,6 +192,7 @@ class Builder implements Sink {
   constructor(
     readonly state: EditorState,
     readonly revealed: ReadonlySet<number>,
+    readonly joined: ReadonlyMap<number, number>,
     private readonly first: number,
     private readonly last: number,
   ) {}
@@ -193,6 +205,8 @@ class Builder implements Sink {
     const line = this.state.doc.lineAt(from);
     // A view plugin may not replace a line break.
     if (to < from || to > line.to || this.revealed.has(line.number)) return;
+    // The state field already consumed a joined line's quote/indent prefix.
+    if (to <= (this.joined.get(line.number) ?? -1)) return;
     if (from === to) {
       if (widget) this.decos.push(Decoration.widget({ widget, side }).range(from));
     } else {
@@ -223,6 +237,7 @@ class Builder implements Sink {
 
   finish(): DecorationSet {
     for (const [n, { classes, quote, hang }] of this.lines) {
+      if (this.joined.has(n)) continue;
       const key = `${classes.join(" ")}|${quote}|${hang}`;
       let deco = lineDecos.get(key);
       if (!deco) {
@@ -320,6 +335,10 @@ function inlineNodes(sink: Sink, nodes: SyntaxNode[]): void {
       case "Escape":
         sink.hide(node.from, node.from + 1);
         sink.mark(node.from + 1, node.to, PLAIN);
+        break;
+      case "HardBreak":
+        // Keep the newline, hiding only the two spaces or backslash that requested it.
+        sink.hide(node.from, sink.state.doc.lineAt(node.from).to);
         break;
       case "QuoteMark":
         quoteMark(sink, node);
@@ -462,7 +481,7 @@ function listItem(b: Builder, node: SyntaxNode): void {
     if (child.name !== "Paragraph" && child.name !== "Task") continue;
     const last = doc.lineAt(child.to).number;
     for (let n = doc.lineAt(child.from).number; n <= last; n++) {
-      if (n === line.number || !b.inView(n) || b.revealed.has(n)) continue;
+      if (n === line.number || !b.inView(n) || b.revealed.has(n) || b.joined.has(n)) continue;
       const l = doc.line(n);
       const start = l.from + quotePrefix(l.text);
       b.hide(start, start + blanks(l.text, start - l.from), new ListMarker(width, "", null));
@@ -572,18 +591,109 @@ function frontmatter(doc: Text): number | null {
   return null;
 }
 
+const setMarkdownFocus = StateEffect.define<boolean>();
+
+type ProseFlow = {
+  focused: boolean;
+  decorations: DecorationSet;
+  /** Joined source line → end of its consumed indentation and quote markers. */
+  joined: ReadonlyMap<number, number>;
+};
+
+/**
+ * Soft newlines belong to their paragraph, rather than to its source rows. Keep an
+ * entire paragraph in source layout when inspecting it or showing line annotations:
+ * merging it would otherwise lose gutter signs and line-specific tints.
+ */
+function flowProse(state: EditorState, focused: boolean): ProseFlow {
+  const { doc } = state;
+  const separate = revealedLines(state, focused);
+  for (const line of markedChangeLines(state)) separate.add(line);
+  for (const line of flaggedLines(state)) separate.add(line);
+  const searched = swiperLine(state);
+  if (searched != null) separate.add(searched);
+  const decorations: Range<Decoration>[] = [];
+  const joined = new Map<number, number>();
+  const front = frontmatter(doc);
+  syntaxTree(state).iterate({
+    enter(ref) {
+      if (front != null && ref.from <= front && ref.name !== "Document") return false;
+      if (ref.name !== "Paragraph" && ref.name !== "Task") {
+        // No prose inside code, tables, headings, HTML or link definitions.
+        return !/^(FencedCode|CodeBlock|Table|ATXHeading\d|SetextHeading\d|HTMLBlock|CommentBlock|LinkReference)$/.test(
+          ref.name,
+        );
+      }
+      const first = doc.lineAt(ref.from).number;
+      const last = doc.lineAt(ref.to).number;
+      // Source rows already end at their written newlines. Give them the pane's
+      // width so the prose measure doesn't wrap a short tail a second time.
+      let source = false;
+      for (let n = first; n <= last; n++) if (separate.has(n)) source = true;
+      if (source) {
+        for (let n = first; n <= last; n++) decorations.push(SOURCE_LINE.range(doc.line(n).from));
+        return false;
+      }
+      if (first === last) return false;
+
+      const hard = new Set<number>();
+      const prefixes = new Map<number, number>();
+      ref.node.cursor().iterate((part) => {
+        if (part.name === "HardBreak") hard.add(doc.lineAt(part.from).number);
+        if (part.name === "QuoteMark") {
+          prefixes.set(doc.lineAt(part.from).number, part.to);
+        }
+      });
+      // GitHub alert labels stand above their prose, even without a blank quote line.
+      const alert = /^\s*(?:>\s*)+\[!(\w+)\]\s*$/.exec(doc.line(first).text);
+      if (alert && (alert[1].toLowerCase() in ALERTS)) hard.add(first);
+
+      for (let n = first; n < last; n++) {
+        if (hard.has(n)) continue;
+        const line = doc.line(n);
+        const next = doc.line(n + 1);
+        let from = line.to;
+        while (from > line.from && /[ \t]/.test(line.text[from - 1 - line.from])) from--;
+        const prefix = prefixes.get(n + 1) ?? next.from;
+        const to = prefix + blanks(next.text, prefix - next.from);
+        decorations.push(SOFT_BREAK.range(from, to));
+        joined.set(n + 1, to);
+      }
+      return false;
+    },
+  });
+  return { focused, decorations: Decoration.set(decorations, true), joined };
+}
+
+// Newline replacements must be supplied before CodeMirror computes its viewport.
+// Keep inline formatting in the viewport plugin, which cannot replace line breaks.
+const proseFlow = StateField.define<ProseFlow>({
+  create: (state) => flowProse(state, false),
+  update(flow, tr) {
+    let focused = flow.focused;
+    for (const effect of tr.effects) if (effect.is(setMarkdownFocus)) focused = effect.value;
+    if (
+      !tr.docChanged &&
+      !tr.selection &&
+      tr.effects.length === 0 &&
+      syntaxTree(tr.startState) === syntaxTree(tr.state)
+    ) {
+      return flow;
+    }
+    return flowProse(tr.state, focused);
+  },
+  provide: (field) => EditorView.decorations.from(field, (flow) => flow.decorations),
+});
+
 /**
  * The lines that show their markup: the cursor's, or the selection's, while the editor
  * has the keyboard — what the file says is right there where you are, and a selection
  * for a note is of real lines — and the lines of a change whose diff is shown, so a
  * change that only touched markup is never out of sight.
  */
-function revealedLines(view: EditorView): Set<number> {
-  const { state } = view;
+function revealedLines(state: EditorState, focused: boolean): Set<number> {
   const lines = shownChangeLines(state);
-  // Not `view.hasFocus`, which also asks the window: leaving the app for another and
-  // coming back mustn't flip every line on screen.
-  if (view.root.activeElement !== view.contentDOM) return lines;
+  if (!focused && state.selection.main.empty) return lines;
   for (const range of state.selection.ranges) {
     const first = state.doc.lineAt(range.from).number;
     let last = state.doc.lineAt(range.to).number;
@@ -597,9 +707,11 @@ function revealedLines(view: EditorView): Set<number> {
 function build(view: EditorView): DecorationSet {
   const { state } = view;
   const { from, to } = view.viewport;
+  const flow = state.field(proseFlow);
   const b = new Builder(
     state,
-    revealedLines(view),
+    revealedLines(state, flow.focused),
+    flow.joined,
     state.doc.lineAt(from).number,
     state.doc.lineAt(to).number,
   );
@@ -675,19 +787,37 @@ function build(view: EditorView): DecorationSet {
  * under them, quotes and GitHub's alerts, tables lined up, rules. Prose reads in a
  * proportional face; code and tables stay monospaced.
  *
- * Only what's on screen is decorated, from the syntax tree, so it's a view plugin: it
- * neither replaces a line break nor draws a block widget, which only a state field may.
+ * A state field joins soft breaks in prose; the viewport plugin draws inline markup.
+ * Inspected or annotated paragraphs keep their source layout and line-specific marks.
  */
 export const markdownView: Extension = [
+  proseFlow,
   ViewPlugin.fromClass(
     class {
       decorations: DecorationSet;
+      private destroyed = false;
+
+      private syncFocus(view: EditorView) {
+        // activeElement survives leaving the app, unlike view.hasFocus. Dispatch from
+        // a microtask because plugin updates cannot start another editor update.
+        const focused = view.root.activeElement === view.contentDOM;
+        if (focused === view.state.field(proseFlow).focused) return;
+        queueMicrotask(() => {
+          if (this.destroyed) return;
+          const focused = view.root.activeElement === view.contentDOM;
+          if (focused !== view.state.field(proseFlow).focused) {
+            view.dispatch({ effects: setMarkdownFocus.of(focused) });
+          }
+        });
+      }
 
       constructor(view: EditorView) {
         this.decorations = build(view);
+        this.syncFocus(view);
       }
 
       update(update: ViewUpdate) {
+        this.syncFocus(update.view);
         if (
           update.docChanged ||
           update.viewportChanged ||
@@ -698,6 +828,10 @@ export const markdownView: Extension = [
         ) {
           this.decorations = build(update.view);
         }
+      }
+
+      destroy() {
+        this.destroyed = true;
       }
     },
     { decorations: (plugin) => plugin.decorations },
