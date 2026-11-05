@@ -558,6 +558,8 @@ tables lined up, prose in a proportional face. Source newlines within a paragrap
 as spaces; blank lines and explicit Markdown hard breaks remain. Paragraphs being inspected,
 searched, changed or flagged keep their source rows and use the pane width so line
 annotations stay accurate without an extra reading-width wrap.
+Long table cells wrap within their columns to fit the pane, with aligned borders that
+continue down every visual line.
 It is still the file's text underneath — the
 line numbers, change marks, flags and notes are the file's lines — and the line under the
 cursor (or the selection) shows its raw markup, as does a change whose diff is open, so a

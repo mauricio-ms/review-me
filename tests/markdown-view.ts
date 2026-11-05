@@ -6,6 +6,7 @@ import { getCM, Vim, vim } from "@replit/codemirror-vim";
 
 import { diffMarks, setDeletedFile, setDiffMarks, type ShownBlock } from "../src/editor/diff-marks";
 import { flagDecorations, setFlagLines } from "../src/editor/flag-decorations";
+import { gruberDarkerTheme } from "../src/editor/gruber-darker";
 import { markdownView } from "../src/editor/markdown-view";
 import { swiper, swiperHighlight } from "../src/editor/swiper";
 import { linkAt } from "../src/lib/markdown";
@@ -29,7 +30,7 @@ function viewer(doc: string, extra: Extension = []) {
     state: EditorState.create({ doc, extensions: [
       markdown({ base: markdownLanguage }), lineNumbers(), EditorView.lineWrapping,
       EditorState.readOnly.of(true), diffMarks, flagDecorations, swiperHighlight,
-      markdownView, extra,
+      markdownView, gruberDarkerTheme, extra,
     ] }),
   });
   views.push(view);
@@ -93,6 +94,189 @@ test("headings, code, tables, frontmatter and definitions keep their structure",
   equal(view.contentDOM.querySelectorAll(".cm-md-table").length, 3);
   assert(rows(view).includes("a") && rows(view).includes("b"), "code lines were joined");
   equal(rows(view).at(-1), "Flowing prose");
+});
+
+test("large table cells wrap inside aligned columns and stretch their separators", async () => {
+  const doc = "| Key | What it does |\n| --- | --- |\n| `C-s` | Search this file for matching text, with a description long enough to wrap over several visual lines. |\n| `M-.` | Follow a link. |";
+  const view = viewer(doc);
+  view.dom.parentElement!.style.width = "360px";
+  view.requestMeasure();
+  await settle();
+  const tableRows = Array.from(view.contentDOM.querySelectorAll<HTMLElement>(".cm-md-table"));
+  equal(tableRows.length, 4);
+  const cells = tableRows.map((row) => Array.from(row.querySelectorAll<HTMLElement>(".cm-md-table-cell")));
+  equal(cells.map((row) => row.length), [2, 2, 2, 2]);
+  const positions = cells.map((row) => row.map((cell) => cell.getBoundingClientRect()));
+  for (const row of positions) {
+    for (let col = 0; col < row.length; col++) {
+      assert(Math.abs(row[col].left - positions[0][col].left) < 1, "column separators are not aligned");
+      assert(Math.abs(row[col].width - positions[0][col].width) < 1, "column widths differ between rows");
+    }
+    assert(Math.abs(row[0].height - row[1].height) < 1, "separators do not span the wrapped row");
+  }
+  assert(positions[2][1].height > positions[3][1].height, "long cell did not wrap independently");
+  const right = view.contentDOM.getBoundingClientRect().right;
+  assert(positions[2][1].right <= right + 1, "table overflows the pane");
+  equal(view.state.doc.toString(), doc);
+  equal(linkAt(view.state, doc.indexOf("Follow")), null);
+});
+
+test("single-column tables keep both borders around wrapped content", async () => {
+  const view = viewer("| a large col |\n|-------------|\n| asdf asdf asdf text continues here with an_extremely_long_unbroken_token_that_must_wrap | ");
+  view.dom.parentElement!.style.width = "200px";
+  view.requestMeasure();
+  await settle();
+  const cells = Array.from(view.contentDOM.querySelectorAll<HTMLElement>(".cm-md-table-cell"));
+  equal(cells.length, 3);
+  assert(cells[2].getBoundingClientRect().height > cells[0].getBoundingClientRect().height,
+    "cell content did not wrap");
+  const row = cells[2].closest<HTMLElement>(".cm-line")!;
+  assert(cells[2].getBoundingClientRect().right <= row.getBoundingClientRect().right + 1,
+    "unbroken text escaped its column");
+  assert(parseFloat(getComputedStyle(cells[2]).borderLeftWidth) > 0, "left separator is missing");
+  assert(getComputedStyle(row, "::after").content !== "none", "right separator is missing");
+});
+
+test("the header rule adds no extra padding above the first body row", async () => {
+  const doc = "| Key | Action |\n| --- | --- |\n| one | First action |\n| two | Second action |\n\noutside";
+  const view = viewer(doc);
+  await settle();
+  const rule = view.contentDOM.querySelector<HTMLElement>(".cm-md-table-rule-cell")!;
+  const ruleRow = rule.closest<HTMLElement>(".cm-line")!;
+  assert(ruleRow.getBoundingClientRect().height <= 2, "header delimiter still occupies a full text row");
+  const bodyRows = Array.from(view.contentDOM.querySelectorAll<HTMLElement>(".cm-md-table")).slice(2);
+  const first = view.coordsAtPos(doc.indexOf("one"))!;
+  const second = view.coordsAtPos(doc.indexOf("two"))!;
+  const firstGap = first.top - rule.getBoundingClientRect().bottom;
+  const secondGap = second.top - bodyRows[1].getBoundingClientRect().top;
+  assert(Math.abs(firstGap - secondGap) < 2, "first body row has extra space above its text");
+  const gutterTexts = () => Array.from(view.dom.querySelectorAll(".cm-lineNumbers .cm-gutterElement"))
+    .map((el) => el.textContent);
+  assert(!gutterTexts().includes("2"), "collapsed delimiter number overlaps the next row");
+  view.dispatch({ selection: { anchor: view.state.doc.line(2).from } });
+  view.focus();
+  await settle();
+  equal(view.contentDOM.querySelector(".cm-md-table-raw")?.textContent, "| --- | --- |");
+  assert(gutterTexts().includes("2"), "inspecting the delimiter did not restore its source line number");
+});
+
+test("tables fill empty and omitted cells and retain column alignment settings", async () => {
+  const view = viewer("Left | Center | Right\n:--- | :---: | ---:\nfirst||third\nonly one cell\n| | filled | |");
+  await settle();
+  const tableRows = Array.from(view.contentDOM.querySelectorAll(".cm-md-table"));
+  equal(tableRows.length, 5);
+  for (const row of tableRows) {
+    const cells = Array.from(row.querySelectorAll<HTMLElement>(".cm-md-table-cell"));
+    equal(cells.length, 3);
+    equal(cells.map((cell) => getComputedStyle(cell).textAlign), ["left", "center", "right"]);
+  }
+});
+
+test("table sizing follows pane resizing and font scaling", async () => {
+  const view = viewer("| Key | Description |\n| --- | --- |\n| C-s | A lengthy description with enough words to wrap when the pane is narrow. |\n| M-. | Short. |");
+  const parent = view.dom.parentElement!;
+  const body = () => Array.from(view.contentDOM.querySelectorAll<HTMLElement>(".cm-md-table"))[2];
+  const check = () => {
+    const tableRows = Array.from(view.contentDOM.querySelectorAll<HTMLElement>(".cm-md-table"));
+    const expected = Array.from(tableRows[0].querySelectorAll(".cm-md-table-cell"))
+      .map((cell) => cell.getBoundingClientRect().left);
+    for (const row of tableRows) {
+      const cells = Array.from(row.querySelectorAll(".cm-md-table-cell"));
+      cells.forEach((cell, i) => assert(Math.abs(cell.getBoundingClientRect().left - expected[i]) < 1,
+        "columns lost alignment after resizing"));
+      assert(cells[1].getBoundingClientRect().right <= row.getBoundingClientRect().right + 1,
+        "resized table overflows the pane");
+    }
+  };
+  await settle();
+  const wideHeight = body().getBoundingClientRect().height;
+  parent.style.width = "300px";
+  view.requestMeasure();
+  await settle();
+  check();
+  assert(body().getBoundingClientRect().height > wideHeight, "narrow table did not get taller");
+  parent.style.setProperty("--fs", "24px");
+  view.requestMeasure();
+  await settle();
+  check();
+});
+
+test("table borders align with indentation, quotes and many narrow columns", async () => {
+  const view = viewer("  | A | B |\n | --- | --- |\n   | left | long content which wraps within this column |\n| right | short |\n\n> | A | B |\n> | --- | --- |\n> | left | quoted content which wraps within this column |\n> | right | short |");
+  view.dom.parentElement!.style.width = "300px";
+  view.requestMeasure();
+  await settle();
+  const tableRows = Array.from(view.contentDOM.querySelectorAll<HTMLElement>(".cm-md-table"));
+  equal(tableRows.length, 8);
+  for (let start = 0; start < tableRows.length; start += 4) {
+    const left = tableRows[start].querySelector(".cm-md-table-cell")!.getBoundingClientRect().left;
+    for (const row of tableRows.slice(start, start + 4)) {
+      assert(Math.abs(row.querySelector(".cm-md-table-cell")!.getBoundingClientRect().left - left) < 1,
+        "source indentation shifted a table border");
+    }
+  }
+  const many = viewer(`|${Array(8).fill(" Col ").join("|")}|\n|${Array(8).fill(" --- ").join("|")}|\n|${Array(8).fill(" long text ").join("|")}|`);
+  many.dom.parentElement!.style.width = "220px";
+  many.requestMeasure();
+  await settle();
+  for (const row of many.contentDOM.querySelectorAll<HTMLElement>(".cm-md-table")) {
+    const cells = row.querySelectorAll(".cm-md-table-cell");
+    equal(cells.length, 8);
+    assert(cells[7].getBoundingClientRect().right <= row.getBoundingClientRect().right + 1,
+      "many-column table escaped the narrow pane");
+  }
+});
+
+test("wrapped table text retains links, source coordinates and review highlights", async () => {
+  const doc = "| Key | Description |\n| --- | --- |\n| `C-s` | A [linked phrase](https://example.com) and **important** text with enough detail to wrap. |\n| other | Short. |";
+  const view = viewer(doc);
+  view.dom.parentElement!.style.width = "360px";
+  const line = view.state.doc.line(3);
+  const changed = line.text.indexOf("important");
+  view.dispatch({ effects: [
+    setDiffMarks.of([block({
+      modified: [3], removedAt: 3, words: true,
+      newText: new Map([[3, line.text]]),
+      newSegs: new Map([[3, [
+        { text: line.text.slice(0, changed), changed: false },
+        { text: "important", changed: true },
+        { text: line.text.slice(changed + 9), changed: false },
+      ]]]),
+    })]),
+    setFlagLines.of([[3, 3]]),
+  ] });
+  await settle();
+  const row = view.contentDOM.querySelector<HTMLElement>(".cm-diff-line-modified")!;
+  equal(row.querySelectorAll(".cm-md-table-cell").length, 2);
+  assert(row.classList.contains("cm-flagged-line"), "flag moved off the table row");
+  equal(row.querySelector(".cm-diff-word")?.textContent, "important");
+  const linkPos = doc.indexOf("linked phrase") + 3;
+  equal(linkAt(view.state, linkPos), "https://example.com");
+  const coords = view.coordsAtPos(linkPos)!;
+  assert(coords, "wrapped link has no source coordinates");
+  const at = view.posAtCoords({ x: coords.left + 1, y: (coords.top + coords.bottom) / 2 });
+  assert(at != null && linkAt(view.state, at) === "https://example.com", "link click lost its source position");
+  equal(view.state.doc.toString(), doc);
+});
+
+test("table cursor inspection and Vim selections still use original source rows", async () => {
+  const doc = "| Key | Description |\n| --- | --- |\n| `C-s` | Long content which wraps over several visual lines within its own cell. |\n| `M-.` | Follow a link. |\n\noutside";
+  const view = viewer(doc, vim());
+  view.dom.parentElement!.style.width = "300px";
+  view.dispatch({ selection: { anchor: view.state.doc.line(3).from } });
+  view.focus();
+  await settle();
+  equal(view.contentDOM.querySelector(".cm-md-table-raw")?.textContent, view.state.doc.line(3).text);
+  const cm = getCM(view)!;
+  Vim.handleKey(cm, "V", "user");
+  Vim.handleKey(cm, "j", "user");
+  equal(view.state.doc.lineAt(view.state.selection.main.from).number, 3);
+  equal(view.state.doc.lineAt(view.state.selection.main.to).number, 4);
+  equal(view.contentDOM.querySelectorAll(".cm-md-table-raw").length, 2);
+  Vim.handleKey(cm, "<Esc>", "user");
+  view.dispatch({ selection: { anchor: view.state.doc.line(6).from } });
+  equal(view.contentDOM.querySelectorAll(".cm-md-table-raw").length, 0);
+  equal(view.contentDOM.querySelectorAll(".cm-md-table-cell").length, 8);
 });
 
 test("change marks and flags retain their original source rows", () => {

@@ -521,9 +521,15 @@ flags, notes, Swiper, vim, saved places) works untouched; decorations only hide 
 draw what it means: headings by weight and a rule, emphasis, inline code, links by their text
 (the address in a tooltip), bullets/numbers/task boxes in a box per nesting level that wrapped
 lines hang under (`padding-left` + negative `text-indent`, so a widget inside sets
-`text-indent: 0`), quotes and GitHub's `> [!NOTE]` alerts, tables padded into aligned
-monospace columns (cell widths measured *as shown*, through the same inline walker with a
-counting `Sink`), rules, dimmed frontmatter and link definitions. Prose is `--prose`, wrapping
+`text-indent: 0`), quotes and GitHub's `> [!NOTE]` alerts, tables in aligned monospace
+columns (natural widths measured *as shown*, through the same inline walker with a
+counting `Sink`), rules, dimmed frontmatter and link definitions. Rendered table rows use
+flex layout with `.cm-md-table-cell` marks around the actual source text: columns shrink
+to fit the pane, text wraps within each cell, and borders stretch to the tallest cell.
+`TableCellWidget` supplies empty/missing cells and the header rule. Unannotated delimiter
+rows render as a 1px rule, with their line number hidden to avoid overlapping the next row;
+inspection or annotations restore their normal source height and line number. A revealed
+row uses `cm-md-table-raw` and ordinary source layout. Prose is `--prose`, wrapping
 at `--md-measure` through `padding-right` so tints and flags still span the line; code,
 tables and the removed-line widgets stay `--mono`. A **state field** joins soft newlines
 within paragraphs and tasks with a space, consuming continuation indentation and quote
@@ -806,8 +812,9 @@ clears the history whenever the comparison (or its revision) changes.
 Logic is unit-tested in Rust against `tempfile` git fixtures (`diff`, `tags`, `commits`,
 `coverage`, `notes`, `review_dir`, `fuzzy`, `tree`, `xref` (Java and `js`), `repo_library`,
 `generated`), and
-`counterpart`'s ranking over plain path lists. UI/interaction has no automated or written
-test plan.
+`counterpart`'s ranking over plain path lists. Markdown layout and interaction have browser
+regressions in `npm run test:markdown` (requires Chromium); other UI/interaction has no
+automated or written test plan.
 
 `xref`'s two- and three-file fixtures are too small to catch resolution bugs that only
 appear across packages, so `xref_validate.rs` runs the resolver over a realistic

@@ -3,6 +3,7 @@ import {
   type EditorState,
   type Extension,
   type Range,
+  RangeSet,
   StateEffect,
   StateField,
   type Text,
@@ -11,6 +12,8 @@ import {
   Decoration,
   type DecorationSet,
   EditorView,
+  GutterMarker,
+  lineNumberMarkers,
   ViewPlugin,
   type ViewUpdate,
   WidgetType,
@@ -90,36 +93,51 @@ class ListMarker extends WidgetType {
   }
 }
 
-/**
- * The text a table row is padded with so its columns line up: spaces, the pipes a row
- * left out, and — for the delimiter row — the rule under the header.
- */
-class TableFill extends WidgetType {
-  constructor(readonly text: string) {
+type Alignment = "left" | "center" | "right";
+
+/** Shared by every row: natural column widths shrink together when the pane narrows. */
+function tableCellStyle(width: number, align: Alignment, columns: number): string {
+  const natural = `calc(${width + 2}ch + 1px)`;
+  const share = `calc((100% - 1px) / ${columns})`;
+  return `flex-basis: ${natural}; max-width: ${natural}; min-width: min(${natural}, ${share});` +
+    ` padding-inline: min(1ch, calc((100% - 1px) / ${columns * 4})); text-align: ${align};`;
+}
+
+/** Empty cells and the delimiter row need a box even though they display no text. */
+class TableCellWidget extends WidgetType {
+  constructor(
+    readonly width: number,
+    readonly align: Alignment,
+    readonly columns: number,
+    readonly rule = false,
+  ) {
     super();
   }
 
   eq(other: WidgetType): boolean {
-    return other instanceof TableFill && other.text === this.text;
+    return (
+      other instanceof TableCellWidget && other.width === this.width &&
+      other.align === this.align && other.columns === this.columns && other.rule === this.rule
+    );
   }
 
   toDOM(): HTMLElement {
     const el = document.createElement("span");
-    for (const run of this.text.match(/\|+|─+| +/g) ?? []) {
-      if (run[0] === " ") {
-        el.appendChild(document.createTextNode(run));
-      } else {
-        const span = document.createElement("span");
-        span.className = run[0] === "|" ? "cm-md-table-pipe" : "cm-md-table-rule";
-        span.textContent = run;
-        el.appendChild(span);
-      }
-    }
+    el.className = `cm-md-table-cell${this.rule ? " cm-md-table-rule-cell" : ""}`;
+    el.style.cssText = tableCellStyle(this.width, this.align, this.columns);
+    el.textContent = "\u200b";
     return el;
   }
 
   ignoreEvent(): boolean {
     return false;
+  }
+}
+
+/** A compact delimiter has no room for a line number; inspection restores it. */
+class HiddenLineNumber extends GutterMarker {
+  toDOM(): HTMLElement {
+    return document.createElement("span");
   }
 }
 
@@ -142,6 +160,7 @@ class RuleWidget extends WidgetType {
 
 const HIDE = Decoration.replace({});
 const RULE = new RuleWidget();
+const HIDDEN_NUMBER = new HiddenLineNumber();
 const IMAGE_TAG = new TextWidget("image", "cm-md-image-tag");
 const SOFT_BREAK = Decoration.replace({ widget: new TextWidget(" ", "cm-md-softbreak") });
 const SOURCE_LINE = Decoration.line({ class: "cm-md-source" });
@@ -149,7 +168,7 @@ const CODE = Decoration.mark({ class: "cm-md-code" });
 const CODE_INFO = Decoration.mark({ class: "cm-md-code-info" });
 const STRIKE = Decoration.mark({ class: "cm-md-strike" });
 const LINK = Decoration.mark({ class: "cm-md-link" });
-const PIPE = Decoration.mark({ class: "cm-md-table-pipe" });
+const TABLE_HEADING = Decoration.mark({ class: "cm-md-table-heading" });
 const PLAIN = Decoration.mark({ class: "cm-md-plain" });
 const BULLETS = ["•", "◦", "▪"];
 /** How far each level of a bulleted list is indented, in em. */
@@ -491,7 +510,7 @@ function listItem(b: Builder, node: SyntaxNode): void {
 }
 
 type Segment = { from: number; to: number; cell: SyntaxNode | null };
-type Row = { node: SyntaxNode; segments: Segment[]; lead: boolean; trail: boolean };
+type Row = { node: SyntaxNode; segments: Segment[] };
 
 /** A table row's cells by the pipes around them — an empty cell has no node. */
 function tableRow(node: SyntaxNode): Row {
@@ -509,10 +528,10 @@ function tableRow(node: SyntaxNode): Row {
   // What follows the last pipe is a cell only if it holds something.
   const trail = segments.length > 0 && segments[segments.length - 1].cell == null && pipes.length > 0;
   if (trail) segments.pop();
-  return { node, segments, lead, trail };
+  return { node, segments };
 }
 
-/** Line a table's columns up: monospaced, padded to each column's widest cell as shown. */
+/** Align column boxes across source rows, wrapping each cell's actual document text. */
 function table(b: Builder, node: SyntaxNode): void {
   const { state } = b;
   const { doc } = state;
@@ -524,7 +543,7 @@ function table(b: Builder, node: SyntaxNode): void {
     .replace(/^\s*\|/, "")
     .replace(/\|\s*$/, "")
     .split("|")
-    .map((d) => {
+    .map((d): Alignment => {
       const t = d.trim();
       return t.startsWith(":") && t.endsWith(":") ? "center" : t.endsWith(":") ? "right" : "left";
     });
@@ -535,45 +554,65 @@ function table(b: Builder, node: SyntaxNode): void {
     return cell.to - cell.from - measure.hidden;
   };
   const widths: number[] = [];
-  const cellWidths = rows.map((row) =>
-    row.segments.map((seg, i) => {
+  rows.forEach((row) =>
+    row.segments.forEach((seg, i) => {
       const w = shown(seg.cell);
       widths[i] = Math.max(widths[i] ?? 1, w);
-      return w;
     }),
   );
   const columns = Math.max(widths.length, align.length);
   for (let i = 0; i < columns; i++) widths[i] = widths[i] ?? 1;
-  const pad = (n: number) => " ".repeat(Math.max(0, n));
+  const cells = widths.map((width, i) => Decoration.mark({
+    class: "cm-md-table-cell",
+    attributes: { style: tableCellStyle(width, align[i] ?? "left", columns) },
+  }));
 
   rows.forEach((row, r) => {
     const line = doc.lineAt(row.node.from);
     if (!b.inView(line.number)) return;
     b.addClass(row.node.from, row.node.from, r === 0 ? "cm-md-table cm-md-table-head" : "cm-md-table");
-    for (const p of children(row.node)) if (p.name === "TableDelimiter") b.mark(p.from, p.to, PIPE);
-    const missing = widths
-      .slice(row.segments.length)
-      .map((w) => `${pad(w + 2)}|`)
-      .join("");
+    if (b.revealed.has(line.number)) {
+      b.addClass(row.node.from, row.node.from, "cm-md-table-raw");
+      return;
+    }
+    for (const p of children(row.node)) if (p.name === "TableDelimiter") b.hide(p.from, p.to);
     row.segments.forEach((seg, i) => {
-      const extra = widths[i] - cellWidths[r][i];
-      const left = align[i] === "right" ? extra : align[i] === "center" ? Math.floor(extra / 2) : 0;
-      const before = (i === 0 && !row.lead ? "|" : "") + pad(1 + left);
-      const after =
-        pad(1 + extra - left) + (i === row.segments.length - 1 ? (row.trail ? "" : "|") + missing : "");
       if (seg.cell) {
-        b.hide(seg.from, seg.cell.from, new TableFill(before), -1);
-        b.hide(seg.cell.to, seg.to, new TableFill(after));
+        b.mark(seg.from, seg.to, cells[i]);
+        if (r === 0) b.mark(seg.cell.from, seg.cell.to, TABLE_HEADING);
+        b.hide(seg.from, seg.cell.from);
+        b.hide(seg.cell.to, seg.to);
       } else {
-        b.hide(seg.from, seg.to, new TableFill(before + after));
+        b.hide(seg.from, seg.to, new TableCellWidget(widths[i], align[i] ?? "left", columns));
       }
     });
+    for (let i = row.segments.length; i < columns; i++) {
+      b.hide(row.node.to, row.node.to, new TableCellWidget(widths[i], align[i] ?? "left", columns));
+    }
   });
 
   if (delimiter && b.inView(doc.lineAt(delimiter.from).number)) {
     b.addClass(delimiter.from, delimiter.from, "cm-md-table");
-    const rule = `|${widths.map((w) => "─".repeat(w + 2)).join("|")}|`;
-    b.hide(delimiter.from, delimiter.to, new TableFill(rule));
+    if (state.field(proseFlow).compactRules.has(doc.lineAt(delimiter.from).number)) {
+      b.addClass(delimiter.from, delimiter.from, "cm-md-table-rule-line");
+    }
+    if (b.revealed.has(doc.lineAt(delimiter.from).number)) {
+      b.addClass(delimiter.from, delimiter.from, "cm-md-table-raw");
+      return;
+    }
+    let at = delimiter.from;
+    let col = 0;
+    for (const part of state.sliceDoc(delimiter.from, delimiter.to).split("|")) {
+      const end = at + part.length;
+      if (part.trim()) {
+        b.hide(at, end, new TableCellWidget(widths[col], align[col] ?? "left", columns, true));
+        col++;
+      } else {
+        b.hide(at, end);
+      }
+      if (end < delimiter.to) b.hide(end, end + 1);
+      at = end + 1;
+    }
   }
 }
 
@@ -598,6 +637,8 @@ type ProseFlow = {
   decorations: DecorationSet;
   /** Joined source line → end of its consumed indentation and quote markers. */
   joined: ReadonlyMap<number, number>;
+  /** Unannotated table delimiter line → source start, rendered as a thin rule. */
+  compactRules: ReadonlyMap<number, number>;
 };
 
 /**
@@ -614,10 +655,19 @@ function flowProse(state: EditorState, focused: boolean): ProseFlow {
   if (searched != null) separate.add(searched);
   const decorations: Range<Decoration>[] = [];
   const joined = new Map<number, number>();
+  const compactRules = new Map<number, number>();
   const front = frontmatter(doc);
   syntaxTree(state).iterate({
     enter(ref) {
       if (front != null && ref.from <= front && ref.name !== "Document") return false;
+      if (ref.name === "Table") {
+        const delimiter = ref.node.getChild("TableDelimiter");
+        if (delimiter) {
+          const line = doc.lineAt(delimiter.from);
+          if (!separate.has(line.number)) compactRules.set(line.number, line.from);
+        }
+        return false;
+      }
       if (ref.name !== "Paragraph" && ref.name !== "Task") {
         // No prose inside code, tables, headings, HTML or link definitions.
         return !/^(FencedCode|CodeBlock|Table|ATXHeading\d|SetextHeading\d|HTMLBlock|CommentBlock|LinkReference)$/.test(
@@ -662,7 +712,7 @@ function flowProse(state: EditorState, focused: boolean): ProseFlow {
       return false;
     },
   });
-  return { focused, decorations: Decoration.set(decorations, true), joined };
+  return { focused, decorations: Decoration.set(decorations, true), joined, compactRules };
 }
 
 // Newline replacements must be supplied before CodeMirror computes its viewport.
@@ -682,7 +732,12 @@ const proseFlow = StateField.define<ProseFlow>({
     }
     return flowProse(tr.state, focused);
   },
-  provide: (field) => EditorView.decorations.from(field, (flow) => flow.decorations),
+  provide: (field) => [
+    EditorView.decorations.from(field, (flow) => flow.decorations),
+    lineNumberMarkers.from(field, (flow) => RangeSet.of(
+      [...flow.compactRules.values()].map((pos) => HIDDEN_NUMBER.range(pos)),
+    )),
+  ],
 });
 
 /**

@@ -1476,11 +1476,78 @@ kbd {
   border-top: 1px solid var(--bg-4);
 }
 
-.cm-md .cm-md-table-pipe,
-.cm-md .cm-md-table-pipe *,
-.cm-md .cm-md-table-rule {
-  color: var(--fg-3);
-  font-weight: normal;
+.cm-md .cm-line.cm-md-table:not(.cm-md-table-raw) {
+  display: flex;
+  align-items: stretch;
+  white-space: normal;
+}
+
+/* Cell text remains the document's text, so cursor positions, links and selections
+   still map to source columns. Borders stretch to the tallest cell of each row. */
+.cm-md-table-cell {
+  display: block;
+  flex: 0 1 auto;
+  min-width: 0;
+  padding: 0.2em 1ch;
+  border-left: 1px solid var(--fg-3);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.cm-md-table-head:not(.cm-md-table-raw) .cm-md-table-cell {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding-block: 0.5em;
+  border-top: 1px solid var(--fg-3);
+}
+
+.cm-md-table-heading {
+  display: block;
+  min-width: 0;
+}
+
+.cm-md-table:not(.cm-md-table-head):not(.cm-md-table-raw) .cm-md-table-cell:not(.cm-md-table-rule-cell) {
+  border-bottom: 1px solid var(--fg-3);
+}
+
+.cm-md-table:not(.cm-md-table-raw)::after {
+  content: "";
+  flex: none;
+  border-left: 1px solid var(--fg-3);
+}
+
+.cm-md-table:not(.cm-md-table-raw) > .cm-widgetBuffer {
+  display: none;
+}
+
+.cm-md-table-rule-cell {
+  position: relative;
+}
+
+/* The Markdown delimiter is a separator, not another padded text row. */
+.cm-md .cm-line.cm-md-table-rule-line:not(.cm-md-table-raw) {
+  height: 1px;
+  line-height: 0;
+}
+
+.cm-md-table-rule-line .cm-md-table-rule-cell {
+  height: 1px;
+  padding-block: 0;
+  line-height: 0;
+}
+
+.cm-md-table-rule-cell::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  border-top: 1px solid var(--fg-3);
+}
+
+.cm-md-table-rule-line .cm-md-table-rule-cell::after {
+  top: 0;
 }
 
 /* Metadata, not prose: dim, whatever the parser made of it. */
