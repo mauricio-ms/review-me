@@ -272,6 +272,8 @@ export function useCommands(close: CommandClose): {
   const handleToggleDiffMode = useCallback(() => {
     toggleDiffHighlight();
     close();
+    const ui = useUIStore.getState();
+    ui.showFlash(`Diff highlighting: ${ui.diffHighlight}`);
   }, [close, toggleDiffHighlight]);
 
   const handleToggleProjectFilter = useCallback(() => {
@@ -427,8 +429,7 @@ export function useCommands(close: CommandClose): {
       name: "diffmode",
       aliases: ["highlight", "worddiff", "hl"],
       label: `diff highlight → ${diffHighlight === "word" ? "line" : "word"}`,
-      buffer: "diff",
-      enabled: !!repo,
+      enabled: !!repo && (activeBuffer === "diff" || activeBuffer === "project"),
       run: handleToggleDiffMode,
     },
     {

@@ -353,6 +353,7 @@ just the current buffer's keys; `C-h k` tells you what a key does.
 | `C-x p k` | `close` | Close the repository |
 | `C-x v =` | `worktree` | Return to the working-tree diff |
 | `C-x v v` | `commit` | Commit the reviewed working-tree changes |
+| `C-x v w` | `diffmode` | Toggle word-diff ↔ whole-line highlighting in the diff buffer and project viewer |
 | `C-x x g` | `refresh` | Recompute the active comparison |
 | `C-x C-=` / `C-x C--` / `C-x C-0` | `text-scale-increase` / `-decrease` / `-reset` | Bigger / smaller / default text everywhere (then `=` `-` `0` alone keep adjusting); remembered |
 | `C-h b` | `help` | Every key binding and command |
@@ -370,7 +371,6 @@ just the current buffer's keys; `C-h k` tells you what a key does.
 | `note` | (diff, commit review) Note on the lines at the cursor — a fix for later |
 | `export` | Write the notes on the commits buffer's commits to one Markdown file |
 | `clear` | Clear this comparison's review, flag and ignore marks |
-| `diffmode` | (diff) Toggle word-diff ↔ whole-line highlighting |
 | `changed` | Project tree: only the changed files ↔ all files (`c` in the tree); the finder lists changed files first |
 | `hunk` | (project) Show/hide the diff of the change at the cursor or selection |
 | `hunks` | (project) Show/hide the diff of every change, in every file |
@@ -536,12 +536,15 @@ editor's git signs are: a green bar beside added lines, a blue one beside modifi
 and a red notch between the lines where something was removed (the header adds the
 file's `+adds −dels`). `]c` / `[c` jump from change to change — the mode line says which
 one you're on, `change 2/5` — and `]f` / `[f` go on to the next or previous changed file,
-in the changed-files tree's order, the way they walk files in the diff buffer. `M-x hunk` opens the diff of the change under the cursor or the
-visual selection right there — the removed lines appear in red above what replaced them,
-changed words highlighted — and `M-x hunk` again closes it; `M-x hunks` does the same for every
-change in every file, and `M-x hunk` then hides just the one you're on. While the tree lists
-only the changed files (`c`), the removed lines are always shown in place; `M-x hunk` and
-`M-x hunks` then add the word highlighting.
+in the changed-files tree's order, the way they walk files in the diff buffer.
+Inline diffs are shown by default: removed lines appear in red above what replaced them,
+with changed words highlighted. **`C-x v w` / `M-x diffmode`** toggles word emphasis off
+or on, keeping the added and removed lines visible. The setting is shared with the diff
+buffer and survives switching files and comparisons during the session.
+`M-x hunk` hides or shows the diff of the change under the cursor or visual selection;
+`M-x hunks` does the same for every change in every file. Word emphasis works on visible
+changed lines even when the hunk is collapsed. While the tree lists only the changed files
+(`c`), removed lines remain visible and follow the word/line setting too.
 
 A strip at the viewer's right edge, beside the scrollbar, maps the whole file: each change
 in its gutter sign's colour, flags in amber, the part on screen as a band and the cursor as

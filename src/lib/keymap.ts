@@ -114,6 +114,7 @@ const GLOBAL_KEYS = [
   { keys: ["C-x p k"], command: "close", doc: "close the repository" },
   { keys: ["C-x v ="], command: "worktree", doc: "the working-tree diff" },
   { keys: ["C-x v v"], command: "commit-reviewed", doc: "commit the reviewed changes" },
+  { keys: ["C-x v w"], command: "diff-mode", doc: "toggle word or whole-line diff highlighting" },
   { keys: ["C-x x g"], command: "refresh", doc: "refresh" },
   {
     keys: ["C-x C-=", "C-x C-+"],

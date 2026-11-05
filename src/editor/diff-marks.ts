@@ -21,13 +21,13 @@ import type { WordSeg } from "../lib/word-diff";
 /**
  * A change block plus how much of its diff the viewer shows: `shown` is the full inline
  * diff (`M-x hunk`/`M-x hunks`), `showRemoved` just the removed lines — the changed-files view
- * always has those.
+ * always has those. `words` independently emphasizes changed words on visible lines.
  */
-export type ShownBlock = ChangeBlock & { shown: boolean; showRemoved: boolean };
+export type ShownBlock = ChangeBlock & { shown: boolean; showRemoved: boolean; words: boolean };
 
 /**
  * Replace the change marks of the file in the project viewer: gutter signs and line
- * tints always, and — for blocks shown inline — the removed lines and word highlights.
+ * tints always, optional word highlights, and — for blocks shown inline — the removed lines.
  */
 export const setDiffMarks = StateEffect.define<ShownBlock[]>();
 
@@ -66,7 +66,7 @@ class RemovedLines extends WidgetType {
     readonly id: string,
     readonly lines: string[],
     readonly segs: (WordSeg[] | null)[],
-    /** Highlight the changed words — only as part of the full inline diff. */
+    /** Highlight the changed words, independently of whether the hunk is expanded. */
     readonly words: boolean,
   ) {
     super();
@@ -143,6 +143,7 @@ function buildMarks(doc: Text, blocks: ShownBlock[], revealed: string | null): M
   for (const block of blocks) {
     const valid = (ln: number) => ln >= 1 && ln <= doc.lines;
     const shown = block.shown || block.id === revealed;
+    const words = block.words;
     for (const ln of block.modified.filter(valid)) {
       sign(ln, "cm-diff-sign-modified");
       deco.push((shown ? NEW_LINE : MODIFIED_LINE).range(doc.line(ln).from));
@@ -165,7 +166,7 @@ function buildMarks(doc: Text, blocks: ShownBlock[], revealed: string | null): M
         block.id,
         block.removed.map((l) => l.content),
         block.removedSegs,
-        shown,
+        words,
       );
       deco.push(
         block.removedAt > doc.lines
@@ -175,7 +176,7 @@ function buildMarks(doc: Text, blocks: ShownBlock[], revealed: string | null): M
             ),
       );
     }
-    if (!shown) continue;
+    if (!words) continue;
     for (const [ln, segs] of block.newSegs) {
       // Only where the viewer still holds the text the diff saw — a file changed on
       // disk since the diff was computed would put the highlights on the wrong words.
@@ -244,7 +245,7 @@ export function markedBlocks(state: EditorState): readonly ShownBlock[] {
 
 /**
  * The lines (1-based) of the change blocks whose diff is shown inline — `M-x hunk`,
- * `M-x hunks`, or Swiper revealing one: what the comparison wrote, word marks and all.
+ * `M-x hunks`, or Swiper revealing one: what the comparison wrote.
  */
 export function shownChangeLines(state: EditorState): Set<number> {
   const marks = state.field(diffMarksField, false);

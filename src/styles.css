@@ -1641,6 +1641,8 @@ kbd {
   overflow-wrap: anywhere;
 }
 
+.cm-diff-line-added .cm-diff-word,
+.cm-diff-line-modified .cm-diff-word,
 .cm-diff-line-new .cm-diff-word {
   background: rgba(var(--accent-green-rgb), 0.3);
   border-radius: 2px;

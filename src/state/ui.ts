@@ -4,7 +4,7 @@ import type { KeyScope } from "../lib/keymap";
 import type { FileBufferId } from "./windows";
 
 export type VimMode = "normal" | "insert" | "visual" | "replace";
-/** How the diff view highlights changes: per-word (intra-line) or whole-line. */
+/** How the diff buffer and project viewer highlight changes: per-word or whole-line. */
 export type DiffHighlightMode = "word" | "line";
 
 /** Which full-screen modal picker (if any) is open. */

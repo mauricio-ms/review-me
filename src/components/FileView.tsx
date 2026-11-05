@@ -100,6 +100,7 @@ export default function FileView({ win, bufferId }: { win: WindowId; bufferId: F
   const changedOnly = useProjectStore((s) => s.filter === "changed");
   const inlineDiff = useProjectStore((s) => s.inlineDiff);
   const inlineFlipped = useProjectStore((s) => s.inlineFlipped);
+  const diffHighlight = useUIStore((s) => s.diffHighlight);
   const focused = useWindowStore((s) => s.selected === win && !s.treeFocused);
   const focusRequest = useUIStore((s) => s.focusRequest);
   const rawMarkup = useFilesStore((s) => s.rawMarkup.has(bufferId));
@@ -165,9 +166,10 @@ export default function FileView({ win, bufferId }: { win: WindowId; bufferId: F
       ...b,
       shown: inlineDiff !== inlineFlipped.has(b.id),
       showRemoved: changedOnly,
+      words: diffHighlight === "word",
     }));
     view.dispatch({ effects: setDiffMarks.of(shown) });
-  }, [blocks, changedOnly, content, inlineDiff, inlineFlipped, view]);
+  }, [blocks, changedOnly, content, diffHighlight, inlineDiff, inlineFlipped, view]);
 
   useEffect(() => {
     view?.dispatch({ effects: setDeletedFile.of(deleted) });

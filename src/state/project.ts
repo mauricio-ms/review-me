@@ -72,8 +72,8 @@ type ProjectState = {
    */
   filter: ProjectFilter;
   /**
-   * Show every change's removed lines inline, in every file (`M-x hunks`). Like `filter`,
-   * a standing preference.
+   * Show every change's inline diff, in every file (`M-x hunks`). On by default;
+   * like `filter`, a standing preference. Word emphasis follows `diffHighlight`.
    */
   inlineDiff: boolean;
   /**
@@ -120,7 +120,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
   source: WORKTREE_SOURCE,
   sourceLabel: null,
   filter: "all",
-  inlineDiff: false,
+  inlineDiff: true,
   inlineFlipped: new Set(),
   treeWidth: savedTreeWidth(),
   treeHidden: false,

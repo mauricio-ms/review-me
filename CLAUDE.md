@@ -294,7 +294,8 @@ own `onKeyDown` over a flattened `Row[]` (file/hunk/line) — its keys, sequence
 `g g` and `] h` included, are `keymap.ts`'s `diff` scope — and a `visualAnchor` for `v`
 selection. Line rows carry **intra-line word-diff** segments (`lib/word-diff.ts`: pairs
 each removed line with the added line that replaced it, LCS over tokens) — on by default;
-`M-x diffmode` toggles `useUIStore.diffHighlight` between `word` and whole-`line`. In commit
+`C-x v w` / `M-x diffmode` toggles `useUIStore.diffHighlight` between `word` and whole-`line`
+in both the diff buffer and project viewer. In commit
 mode the first row is the commit itself (`kind: "commit"`: `Comparison::Commit`'s subject,
 author, date and `body`, which `TAB` folds to the subject); it belongs to no file, so read a
 row's file through `rowFile` rather than assuming every non-section row has one. Only the
@@ -505,12 +506,15 @@ the file at hand and wrapping — in the tree from its cursor, previewing; the m
 `changeBlocks` is cached per `ChangedFile`. `editor/overview-ruler.ts` draws the same
 blocks (`markedBlocks`) and the flags (`flaggedLines`) on a strip beside the scrollbar,
 placed by CodeMirror's height map; it shows only while there's something to mark, and
-makes room through `editorAttributes`, since CodeMirror owns the editor's classes. What is shown is `useProjectStore.inlineDiff` (`M-x hunks`,
-all files) XOR `inlineFlipped` (`M-x hunk`, the blocks at the cursor/selection, cleared when
-the comparison changes). The changed-files view (`filter === "changed"`) always shows the
-removed lines (`ShownBlock.showRemoved`); the full diff — green new lines, word marks —
-still follows `M-x hunk`/`M-x hunks`. Block widgets must come from a `StateField`, never a view
-plugin — CodeMirror rejects them there.
+makes room through `editorAttributes`, since CodeMirror owns the editor's classes. What is
+shown is `useProjectStore.inlineDiff` (on by default; `M-x hunks`, all files) XOR
+`inlineFlipped` (`M-x hunk`, the blocks at the cursor/selection, cleared when the comparison
+changes). Word emphasis is independent of hunk expansion: `ShownBlock.words` follows
+`useUIStore.diffHighlight` (`C-x v w` / `M-x diffmode`) on visible new and removed lines,
+including collapsed blocks and a block Swiper reveals. The changed-files view
+(`filter === "changed"`) always shows the removed lines (`ShownBlock.showRemoved`); the full
+inline diff still follows `M-x hunk`/`M-x hunks`. Block widgets must come from a
+`StateField`, never a view plugin — CodeMirror rejects them there.
 
 **Markdown renders in place** (`editor/markdown-view.ts`, on for `.md`/`.markdown`/`.mkd`
 unless `M-x markdown-markup` put the buffer in `useFilesStore.rawMarkup`). The document stays
