@@ -230,6 +230,23 @@ pub struct FlagTag {
     pub severity: Option<String>,
 }
 
+/// The original concern remains available after manual resolution.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolvedFlag {
+    #[serde(flatten)]
+    pub flag: FlagTag,
+    pub resolved_at: u64,
+}
+
+/// Explicit identities let a confirmed batch span several commit reviews without
+/// taking flags added after the confirmation prompt opened.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FlagRef {
+    pub scope: ReviewScope,
+    pub id: String,
+}
+
 /// A hunk/file the reviewer has set aside ("don't need to look at this"). Like a
 /// flag but with no severity — purely a marker that buckets it into the Ignore
 /// section.
@@ -252,6 +269,8 @@ pub struct TagStore {
     #[serde(default)]
     pub flags: Vec<FlagTag>,
     #[serde(default)]
+    pub resolved_flags: Vec<ResolvedFlag>,
+    #[serde(default)]
     pub ignored: Vec<IgnoredTag>,
 }
 
@@ -261,6 +280,7 @@ impl Default for TagStore {
             version: 1,
             reviewed: Vec::new(),
             flags: Vec::new(),
+            resolved_flags: Vec::new(),
             ignored: Vec::new(),
         }
     }
@@ -273,6 +293,7 @@ pub fn load(root: &Path, scope: &ReviewScope) -> AppResult<TagStore> {
     let mut store = read(root)?;
     store.reviewed.retain(|t| t.anchor.scope == *scope);
     store.flags.retain(|t| t.anchor.scope == *scope);
+    store.resolved_flags.retain(|t| t.flag.anchor.scope == *scope);
     store.ignored.retain(|t| t.anchor.scope == *scope);
 
     let git = repo::open(root).ok();
@@ -398,6 +419,40 @@ pub fn set_flag_note(
     flag.note = note.filter(|n| !n.trim().is_empty());
     write(root, &store)?;
     load(root, scope)
+}
+
+/// Active flags from exactly these commits, in one read. Worktree and branch
+/// comparisons remain independent even when their code is identical.
+pub fn flags_for_commits(root: &Path, oids: &[String]) -> AppResult<Vec<FlagTag>> {
+    let oids: HashSet<&str> = oids.iter().map(String::as_str).collect();
+    Ok(read(root)?.flags.into_iter().filter(|flag| {
+        matches!(&flag.anchor.scope, ReviewScope::Commit { oid } if oids.contains(oid.as_str()))
+    }).collect())
+}
+
+/// Archive a confirmed batch in one write. Validate every identity first, so a
+/// missing flag or a wrong scope cannot partially resolve a multi-commit selection.
+pub fn resolve_flags(root: &Path, flags: &[FlagRef]) -> AppResult<()> {
+    if flags.is_empty() {
+        return Ok(());
+    }
+    let mut store = read(root)?;
+    let selected: HashSet<_> = flags.iter().map(|f| (f.scope.clone(), f.id.clone())).collect();
+    for (scope, id) in &selected {
+        if !store.flags.iter().any(|f| f.id == *id && f.anchor.scope == *scope) {
+            return Err(AppError::Tag(format!("flag {id} is no longer active in this comparison")));
+        }
+    }
+    let resolved_at = now_millis();
+    store.flags.retain(|flag| {
+        if selected.contains(&(flag.anchor.scope.clone(), flag.id.clone())) {
+            store.resolved_flags.push(ResolvedFlag { flag: flag.clone(), resolved_at });
+            false
+        } else {
+            true
+        }
+    });
+    write(root, &store)
 }
 
 pub fn remove(root: &Path, scope: &ReviewScope, id: &str) -> AppResult<TagStore> {
@@ -1039,6 +1094,7 @@ mod tests {
 
         let store = load(root, WT).unwrap();
         assert_eq!(store.reviewed.len(), 1, "legacy tag survives migration");
+        assert!(store.resolved_flags.is_empty());
         assert_eq!(store.reviewed[0].anchor.scope, ReviewScope::Worktree);
         // …and it belongs to the working-tree diff only.
         let branch = load(root, &branch_scope("refs/heads/master", "refs/heads/feature")).unwrap();
@@ -1520,5 +1576,92 @@ mod tests {
         // A flag is only reachable from its own comparison.
         assert!(set_flag_note(root, WT, &before.id, Some("x".into())).is_err());
         assert!(set_flag_note(root, &scope, "flag:nope", Some("x".into())).is_err());
+    }
+
+    fn flag_refs(flags: &[FlagTag]) -> Vec<FlagRef> {
+        flags.iter().map(|f| FlagRef { scope: f.anchor.scope.clone(), id: f.id.clone() }).collect()
+    }
+
+    #[test]
+    fn resolving_multiple_commits_archives_concerns_and_preserves_other_reviews() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        branchy_repo(root);
+        let first = commit_scope(root, "master");
+        let second = commit_scope(root, "feature");
+        let other = commit_scope(root, "other");
+        let branch = branch_scope("refs/heads/master", "refs/heads/feature");
+        for scope in [&first, &second, &other, WT, &branch] {
+            add_flag(root, scope, "a.txt", 2, 2, AnchorKind::Range, AnchorSide::New,
+                Some("Validate the input.".into()), Some("high".into())).unwrap();
+        }
+        add_flag(root, &first, "a.txt", 0, 0, AnchorKind::File, AnchorSide::File,
+            Some("Split this file.".into()), None).unwrap();
+        add_flag(root, &second, "", 0, 0, AnchorKind::Commit, AnchorSide::Commit,
+            Some("Add tests.".into()), None).unwrap();
+        add_flag(root, &second, "a.txt", 1, 1, AnchorKind::Range, AnchorSide::Old, None, None).unwrap();
+        add_reviewed(root, &first, "a.txt", 1, 1, AnchorKind::Range, AnchorSide::New).unwrap();
+        add_ignored(root, &second, "a.txt", 3, 3, AnchorKind::Range, AnchorSide::New).unwrap();
+        let oids: Vec<String> = [&first, &second].iter().map(|scope| match scope {
+            ReviewScope::Commit { oid } => oid.clone(), _ => unreachable!(),
+        }).collect();
+        let flags = flags_for_commits(root, &oids).unwrap();
+        assert_eq!(flags.len(), 5);
+        let mut refs = flag_refs(&flags);
+        refs.push(FlagRef { scope: refs[0].scope.clone(), id: refs[0].id.clone() });
+        resolve_flags(root, &refs).unwrap();
+        assert!(flags_for_commits(root, &oids).unwrap().is_empty());
+        assert!(flags_for_commits(root, &[]).unwrap().is_empty());
+        let stored = read(root).unwrap();
+        assert_eq!(stored.resolved_flags.len(), 5, "duplicate ids resolve once");
+        for original in &flags {
+            let archived = stored.resolved_flags.iter().find(|f| f.flag.id == original.id).unwrap();
+            assert!(archived.resolved_at >= original.created_at);
+            assert_eq!(serde_json::to_value(&archived.flag).unwrap(), serde_json::to_value(original).unwrap());
+        }
+        assert_eq!(load(root, &first).unwrap().reviewed.len(), 1);
+        assert_eq!(load(root, &second).unwrap().ignored.len(), 1);
+        for scope in [&other, WT, &branch] {
+            let store = load(root, scope).unwrap();
+            assert_eq!(store.flags.len(), 1);
+            assert!(store.resolved_flags.is_empty());
+        }
+
+        // Re-flagging the same location and clearing active marks keep the history.
+        add_flag(root, &first, "a.txt", 2, 2, AnchorKind::Range, AnchorSide::New, None, None).unwrap();
+        unmark_range(root, &first, "a.txt", 1, 3, AnchorSide::New).unwrap();
+        clear_scope(root, &second).unwrap();
+        assert_eq!(read(root).unwrap().resolved_flags.len(), 5);
+    }
+
+    #[test]
+    fn invalid_or_changed_flag_identities_never_partially_resolve_a_batch() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        branchy_repo(root);
+        let first = commit_scope(root, "master");
+        let second = commit_scope(root, "feature");
+        let a = add_flag(root, &first, "a.txt", 1, 1, AnchorKind::Range, AnchorSide::New,
+            Some("Keep this note.".into()), None).unwrap();
+        let b = add_flag(root, &second, "a.txt", 2, 2, AnchorKind::Range, AnchorSide::New, None, None).unwrap();
+        let mut refs = flag_refs(&a.flags);
+        refs.extend(flag_refs(&b.flags));
+        let bytes = fs::read(tags_path(root)).unwrap();
+        refs[1].scope = first.clone();
+        assert!(resolve_flags(root, &refs).is_err());
+        assert_eq!(fs::read(tags_path(root)).unwrap(), bytes);
+        refs[1].scope = second.clone();
+        refs[1].id = "missing".into();
+        assert!(resolve_flags(root, &refs).is_err());
+        assert_eq!(fs::read(tags_path(root)).unwrap(), bytes);
+        refs[1].id = b.flags[0].id.clone();
+
+        // An additional flag created after prompting was never confirmed.
+        add_flag(root, &second, "a.txt", 3, 3, AnchorKind::Range, AnchorSide::New, None, None).unwrap();
+        resolve_flags(root, &refs).unwrap();
+        assert!(load(root, &first).unwrap().flags.is_empty());
+        let store = load(root, &second).unwrap();
+        assert_eq!(store.flags.len(), 1);
+        assert_eq!(store.flags[0].anchor.start_line, 3);
     }
 }

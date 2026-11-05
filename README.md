@@ -394,6 +394,7 @@ just the current buffer's keys; `C-h k` tells you what a key does.
 | `r` | Mark the file / hunk / selection **reviewed** (`✓`) |
 | `u` | Unmark (asks first when that deletes a note) |
 | `f` | **Flag** (`⚑`) the file / hunk / selection (flagging it again keeps its note) |
+| `x` | **Resolve** flags on the note / file / hunk / selected lines, after confirmation (`M-x resolve`) |
 | `i` | **Ignore** (`⊘`) the file / hunk / selection |
 | `C-s` | **Swiper** over the whole diff, folded files too (see below) |
 | `C-e` / `C-r` | Scroll one line down / up |
@@ -453,6 +454,9 @@ upstream or nothing unpushed, its whole history under **Recent commits**.
 | --- | --- |
 | `j` / `k` | Move down / up |
 | `gg` / `G` | Jump to the newest / oldest loaded commit |
+| `v` / `V` | Start or end visual selection of whole commits; extend with motions |
+| `x` | **Resolve** all flags on this commit or the selected commits, after confirmation (`M-x resolve`) |
+| `Esc` / `C-g` | Cancel the commit selection |
 | `Enter` | Review that commit against its first parent, in the diff buffer |
 | `o` | The same, in the other window (the log stays beside it) |
 | `b` | Review the whole listed range as one diff (`base...branch`) |
@@ -462,6 +466,19 @@ upstream or nothing unpushed, its whole history under **Recent commits**.
 `✓` when every change is reviewed (or ignored), `done/total` while partial, `⚑ n` flags and
 `✎ n` notes. History pages in as you approach the end, and reloads whenever the buffer is
 shown, on `C-x x g`, and when the review branch or its base changes.
+
+To close concerns after checking the fixes, select commits with `v`, extend with
+`j` / `k` (or the arrows), then press `x`. Selected rows are highlighted and the
+header counts their commits and flags. The minibuffer asks, for example,
+`Resolve 12 flags across 4 selected commits? (y or n)`. Press `y` to resolve the
+whole batch; `n`, `Esc`, or `C-g` cancels and keeps your selection. `Enter` does
+not confirm. Without a selection, `x` targets the commit under the cursor.
+
+Resolution removes active flags and their notes from future exports, while keeping
+the original notes, anchors and a resolution timestamp in `tags.json`'s
+`resolvedFlags` history. Reviewed and ignored marks keep their existing state.
+Selecting commits affects only those commits' own flags. In the diff, `x` acts on
+the note, file, hunk or selected lines instead, then moves to the next flag.
 
 `M-x show` keeps the old commit picker for what the list can't do: filter by subject or
 author over the branch's **whole** history, and resolve a typed sha against the whole
@@ -660,6 +677,7 @@ See [`CLAUDE.md`](./CLAUDE.md) for a deeper architecture tour.
 
 ```bash
 npm run build                 # frontend gate (tsc strict → vite build)
+npm run test:resolve          # Chromium keyboard/confirmation regressions (mocked IPC)
 cd src-tauri && cargo test    # backend unit tests (tempfile git fixtures)
 cd src-tauri && cargo check   # fast backend typecheck
 ```

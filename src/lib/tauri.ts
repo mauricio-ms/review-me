@@ -23,6 +23,8 @@ import type {
 import type {
   AnchorKind,
   AnchorSide,
+  FlagRef,
+  FlagTag,
   NotesExport,
   ReviewScope,
   TagStore,
@@ -103,6 +105,18 @@ export function readFile(
 
 export function loadTags(repo: string, scope: ReviewScope): Promise<TagStore> {
   return invoke<TagStore>("load_tags", { repo, scope });
+}
+
+export function flagsForCommits(repo: string, oids: string[]): Promise<FlagTag[]> {
+  return invoke<FlagTag[]>("flags_for_commits", { repo, oids });
+}
+
+export function resolveFlags(
+  repo: string,
+  scope: ReviewScope,
+  flags: FlagRef[],
+): Promise<TagStore> {
+  return invoke<TagStore>("resolve_flags", { repo, scope, flags });
 }
 
 export function addReviewedTag(

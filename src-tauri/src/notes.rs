@@ -119,11 +119,19 @@ fn commit_path(root: &Path, oid: &str) -> PathBuf {
 /// Regenerate `oid`'s notes file — or remove it once the commit has no notes — and
 /// the index. Called after any mark changes in that commit's scope.
 pub fn sync_commit(root: &Path, oid: &str) -> AppResult<()> {
+    sync_commits(root, &[oid])
+}
+
+/// Batch resolution regenerates its commit documents together and rewrites the
+/// shared index once, rather than once per selected commit.
+pub fn sync_commits(root: &Path, oids: &[&str]) -> AppResult<()> {
     let repo = repo::open(root)?;
-    let path = commit_path(root, oid);
-    match gather(&repo, root, oid)? {
-        Some(notes) => write_if_changed(root, &path, &render_commit(&notes))?,
-        None => remove_if_exists(&path)?,
+    for oid in oids {
+        let path = commit_path(root, oid);
+        match gather(&repo, root, oid)? {
+            Some(notes) => write_if_changed(root, &path, &render_commit(&notes))?,
+            None => remove_if_exists(&path)?,
+        }
     }
     sync_index(&repo, root)
 }
@@ -914,6 +922,36 @@ mod tests {
         assert!(md.contains("parent: null\n"));
         assert!(md.replace("\n> ", " ").contains("a root commit, so everything in it is new"));
         assert!(md.contains("```diff\n@@ -0,0 +1 @@\n+first\n```"));
+    }
+
+    #[test]
+    fn resolving_notes_across_commits_updates_documents_exports_and_counts() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let (base, oid) = fixture(root);
+        flag(root, &base, "Account.java", 2, 2, AnchorSide::New, "Use a decimal.");
+        flag(root, &oid, "Account.java", 4, 6, AnchorSide::New, "Validate the amount.");
+        let repo = Repository::open(root).unwrap();
+        let before = export(&repo, root, "refs/heads/master", None).unwrap();
+        assert_eq!(before.notes, 2);
+        let flags = tags::flags_for_commits(root, &[base.clone(), oid.clone()]).unwrap();
+        let refs: Vec<_> = flags.iter().map(|f| tags::FlagRef {
+            scope: f.anchor.scope.clone(), id: f.id.clone(),
+        }).collect();
+        tags::resolve_flags(root, &refs).unwrap();
+        sync_commits(root, &[&base, &oid]).unwrap();
+        for commit in [&base, &oid] {
+            assert!(!commit_path(root, commit).exists());
+            let store = tags::load(root, &ReviewScope::Commit { oid: commit.clone() }).unwrap();
+            assert_eq!(store.resolved_flags.len(), 1);
+            assert!(store.resolved_flags[0].flag.note.is_some());
+        }
+        assert!(!notes_dir(root).join("README.md").exists());
+        let after = export(&repo, root, "refs/heads/master", None).unwrap();
+        assert_eq!(after.notes, 0);
+        assert!(after.path.is_none());
+        assert!(!root.join(before.path.unwrap()).exists());
+        assert!(crate::coverage::commit_reviews(&repo, root, &[base, oid]).unwrap().is_empty());
     }
 
     #[test]

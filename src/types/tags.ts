@@ -83,10 +83,20 @@ export interface IgnoredTag {
   note: string | null;
 }
 
+export interface ResolvedFlag extends FlagTag {
+  resolvedAt: number;
+}
+
+export interface FlagRef {
+  scope: ReviewScope;
+  id: string;
+}
+
 export interface TagStore {
   version: number;
   reviewed: ReviewedTag[];
   flags: FlagTag[];
+  resolvedFlags: ResolvedFlag[];
   ignored: IgnoredTag[];
 }
 
@@ -102,5 +112,6 @@ export const EMPTY_TAG_STORE: TagStore = {
   version: 1,
   reviewed: [],
   flags: [],
+  resolvedFlags: [],
   ignored: [],
 };

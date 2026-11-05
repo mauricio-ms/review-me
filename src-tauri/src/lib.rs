@@ -39,6 +39,8 @@ pub fn run() {
             commands::create_directory,
             commands::read_file,
             commands::load_tags,
+            commands::flags_for_commits,
+            commands::resolve_flags,
             commands::add_reviewed_tag,
             commands::add_flag_tag,
             commands::add_ignored_tag,

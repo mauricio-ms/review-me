@@ -165,6 +165,7 @@ const DIFF_KEYS = [
   { keys: ["ESC", "C-g"], action: "escape", doc: "end the selection" },
   { keys: ["r"], action: "review", doc: "mark reviewed" },
   { keys: ["f"], action: "flag", doc: "flag" },
+  { keys: ["x"], action: "resolve", command: "resolve", doc: "resolve flags here (asks first); keeps notes" },
   { keys: ["i"], action: "ignore", doc: "ignore" },
   { keys: ["u"], action: "unmark", doc: "unmark" },
   {
@@ -187,6 +188,9 @@ const LOG_KEYS = [
   { keys: ["k", "<up>"], action: "up", doc: "previous commit" },
   { keys: ["g g"], action: "first", doc: "first commit" },
   { keys: ["G"], action: "last", doc: "last commit" },
+  { keys: ["v", "V"], action: "visual", doc: "select commits, extending with motions" },
+  { keys: ["ESC", "C-g"], action: "escape", doc: "cancel the commit selection" },
+  { keys: ["x"], action: "resolve", command: "resolve", doc: "resolve flags on this commit or the selected commits (asks first)" },
   { keys: ["RET"], action: "open", doc: "review this commit" },
   { keys: ["o"], action: "open-other", doc: "review this commit in the other window" },
   { keys: ["b"], action: "range", doc: "review the whole listed range as one diff" },

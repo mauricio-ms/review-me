@@ -5,6 +5,8 @@ import { dispatchKey, type KeyHandler } from "../lib/key-dispatch";
 import { KEYMAP, type LogAction } from "../lib/keymap";
 import { loadMoreLog, setLogHandle } from "../lib/log";
 import { enterCommit, enterLogRange } from "../lib/open-repo";
+import { confirmAndResolve, setResolveHandler } from "../lib/resolve-flags";
+import { flagsForCommits } from "../lib/tauri";
 import type { SwiperMatcher } from "../lib/swiper";
 import { markMatches, setListSwiper, swipeList } from "../lib/swiper-list";
 import { timeAgo } from "../lib/time";
@@ -101,11 +103,14 @@ function refKind(ref: string): "local" | "remote" {
  */
 export default function LogBuffer() {
   const repo = useRepoStore((s) => s.repo);
+  const repoPath = useRepoStore((s) => s.repoPath);
   const reviewBranch = useRepoStore((s) => s.reviewBranch);
   const uncommitted = useRepoStore((s) =>
     s.comparison.kind === "worktree" ? (s.diff?.files.length ?? 0) : 0,
   );
   const range = useLogStore((s) => s.range);
+  const logRef = useLogStore((s) => s.ref);
+  const logBase = useLogStore((s) => s.base);
   const commits = useLogStore((s) => s.commits);
   const reviews = useLogStore((s) => s.reviews);
   const loading = useLogStore((s) => s.loading);
@@ -121,12 +126,25 @@ export default function LogBuffer() {
   // Tracked by oid, not index, so a reload (the branch moved, a page arrived) keeps
   // the cursor on the same commit.
   const [cursorOid, setCursorOid] = useState<string | null>(null);
+  const [visualAnchorOid, setVisualAnchorOid] = useState<string | null>(null);
+  const resolving = useRef(false);
   // What is being opened, for the header: a short oid or `base...branch`.
   const [entering, setEntering] = useState<string | null>(null);
   const [enterError, setEnterError] = useState<string | null>(null);
 
   const found = cursorOid ? commits.findIndex((c) => c.oid === cursorOid) : -1;
   const cursor = found >= 0 ? found : 0;
+  const anchor = visualAnchorOid ? commits.findIndex((c) => c.oid === visualAnchorOid) : -1;
+  const visual = anchor >= 0 && found >= 0;
+  const lo = visual ? Math.min(anchor, cursor) : cursor;
+  const hi = visual ? Math.max(anchor, cursor) : cursor;
+  const selected = commits.slice(lo, hi + 1);
+  const selectedFlags = selected.reduce((n, c) => n + (reviews[c.oid]?.flags ?? 0), 0);
+
+  useEffect(() => setVisualAnchorOid(null), [repoPath, logRef, logBase]);
+  useEffect(() => {
+    if (visualAnchorOid && (anchor < 0 || found < 0)) setVisualAnchorOid(null);
+  }, [anchor, found, visualAnchorOid]);
 
   // History (`M-,`) reads the commit under the cursor and puts it back there.
   const cursorCommit = commits[cursor]?.oid ?? null;
@@ -214,6 +232,7 @@ export default function LogBuffer() {
 
   const enter = (commit: CommitInfo | undefined, options: ShowOptions = {}) => {
     if (!commit || entering) return;
+    setVisualAnchorOid(null);
     setCursorOid(commit.oid);
     void opening(commit.shortOid, () => enterCommit(commit.oid, options));
   };
@@ -231,14 +250,60 @@ export default function LogBuffer() {
   // The whole listed range as one diff — only when there is a base to diff against.
   const enterRange = () => {
     if (!rangeBase) return;
+    setVisualAnchorOid(null);
     void opening(`${rangeBase.name}...${branchName}`, enterLogRange);
   };
+
+  const doResolve = async () => {
+    if (!repoPath || resolving.current) return;
+    if (selected.length === 0) {
+      useUIStore.getState().showFlash("No commits here to resolve");
+      useUIStore.getState().requestFocus();
+      return;
+    }
+    const oids = selected.map((c) => c.oid);
+    const isCurrent = () => {
+      const log = useLogStore.getState();
+      return useRepoStore.getState().repoPath === repoPath &&
+        log.ref === logRef && log.base === logBase &&
+        oids.every((oid) => log.commits.some((c) => c.oid === oid));
+    };
+    resolving.current = true;
+    try {
+      const flags = await flagsForCommits(repoPath, oids);
+      const where = visual
+        ? `across ${oids.length} selected commit${oids.length === 1 ? "" : "s"}`
+        : `on commit ${selected[0].shortOid}`;
+      if (await confirmAndResolve(repoPath, flags, where, isCurrent)) {
+        if (isCurrent()) setVisualAnchorOid(null);
+      }
+    } catch (error) {
+      if (isCurrent()) {
+        useUIStore.getState().showFlash(`Could not resolve flags: ${errorMessage(error)}`);
+        useUIStore.getState().requestFocus();
+      }
+    } finally {
+      resolving.current = false;
+    }
+  };
+  useEffect(() => setResolveHandler("log", () => { void doResolve(); }));
 
   const handlers: Record<LogAction, KeyHandler> = {
     down: () => moveTo(cursor + 1),
     up: () => moveTo(cursor - 1),
     first: () => moveTo(0),
     last: () => moveTo(commits.length - 1),
+    visual: () => {
+      const commit = commits[cursor];
+      if (!commit) return;
+      setCursorOid(commit.oid);
+      setVisualAnchorOid((oid) => oid == null ? commit.oid : null);
+    },
+    escape: () => {
+      if (!visual) return false;
+      setVisualAnchorOid(null);
+    },
+    resolve: () => { void doResolve(); },
     open: () => enter(commits[cursor]),
     // magit's way: the log stays, the commit opens beside it.
     "open-other": () => enter(commits[cursor], { other: true }),
@@ -280,12 +345,17 @@ export default function LogBuffer() {
         <span className="diff-header-count">
           {listed} commit{plural}
         </span>
+        {visual && (
+          <span className="diff-header-count">
+            {selected.length} commit{selected.length === 1 ? "" : "s"} selected · {selectedFlags} flag{selectedFlags === 1 ? "" : "s"}
+          </span>
+        )}
         {entering && <span className="diff-header-status">opening {entering}…</span>}
         {loading && !entering && <span className="diff-header-status">loading…</span>}
         {shownError && <span className="diff-header-error">{shownError}</span>}
       </div>
 
-      <div className="log-list" ref={listRef} onScroll={onScroll}>
+      <div className="log-list" ref={listRef} onScroll={onScroll} role="listbox" aria-label="Commits" aria-multiselectable="true">
         <div className="log-status">
           <div className="log-status-line">
             <span className="log-status-label">Head:</span>
@@ -338,7 +408,9 @@ export default function LogBuffer() {
               if (el) rowRefs.current.set(commit.oid, el);
               else rowRefs.current.delete(commit.oid);
             }}
-            className={`diff-row log-row${index === cursor ? " is-selected" : ""}`}
+            className={`diff-row log-row${index === cursor ? " is-selected" : ""}${visual && index >= lo && index <= hi ? " is-visual-sel" : ""}`}
+            role="option"
+            aria-selected={visual ? index >= lo && index <= hi : index === cursor}
             onClick={() => setCursorOid(commit.oid)}
             onDoubleClick={() => enter(commit)}
           >

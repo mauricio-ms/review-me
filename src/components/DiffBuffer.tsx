@@ -21,6 +21,7 @@ import { dispatchKey, type KeyHandler } from "../lib/key-dispatch";
 import { KEYMAP, type DiffAction } from "../lib/keymap";
 import { COMMIT_TARGET, flagTarget, hasNote, openNoteFor } from "../lib/notes";
 import { wholeFileTarget } from "../lib/project-review";
+import { confirmAndResolve, setResolveHandler } from "../lib/resolve-flags";
 import { leaveHistory } from "../lib/open-repo";
 import { openFileFromDiff } from "../lib/project";
 import type { SwiperMatcher } from "../lib/swiper";
@@ -146,6 +147,25 @@ function rowFile(row: Row | undefined): ChangedFile | null {
     return null;
   }
   return row.file;
+}
+
+/** A flag's note is the most useful place to land while resolving a batch. */
+function rowForFlag(rows: Row[], flag: FlagTag): Row | undefined {
+  const note = rows.find(
+    (r) => (r.kind === "note" || r.kind === "commitNote") && r.flag.id === flag.id,
+  );
+  if (note) return note;
+  const { file, side, startLine, endLine } = flag.anchor;
+  if (side === "commit") return rows.find((r) => r.kind === "commit");
+  if (side !== "file" && !flag.anchor.stale) {
+    const hunk = rows.find((r) => {
+      if (r.kind !== "hunk" || r.section !== "flagged" || r.file.path !== file) return false;
+      const t = hunkTarget(r.hunk);
+      return t != null && t.side === side && t.lo <= endLine && t.hi >= startLine;
+    });
+    if (hunk) return hunk;
+  }
+  return rows.find((r) => r.kind === "file" && r.file.path === file);
 }
 
 // ---------- Swiper (`C-s`) ----------
@@ -475,6 +495,7 @@ export default function DiffBuffer() {
   const skipScrollIntoView = useRef(false);
   const [cursor, setCursor] = useState(0);
   const [visualAnchor, setVisualAnchor] = useState<number | null>(null);
+  const resolving = useRef(false);
   const [measurementEpoch, setMeasurementEpoch] = useState(0);
   const [viewport, setViewport] = useState({ top: 0, height: 600 });
   // Folded to its subject line; kept from one commit to the next.
@@ -1008,6 +1029,66 @@ export default function DiffBuffer() {
     exitVisual();
   };
 
+  const doResolve = async () => {
+    if (resolving.current) return;
+    const before = useRepoStore.getState();
+    const repo = before.repoPath;
+    if (!repo) return;
+    const row = rows[cursor];
+    const scope = targetScope();
+    const selected = flags.filter((flag) => {
+      if (visualAnchor == null) {
+        if (row?.kind === "note" || row?.kind === "commitNote") return flag.id === row.flag.id;
+        if (row?.kind === "file") return flag.anchor.file === row.file.path;
+        if (row?.kind === "commit") return flag.anchor.side === "commit";
+      }
+      const a = flag.anchor;
+      return scope != null && !a.stale && a.file === scope.file.path && a.side === scope.side &&
+        a.startLine <= scope.hi && a.endLine >= scope.lo;
+    });
+    const isCurrent = () => {
+      const state = useRepoStore.getState();
+      return state.repoPath === repo && state.comparisonEpoch === before.comparisonEpoch;
+    };
+    const path = rowFile(row)?.path;
+    const where = path
+      ? `${visualAnchor == null ? "in" : "in the selected lines of"} ${path}`
+      : "on this commit";
+    resolving.current = true;
+    try {
+      const store = await confirmAndResolve(repo, selected, where, isCurrent);
+      if (!store || !isCurrent()) return;
+      exitVisual();
+      // Include folded rows, so the next concern can be reached with repeated `x`.
+      const expanded = new Set(files.map((f) => f.path));
+      const all = buildRows(commit, files, expanded, new Set(), new Set(), reviewed, flags, ignored, false);
+      // Notes precede their hunk's lines. Start after the resolved concerns' note
+      // rows, so resolving lines 1–2 advances to the note about line 3.
+      const lastResolved = selected.reduce((at, flag) => {
+        const target = rowForFlag(all, flag);
+        return target ? Math.max(at, all.indexOf(target)) : at;
+      }, -1);
+      const here = lastResolved >= 0 ? lastResolved : all.findIndex((r) => r.key === row?.key);
+      const remaining = store.flags.map((flag) => {
+        const target = rowForFlag(all, flag);
+        return { flag, at: target ? all.indexOf(target) : -1 };
+      }).filter(({ at }) => at >= 0).sort((a, b) => a.at - b.at);
+      const next = remaining.find(({ at }) => at >= here) ?? remaining[0];
+      if (next) {
+        const after = buildRows(commit, files, expanded, new Set(), new Set(), store.reviewed, store.flags, store.ignored, false);
+        const nextRow = rowForFlag(after, next.flag);
+        if (nextRow) {
+          const state = useRepoStore.getState();
+          state.setFolds(reveal(state, nextRow));
+          setSeekKey(nextRow.key);
+        }
+      }
+    } finally {
+      resolving.current = false;
+    }
+  };
+  useEffect(() => setResolveHandler("diff", () => { void doResolve(); }));
+
   const doFlag = () => {
     const scope = targetScope();
     if (!scope) return;
@@ -1175,6 +1256,7 @@ export default function DiffBuffer() {
     },
     review: doReview,
     flag: doFlag,
+    resolve: () => { void doResolve(); },
     ignore: doIgnore,
     unmark: doUnmark,
     swiper: startSwiper,

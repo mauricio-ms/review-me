@@ -396,6 +396,28 @@ under the first hunk it touches (or under the file row, a whole-file note first)
 commit's as a `commitNote` row under the commit; a note row's scope is its flag's
 target, so `u` there (or on the commit row) asks, then takes it.
 
+`x` / `M-x resolve` works in the diff and log through `lib/resolve-flags.ts`'s
+registered buffer handlers. Every resolution uses the existing minibuffer `confirm`:
+`y` applies it; `n` / `ESC` / `C-g` cancels with the visual selection intact; `RET`
+does not confirm. Diff note rows target their exact flag, file rows every flag on
+the path, hunks/lines/selections overlapping same-side ranges. Success clears visual
+mode and reveals the next remaining concern, including folded files.
+
+The log's `v` / `V` selects whole commit rows; all motions extend the range, and
+`ESC` / `C-g` cancels. Its anchor and cursor use oids, so paging and prepending
+history keep the same endpoints. A different repo/ref/base or a missing endpoint
+clears selection. `x` targets the cursor's commit or the selected commits; it reads
+their exact flags via `flags_for_commits` before asking, with counts in the prompt.
+Success clears selection and refreshes the affected log badges and active tags.
+
+`tags::resolve_flags` validates a batch of `{scope, id}` identities before a single
+write, moving active flags into `resolvedFlags` (flattened original flag plus
+`resolvedAt`). Legacy stores default this array to empty; `load` scope-filters it
+without re-anchoring history. Unmark/re-flag/clear affect active marks and preserve
+the archive. Only active flags affect coverage or exports. There is no undo command.
+The resolution command refreshes commit documents through `notes::sync_commits`,
+which opens the repo once and rewrites the shared notes index once per batch.
+
 `notes.rs` exports them as Markdown, a **projection** never read back: every command
 that can change a commit's flags (`add_flag_tag`, `set_flag_note`, `remove_tag`,
 `clear_tags`, `unmark_range`) calls `commands.rs`'s `sync_notes`, which rewrites
@@ -812,9 +834,10 @@ clears the history whenever the comparison (or its revision) changes.
 Logic is unit-tested in Rust against `tempfile` git fixtures (`diff`, `tags`, `commits`,
 `coverage`, `notes`, `review_dir`, `fuzzy`, `tree`, `xref` (Java and `js`), `repo_library`,
 `generated`), and
-`counterpart`'s ranking over plain path lists. Markdown layout and interaction have browser
-regressions in `npm run test:markdown` (requires Chromium); other UI/interaction has no
-automated or written test plan.
+`counterpart`'s ranking over plain path lists. Browser regressions (requires Chromium)
+run through `npm run test:markdown` for CodeMirror layout and `npm run test:resolve`
+for visual commit selection, confirmation/cancellation, scoped batches, failure paths,
+and diff selection/navigation, with mocked Tauri IPC.
 
 `xref`'s two- and three-file fixtures are too small to catch resolution bugs that only
 appear across packages, so `xref_validate.rs` runs the resolver over a realistic

@@ -22,6 +22,7 @@ import { applyComparison, refreshDiff } from "../lib/open-repo";
 import { resizeTree, revealFile, toggleChangedOnly, toggleTree } from "../lib/project";
 import { flagHere, gotoFileToReview } from "../lib/project-review";
 import { ignoreGeneratedFiles } from "../lib/review-actions";
+import { resolveAtCursor } from "../lib/resolve-flags";
 import { adjustTextScale } from "../lib/text-scale";
 import { versionLine } from "../lib/version";
 import {
@@ -62,6 +63,7 @@ export type CommandId =
   | "refresh"
   | "diff-mode"
   | "flag"
+  | "resolve"
   | "note"
   | "note-file"
   | "note-commit"
@@ -425,6 +427,17 @@ export function useCommands(close: CommandClose): {
       buffer: "project",
       enabled: !!openPath,
       run: handleProjectFlag,
+    },
+    {
+      id: "resolve",
+      name: "resolve",
+      aliases: ["resolve-flags"],
+      label: "resolve flags at the cursor or in the visual selection (asks first)",
+      enabled: !!repo && (activeBuffer === "diff" || activeBuffer === "log"),
+      run: () => {
+        close({ restoreFocus: false });
+        resolveAtCursor();
+      },
     },
     {
       id: "note",

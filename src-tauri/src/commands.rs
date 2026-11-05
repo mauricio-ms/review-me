@@ -15,7 +15,7 @@ use crate::revision::{self, ProjectSource};
 use crate::review_commit::{
     self, PreparedReviewedCommit, ReviewedCommitPreflight, ReviewedCommitResult,
 };
-use crate::tags::{self, AnchorKind, AnchorSide, ReviewScope, TagStore};
+use crate::tags::{self, AnchorKind, AnchorSide, FlagRef, FlagTag, ReviewScope, TagStore};
 use crate::tree::{self, TreeListing};
 use crate::xref::{self, Audit, IndexStats, Occurrences, SymbolRef, XrefResult};
 
@@ -139,6 +139,27 @@ pub fn read_file(repo: String, source: ProjectSource, path: String) -> AppResult
 #[tauri::command]
 pub fn load_tags(repo: String, scope: ReviewScope) -> AppResult<TagStore> {
     tags::load(&repo_root(repo)?, &scope)
+}
+
+#[tauri::command]
+pub fn flags_for_commits(repo: String, oids: Vec<String>) -> AppResult<Vec<FlagTag>> {
+    tags::flags_for_commits(&repo_root(repo)?, &oids)
+}
+
+#[tauri::command]
+pub fn resolve_flags(repo: String, scope: ReviewScope, flags: Vec<FlagRef>) -> AppResult<TagStore> {
+    let root = repo_root(repo)?;
+    tags::resolve_flags(&root, &flags)?;
+    let oids: std::collections::BTreeSet<_> = flags.iter().filter_map(|f| match &f.scope {
+        ReviewScope::Commit { oid } => Some(oid.as_str()),
+        _ => None,
+    }).collect();
+    if !oids.is_empty() {
+        if let Err(error) = notes::sync_commits(&root, &oids.into_iter().collect::<Vec<_>>()) {
+            eprintln!("failed to export notes after resolving flags: {error}");
+        }
+    }
+    tags::load(&root, &scope)
 }
 
 #[tauri::command]
