@@ -21,6 +21,7 @@ minibuffer here (see "Commands and keys" below).
 ```bash
 npm run tauri dev          # run the desktop app (Vite on :1420 + Tauri window; needs a display)
 npm run build              # frontend gate: tsc (strict) THEN vite build — run before committing FE
+npm run test:frontend      # frontend tests, including application/test TypeScript checks
 cd src-tauri && cargo test # backend tests (all logic modules have unit tests w/ tempfile fixtures)
 cd src-tauri && cargo test diff::tests::marks_staged_files   # single test
 cd src-tauri && cargo check                                  # fast backend typecheck
@@ -835,64 +836,116 @@ clears the history whenever the comparison (or its revision) changes.
 
 ## Testing
 
-Backend integration fixtures live in `src-tauri/src/test_support.rs`. Additional
-regressions exercise command-level note generation, corrupt/failed persistence,
-filesystem boundaries and reviewed-commit recovery. Use temporary repositories and
-local Git configuration; do not change process-wide Git or HOME environment variables
-inside parallel tests. `prepare_with` accepts a storage callback so tests can fail
-preparation persistence deterministically after staging and verify rollback.
+### Required coverage
 
-Reviewed-commit preparation persists its HEAD, branch, index tree, selected tag ids
-and eventual commit oid in the worktree Git directory's `review-me-prepared.json`.
-Commit/abort validate that snapshot; failed preparation restores only index bytes it
-still owns. Recording the commit oid before moving the ref makes cleanup retries
-idempotent across restarts. A later commit preflight also finishes pending cleanup.
-`storage.rs` atomically replaces JSON state using a temporary file in the destination
-directory; `tempfile` is a runtime dependency as well as a fixture helper.
+**Frontend and backend behavioral changes must include automated tests in the affected
+layer.** New features need tests for their observable behavior; bug fixes need a
+regression that reproduces the failure before the fix. Changes spanning Tauri IPC,
+shared payloads, review scopes or revision selection require tests on both sides.
+Frontend IPC mocks do not replace backend integration tests, and Rust tests do not
+replace browser tests for interaction, rendering or focus.
 
-`npm run test:frontend` type-checks application and test sources, then runs all frontend
-suites through `scripts/browser-tests.mjs` (Vite + Chromium, real browser time, an
-ephemeral loopback server and isolated profiles; `CHROME_BIN` overrides Chromium).
-`tests/support.ts` provides assertions, lifecycle hooks, condition waits, deferred
-promises and a strict IPC mock; `tests/fixtures.ts` provides domain fixtures and store
-reset. Mock the IPC boundary, use real application logic/stores, and wait on observable
-conditions. Keep async regressions deterministic by resolving deferred replies in the
-order the scenario needs. Uncaught errors and unexpected IPC fail tests even if the
-application catches an unexpected background call.
+Test meaningful outcomes and invariants with explicit expected results. Cover relevant
+failure paths and boundaries as well as success; do not mirror the implementation,
+reproduce its algorithm in a mock, or rely on large DOM snapshots. Reuse the existing
+suites and fixtures. Documentation-only changes need a document/diff check, without
+new runtime tests.
 
-Additional suites: `test:coverage` (review classification/progress, not instrumentation),
-`test:algorithms` (word diffs, change blocks, trees and revision selection),
-`test:navigation` (window layouts, buffers, previews and history), `test:loading`
-(comparison/file reads and stale responses), `test:keyboard` (dispatch and Vim),
-`test:review` (review actions, notes, prompts, focus and pending writes).
+### Frontend tests
 
-Logic is unit-tested in Rust against `tempfile` git fixtures (`diff`, `tags`, `commits`,
-`coverage`, `notes`, `review_dir`, `fuzzy`, `tree`, `xref` (Java and `js`), `repo_library`,
-`generated`), and
-`counterpart`'s ranking over plain path lists. Browser regressions (requires Chromium)
-run through `npm run test:jsdoc` for documentation tokens, embedded languages and highlighting,
-`npm run test:markdown` for CodeMirror layout, and `npm run test:resolve`
-for visual commit selection, confirmation/cancellation, scoped batches, failure paths,
-and diff selection/navigation, with mocked Tauri IPC.
+Use `tests/support.ts` (assertions, lifecycle hooks, condition waits, deferred promises,
+strict IPC mocks) and `tests/fixtures.ts` (domain fixtures and store reset).
 
-`xref`'s two- and three-file fixtures are too small to catch resolution bugs that only
-appear across packages, so `xref_validate.rs` runs the resolver over a realistic
-multi-package project — 52 assertions covering every tier plus the residue. Build it with
-`./scripts/make-java-sample.sh` (the tree is gitignored), then run
-`cargo test --lib xref_validate -- --ignored --nocapture`. The test is opt-in and
-requires a valid, nonempty fixture. It's also the fixture to open in the app for
-hand-testing `M-.`/`M-,`/`M-?`.
+- Exercise pure functions and Zustand stores directly for review classification,
+  progress, diff algorithms, tree ordering and navigation state.
+- Mount real React/CodeMirror components for user workflows. Exercise keys, clicks,
+  selection, rendering and actual focus, and check the resulting state and IPC scope.
+- Mock only the Tauri boundary. Configure every expected command explicitly;
+  unexpected IPC, uncaught browser errors and empty suites must fail the run.
+- Use controlled promises to test replies finishing out of order. Check that late
+  successes and failures cannot overwrite a newer repository, comparison, revision,
+  preview or edit. Include cancellation and write failure cases where relevant.
+- Wait for observable DOM/state conditions rather than fixed delays. Reset stores and
+  mocks, close requests, unmount components and destroy/unregister editor views between
+  tests so a test cannot depend on the previous one's state.
+- For keyboard/editor changes, cover prefix cancellation and scope ownership, Vim
+  insert-mode coexistence, and focus transfer/restoration as applicable.
 
-The JavaScript/TypeScript resolver is validated the same way against real projects —
-Vue core, Next commerce, shadcn/ui, SvelteKit and Angular realworld, Nuxt movies, vitesse,
-Starlight, Express, Bootstrap — pinned to the commits it was measured on:
-`./scripts/make-frontend-samples.sh` fetches them into the gitignored `sample-frontend/`, and
-`cargo test --lib xref::js::validate -- --ignored --nocapture` (ignored by default: about a
-minute) asserts each one's unresolved imports and undecided-name share haven't grown. A
-change that moves those numbers moves the thresholds in `js/validate.rs` with it, on purpose.
-Explicit validation requires every sample to be a Git repository with source files
-and imports; missing or empty samples fail rather than silently shrinking the run.
+`scripts/browser-tests.mjs` runs Vite + headless Chromium with real browser time, an
+ephemeral loopback server and isolated profiles. Preserve real layout/focus behavior;
+`CHROME_BIN` overrides the browser executable. Register new suites in `test:frontend`
+and keep their TypeScript included in `tsconfig.tests.json`.
 
-**`xref`'s symbol index is a process-global `Mutex`**, so any test that builds one must
-hold `xref::TEST_LOCK` for its whole body — otherwise parallel tests clobber each
-other's fixture and fail in ways that vanish under a `cargo test <filter>`.
+Existing suites: `test:coverage` (review classification/progress, not code-coverage
+instrumentation), `test:algorithms`, `test:navigation`, `test:loading`, `test:keyboard`,
+`test:review`, `test:jsdoc` (documentation highlighting), `test:markdown` (layout and
+navigation), and `test:resolve` (flag selection, confirmation and resolution).
+
+### Backend tests
+
+Use real Rust feature modules and temporary Git/filesystem fixtures. Shared helpers
+live in `src-tauri/src/test_support.rs`; pure logic such as counterpart ranking can use
+plain data. Use local Git configuration, never the user's repositories or persisted
+review state. Do not change process-wide Git or HOME environment variables inside
+parallel tests.
+
+- Test feature logic and the command composition that makes it observable. Changes to
+  note mutations/exports must exercise the actual `commands.rs` functions through
+  creation, editing, removal/resolution and export updates, as applicable.
+- For Git writes, assert the committed tree, HEAD/branch, index, worktree bytes and
+  surviving marks as relevant. Cover existing staging, external changes between
+  prepare/commit/abort, rejected operations and preservation of unrelated work.
+- For persistence, cover malformed/truncated JSON and failed saves without losing the
+  previous data. Use deterministic failures or narrow injected storage callbacks
+  (`prepare_with`) to test rollback, partial success, retry and restart recovery.
+- For file access and browsing, cover invalid/missing paths, repository boundaries,
+  symlinks, invalid text encodings and existing destinations as applicable. Tests must
+  leave files outside their temporary fixtures untouched.
+- Verify comparison/scope isolation: operations using one scope must not remove or
+  return another scope's marks, even when paths, ranges or supplied IDs overlap.
+
+**`xref`'s symbol index is a process-global `Mutex`.** Any test that builds or queries
+the shared index must hold `xref::TEST_LOCK` for its entire body. A filtered test passing
+alone is insufficient; the complete suite must also pass with normal parallelism.
+
+Reviewed-commit preparation persists its HEAD, branch, index tree, tag ids and eventual
+commit oid in the worktree Git directory's `review-me-prepared.json`. Keep tests for
+snapshot validation, rollback that preserves newer staging, and cleanup retries across
+restarts. A later commit preflight also finishes pending cleanup. `storage.rs` atomically
+replaces JSON using a temporary file in the destination directory; preserve tests for
+failed writes and the previous contents.
+
+### Required validation
+
+Before reporting a behavioral change complete or committing it, run both full suites:
+
+```bash
+npm run test:frontend
+(cd src-tauri && cargo test --locked)
+```
+
+For frontend changes, also run `npm run build`. It checks strict application TypeScript
+and the production bundle; it does not replace the tests. `test:frontend` additionally
+type-checks the test sources. Run targeted tests during development, then the full
+suites to catch shared state and integration regressions.
+
+Resolver, import/configuration or indexed-revision changes also require the affected
+large-fixture validation. Set up the fixtures from the project root when needed:
+
+```bash
+./scripts/make-java-sample.sh
+(cd src-tauri && cargo test --locked --lib xref_validate -- --ignored --nocapture)
+./scripts/make-frontend-samples.sh
+(cd src-tauri && cargo test --locked --lib xref::js::validate::validate -- --ignored --nocapture)
+```
+
+The Java fixture exercises a multi-package project. The JavaScript/TypeScript fixtures
+are pinned Vue core, Next commerce, shadcn/ui, SvelteKit, Angular realworld, Nuxt movies,
+vitesse, Starlight, Express and Bootstrap repositories. Explicit validation must fail
+on missing or empty fixtures. Do not silently skip samples or loosen thresholds just
+to make a run pass; intentional changes to resolver baselines need measured results
+and an explanation. The environment-driven xref audit helpers are diagnostic tools.
+
+Report the checks actually run, their results, and any ignored or blocked checks.
+Never describe an unrun or fixture-skipped check as passing. If the environment blocks
+a required check, state the exact blocker instead of weakening the test or hiding it.
