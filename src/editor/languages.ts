@@ -30,7 +30,21 @@ const extra = [
   }),
 ];
 
-export const languages: readonly LanguageDescription[] = [...extra, ...builtin];
+// These languages already load the JavaScript grammar, directly or through HTML.
+// Mark its data facet so the viewer can distinguish JSDoc from other languages'
+// block comments, including when only its parser is mounted in a Markdown fence.
+const withJSDoc = new Set(["JavaScript", "JSX", "TypeScript", "TSX", "HTML", "Vue", "Svelte", "Astro", "Markdown"]);
+export const languages: readonly LanguageDescription[] = [...extra, ...builtin].map((desc) =>
+  !withJSDoc.has(desc.name) ? desc : LanguageDescription.of({
+    name: desc.name, alias: desc.alias, extensions: desc.extensions, filename: desc.filename,
+    async load() {
+      const [support, { javascriptLanguage }] = await Promise.all([
+        desc.load(), import("@codemirror/lang-javascript"),
+      ]);
+      return new LanguageSupport(support.language, [support.support, javascriptLanguage.data.of({ jsdoc: true })]);
+    },
+  }),
+);
 
 async function astro(): Promise<LanguageSupport> {
   const [{ htmlLanguage, html }, { tsxLanguage, typescriptLanguage }] = await Promise.all([

@@ -82,6 +82,12 @@ const gruberDarkerEditorTheme = EditorView.theme(
       backgroundColor: c.niagara2,
       boxShadow: `inset 0 -1px ${c.niagara1}`,
     },
+    // Documentation marks wrap the grammar's ordinary comment spans.
+    ".cm-jsdoc, .cm-jsdoc *": { color: c.green },
+    ".cm-jsdoc-tag, .cm-jsdoc-tag *": { color: c.yellow, fontWeight: "bold" },
+    ".cm-jsdoc-type, .cm-jsdoc-type *": { color: c.quartz },
+    ".cm-jsdoc-name, .cm-jsdoc-name *": { color: c.fg1 },
+    ".cm-jsdoc-link, .cm-jsdoc-link *": { color: c.niagara, textDecoration: "underline" },
     // Swiper: every match in view, the selected line, and the matches on it.
     ".cm-line.cm-swiper-line, .cm-diff-removed-line.cm-swiper-line": {
       backgroundColor: c.bg2,

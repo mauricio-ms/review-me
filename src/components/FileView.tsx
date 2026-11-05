@@ -10,6 +10,7 @@ import { swallowColonKeymap, vimEscapeKeymap, vimNavKeymap } from "../editor/cm-
 import { diffMarks, setDeletedFile, setDiffMarks } from "../editor/diff-marks";
 import { flagDecorations, setFlagLines } from "../editor/flag-decorations";
 import { gruberDarkerTheme } from "../editor/gruber-darker";
+import { jsdocHighlight } from "../editor/jsdoc";
 import { languages } from "../editor/languages";
 import { markdownView } from "../editor/markdown-view";
 import { occurrenceHighlight } from "../editor/occurrences";
@@ -219,6 +220,7 @@ export default function FileView({ win, bufferId }: { win: WindowId; bufferId: F
       occurrences,
       swiperHighlight,
       tracker,
+      jsdocHighlight,
       EditorState.readOnly.of(true),
       EditorView.lineWrapping,
     ];

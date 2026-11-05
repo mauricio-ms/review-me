@@ -560,6 +560,11 @@ shows all files in the tree. **`C-x v w` / `M-x diffmode`** independently toggle
 emphasis on visible changed text. That setting is shared with the diff buffer and survives
 switching files and comparisons during the session.
 
+JSDoc comments in JavaScript and TypeScript distinguish documentation text, tags such as
+`@param`, type expressions, parameter names and inline `{@link …}` references. The same
+highlighting applies inside HTML, Vue and Svelte scripts, Astro frontmatter and expressions,
+and JavaScript/TypeScript code fences in Markdown.
+
 A strip at the viewer's right edge, beside the scrollbar, maps the whole file: each change
 in its gutter sign's colour, flags in amber, the part on screen as a band and the cursor as
 a line, so a change out of sight still shows. Click a mark to go to that change, or

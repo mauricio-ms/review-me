@@ -305,6 +305,10 @@ highlighting lazy-loaded by extension via `@codemirror/language-data`, which
 mixed over the frontmatter and each `{…}` by `parseMixed` overlays — and overrides for
 Markdown: GitHub's flavour (tables, task lists, strikethrough) with fenced code highlighted
 in its own language, where language-data's is bare CommonMark).
+`editor/jsdoc.ts` adds JSDoc marks over real JS/TS block comments. Language loaders mark
+the JavaScript data facet with `jsdoc: true`; the view plugin follows mounted trees and
+overlays, masks excluded ranges (such as Markdown quote prefixes), and decorates only
+visible ranges. Keep its styles before Swiper's current-match styles so search wins.
 
 **One row ≠ one visual line.** Line content wraps (`pre-wrap` + `overflow-wrap: anywhere`
 in `styles.css`) rather than truncating, so a row can be several lines tall: keep gutters
@@ -835,7 +839,8 @@ Logic is unit-tested in Rust against `tempfile` git fixtures (`diff`, `tags`, `c
 `coverage`, `notes`, `review_dir`, `fuzzy`, `tree`, `xref` (Java and `js`), `repo_library`,
 `generated`), and
 `counterpart`'s ranking over plain path lists. Browser regressions (requires Chromium)
-run through `npm run test:markdown` for CodeMirror layout and `npm run test:resolve`
+run through `npm run test:jsdoc` for documentation tokens, embedded languages and highlighting,
+`npm run test:markdown` for CodeMirror layout, and `npm run test:resolve`
 for visual commit selection, confirmation/cancellation, scoped batches, failure paths,
 and diff selection/navigation, with mocked Tauri IPC.
 

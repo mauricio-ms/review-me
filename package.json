@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "test:jsdoc": "node scripts/test-jsdoc.mjs",
     "test:markdown": "node scripts/test-markdown.mjs",
     "test:resolve": "node scripts/test-resolve.mjs",
     "preview": "vite preview",
