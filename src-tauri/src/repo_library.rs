@@ -37,6 +37,10 @@ pub fn remember(app: &tauri::AppHandle, repo_path: &Path) -> AppResult<Vec<Remem
 
 pub fn forget(app: &tauri::AppHandle, repo_path: &Path) -> AppResult<Vec<RememberedRepo>> {
     let path = library_path(app)?;
+    forget_in_file(&path, repo_path)
+}
+
+fn forget_in_file(path: &Path, repo_path: &Path) -> AppResult<Vec<RememberedRepo>> {
     let mut library = read_library(&path)?;
     let normalized = normalize(repo_path);
     library
@@ -92,8 +96,7 @@ fn write_library(path: &Path, library: &RepoLibrary) -> AppResult<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(path, serde_json::to_string_pretty(library)?)?;
-    Ok(())
+    crate::storage::write(path, &serde_json::to_vec_pretty(library)?)
 }
 
 fn normalize(path: &Path) -> String {
@@ -152,5 +155,74 @@ mod tests {
         let repos = remember_in_file(&library, Path::new("/tmp/one"), 20).unwrap();
         assert_eq!(repos.len(), 1);
         assert_eq!(repos[0].last_opened_at, 20);
+    }
+
+    #[test]
+    fn forgetting_an_entry_preserves_the_other_repositories_and_is_idempotent() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("library.json");
+        let one = dir.path().join("one");
+        let two = dir.path().join("two");
+        remember_in_file(&path, &one, 10).unwrap();
+        remember_in_file(&path, &two, 20).unwrap();
+        let repos = forget_in_file(&path, &one).unwrap();
+        assert_eq!(repos.len(), 1);
+        assert_eq!(repos[0].name, "two");
+        let before = std::fs::read(&path).unwrap();
+        forget_in_file(&path, &one).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        assert_eq!(read_library(&path).unwrap().repos.len(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlink_and_canonical_paths_identify_the_same_recent_repository() {
+        use std::os::unix::fs::symlink;
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().join("project");
+        std::fs::create_dir(&repo).unwrap();
+        let alias = dir.path().join("alias");
+        symlink(&repo, &alias).unwrap();
+        let path = dir.path().join("library.json");
+        remember_in_file(&path, &repo, 10).unwrap();
+        let repos = remember_in_file(&path, &alias, 20).unwrap();
+        assert_eq!(repos.len(), 1);
+        assert_eq!(repos[0].path, repo.to_str().unwrap());
+        assert!(forget_in_file(&path, &alias).unwrap().is_empty());
+    }
+
+    #[test]
+    fn absent_and_blank_library_storage_are_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("library.json");
+        assert!(read_library(&path).unwrap().repos.is_empty());
+        std::fs::write(&path, " \n\t").unwrap();
+        assert!(read_library(&path).unwrap().repos.is_empty());
+    }
+
+    #[test]
+    fn corrupt_libraries_are_reported_and_preserved_by_remember_and_forget() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("library.json");
+        for json in ["{", "not JSON", "{\"repos\":42}"] {
+            std::fs::write(&path, json).unwrap();
+            assert!(read_library(&path).is_err());
+            assert!(remember_in_file(&path, Path::new("project"), 10).is_err());
+            assert!(forget_in_file(&path, Path::new("project")).is_err());
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), json);
+        }
+    }
+
+    #[test]
+    fn storage_failures_are_errors_and_equal_timestamps_sort_by_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("library.json");
+        remember_in_file(&path, Path::new("zeta"), 10).unwrap();
+        let repos = remember_in_file(&path, Path::new("Alpha"), 10).unwrap();
+        assert_eq!(repos.iter().map(|repo| repo.name.as_str()).collect::<Vec<_>>(), vec!["Alpha", "zeta"]);
+        let blocker = dir.path().join("blocker");
+        std::fs::write(&blocker, "keep").unwrap();
+        assert!(remember_in_file(&blocker.join("library.json"), Path::new("project"), 10).is_err());
+        assert_eq!(std::fs::read_to_string(blocker).unwrap(), "keep");
     }
 }

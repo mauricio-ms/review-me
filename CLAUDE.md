@@ -835,6 +835,21 @@ clears the history whenever the comparison (or its revision) changes.
 
 ## Testing
 
+Backend integration fixtures live in `src-tauri/src/test_support.rs`. Additional
+regressions exercise command-level note generation, corrupt/failed persistence,
+filesystem boundaries and reviewed-commit recovery. Use temporary repositories and
+local Git configuration; do not change process-wide Git or HOME environment variables
+inside parallel tests. `prepare_with` accepts a storage callback so tests can fail
+preparation persistence deterministically after staging and verify rollback.
+
+Reviewed-commit preparation persists its HEAD, branch, index tree, selected tag ids
+and eventual commit oid in the worktree Git directory's `review-me-prepared.json`.
+Commit/abort validate that snapshot; failed preparation restores only index bytes it
+still owns. Recording the commit oid before moving the ref makes cleanup retries
+idempotent across restarts. A later commit preflight also finishes pending cleanup.
+`storage.rs` atomically replaces JSON state using a temporary file in the destination
+directory; `tempfile` is a runtime dependency as well as a fixture helper.
+
 `npm run test:frontend` type-checks application and test sources, then runs all frontend
 suites through `scripts/browser-tests.mjs` (Vite + Chromium, real browser time, an
 ephemeral loopback server and isolated profiles; `CHROME_BIN` overrides Chromium).
@@ -863,8 +878,10 @@ and diff selection/navigation, with mocked Tauri IPC.
 `xref`'s two- and three-file fixtures are too small to catch resolution bugs that only
 appear across packages, so `xref_validate.rs` runs the resolver over a realistic
 multi-package project — 52 assertions covering every tier plus the residue. Build it with
-`./scripts/make-java-sample.sh` (the tree is gitignored); the test skips loudly without
-it. It's also the fixture to open in the app for hand-testing `M-.`/`M-,`/`M-?`.
+`./scripts/make-java-sample.sh` (the tree is gitignored), then run
+`cargo test --lib xref_validate -- --ignored --nocapture`. The test is opt-in and
+requires a valid, nonempty fixture. It's also the fixture to open in the app for
+hand-testing `M-.`/`M-,`/`M-?`.
 
 The JavaScript/TypeScript resolver is validated the same way against real projects —
 Vue core, Next commerce, shadcn/ui, SvelteKit and Angular realworld, Nuxt movies, vitesse,
@@ -873,6 +890,8 @@ Starlight, Express, Bootstrap — pinned to the commits it was measured on:
 `cargo test --lib xref::js::validate -- --ignored --nocapture` (ignored by default: about a
 minute) asserts each one's unresolved imports and undecided-name share haven't grown. A
 change that moves those numbers moves the thresholds in `js/validate.rs` with it, on purpose.
+Explicit validation requires every sample to be a Git repository with source files
+and imports; missing or empty samples fail rather than silently shrinking the run.
 
 **`xref`'s symbol index is a process-global `Mutex`**, so any test that builds one must
 hold `xref::TEST_LOCK` for its whole body — otherwise parallel tests clobber each

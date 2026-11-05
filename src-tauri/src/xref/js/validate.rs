@@ -8,7 +8,7 @@
 //! Each sample's imports must resolve as well as they did — the ones left are files
 //! the revision doesn't have (generated, a submodule) — and no more of its names may
 //! come out undecided than did. Ignored by default: it parses tens of thousands of
-//! files. Skips loudly when `sample-frontend/` is absent.
+//! files. Once requested, every sample is required and empty samples fail validation.
 
 use std::path::Path;
 
@@ -67,25 +67,28 @@ pub(super) fn tally_names(index: &JsIndex) -> [u32; 4] {
 }
 
 #[test]
-#[ignore]
+#[ignore = "requires ./scripts/make-frontend-samples.sh"]
 fn validate() {
     let samples = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().join("sample-frontend");
-    if !samples.is_dir() {
-        eprintln!("SKIPPED: sample-frontend/ is missing — run ./scripts/make-frontend-samples.sh");
-        return;
-    }
+    validate_samples(&samples).unwrap();
+}
+
+fn validate_samples(samples: &Path) -> Result<(), String> {
+    // Check the whole fixture set before doing any expensive resolver work.
+    let repos = SAMPLES.iter().map(|sample| {
+        crate::test_support::required_sample(&samples.join(sample.name), "./scripts/make-frontend-samples.sh")
+            .map(|repo| (sample, repo))
+    }).collect::<Result<Vec<_>, _>>()?;
     let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mut failures = Vec::new();
-    for sample in SAMPLES {
-        let path = samples.join(sample.name);
-        let Ok(repo) = Repository::open(&path) else {
-            eprintln!("SKIPPED {}: not fetched", sample.name);
-            continue;
-        };
-        let root = crate::repo::root(&repo).unwrap();
-        let files = crate::fuzzy::repo_files(&repo, &ProjectSource::Worktree).unwrap();
-        let index = JsIndex::build(&repo, &root, &ProjectSource::Worktree, &files).unwrap();
+    for (sample, repo) in repos {
+        let root = crate::repo::root(&repo).map_err(|e| e.to_string())?;
+        let files = crate::fuzzy::repo_files(&repo, &ProjectSource::Worktree).map_err(|e| e.to_string())?;
+        let index = JsIndex::build(&repo, &root, &ProjectSource::Worktree, &files).map_err(|e| e.to_string())?;
         let audit = audit_index(&index);
+        if audit.files == 0 || audit.imports == 0 {
+            return Err(format!("{} contains no source files or imports; rebuild the sample fixtures", sample.name));
+        }
         let unresolved = audit.unresolved.len() as u32;
         let mut line = format!(
             "{:20} {:5} files {:6} imports: {:5} unresolved (≤ {})",
@@ -105,5 +108,20 @@ fn validate() {
         }
         eprintln!("{line}");
     }
-    assert!(failures.is_empty(), "resolution got worse:\n{}", failures.join("\n"));
+    if failures.is_empty() { Ok(()) } else { Err(format!("resolution got worse:\n{}", failures.join("\n"))) }
+}
+
+#[test]
+fn missing_samples_fail_instead_of_reporting_success() {
+    let dir = tempfile::tempdir().unwrap();
+    let error = validate_samples(dir.path()).unwrap_err();
+    assert!(error.contains("required sample"));
+    assert!(error.contains("make-frontend-samples.sh"));
+}
+
+#[test]
+fn empty_sample_repositories_fail_instead_of_reporting_zero_unresolved_imports() {
+    let dir = tempfile::tempdir().unwrap();
+    for sample in SAMPLES { Repository::init(dir.path().join(sample.name)).unwrap(); }
+    assert!(validate_samples(dir.path()).unwrap_err().contains("no source files or imports"));
 }

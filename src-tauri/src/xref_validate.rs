@@ -2,23 +2,20 @@
 //! project, complementing the two- and three-file fixtures in `xref::tests`.
 //!
 //!     ./scripts/make-java-sample.sh          # build the fixture (gitignored)
-//!     cargo test --lib xref_validate -- --nocapture
+//!     cargo test --lib xref_validate -- --ignored --nocapture
 //!
-//! Skips when `sample-java/` is absent, so a fresh clone still runs `cargo test`
-//! clean — run the script above to actually exercise it.
+//! Opt-in because its fixture is generated locally. Once requested, validation
+//! fails if `sample-java/` is absent or invalid.
 
 use std::path::{Path, PathBuf};
-
-use git2::Repository;
 
 use crate::revision::ProjectSource;
 use crate::xref;
 
-fn sample_root() -> Option<PathBuf> {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()?
-        .join("sample-java");
-    root.is_dir().then(|| root.canonicalize().unwrap())
+fn sample_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent().unwrap()
+        .join("sample-java")
 }
 
 fn java_files(root: &Path) -> Vec<String> {
@@ -89,19 +86,16 @@ struct Case {
 }
 
 #[test]
+#[ignore = "requires ./scripts/make-java-sample.sh"]
 fn validate() {
     // Shares `xref`'s serialising lock: the symbol index is process-global, so this
     // must not run alongside the unit tests building their own fixtures.
     let _lock = xref::TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
-    let Some(root) = sample_root() else {
-        eprintln!(
-            "SKIPPED: sample-java/ is missing — run ./scripts/make-java-sample.sh to build it"
-        );
-        return;
-    };
-    let repo = Repository::open(&root).unwrap();
+    let repo = crate::test_support::required_sample(&sample_root(), "./scripts/make-java-sample.sh").unwrap();
+    let root = crate::repo::root(&repo).unwrap();
     let files = java_files(&root);
+    assert!(!files.is_empty(), "sample-java contains no Java files; rebuild it with ./scripts/make-java-sample.sh");
     let src = ProjectSource::Worktree;
 
     let stats = xref::build_index(&repo, &root, &src, &files).unwrap();

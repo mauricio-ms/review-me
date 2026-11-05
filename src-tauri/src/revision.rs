@@ -225,4 +225,63 @@ mod tests {
             .unwrap()
             .contains(&"src/untracked.txt".to_string()));
     }
+
+    #[test]
+    fn worktree_reads_reject_paths_outside_the_repository() {
+        let fixture = crate::test_support::TestRepo::new();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("secret.txt"), "outside").unwrap();
+        let path = outside.path().join("secret.txt");
+        // root.join must not allow an absolute path to bypass the boundary check.
+        let error = read_file(&fixture.repo, &ProjectSource::Worktree, fixture.path(), path.to_str().unwrap()).unwrap_err();
+        assert!(error.to_string().contains("path escapes the repository"));
+        let parent = fixture.path().parent().unwrap();
+        let sibling = tempfile::Builder::new().prefix("read-boundary-").tempfile_in(parent).unwrap();
+        let rel = format!("../{}", sibling.path().file_name().unwrap().to_str().unwrap());
+        assert!(read_file(&fixture.repo, &ProjectSource::Worktree, fixture.path(), &rel).unwrap_err().to_string().contains("path escapes the repository"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn worktree_reads_allow_internal_symlinks_and_reject_external_ones() {
+        use std::os::unix::fs::symlink;
+        let fixture = crate::test_support::TestRepo::new();
+        fixture.write("inside.txt", "inside");
+        let outside = tempfile::NamedTempFile::new().unwrap();
+        symlink("inside.txt", fixture.path().join("internal")).unwrap();
+        symlink(outside.path(), fixture.path().join("external")).unwrap();
+        assert_eq!(read_file(&fixture.repo, &ProjectSource::Worktree, fixture.path(), "internal").unwrap(), "inside");
+        assert!(read_file(&fixture.repo, &ProjectSource::Worktree, fixture.path(), "external").unwrap_err().to_string().contains("path escapes the repository"));
+    }
+
+    #[test]
+    fn invalid_utf8_is_an_error_for_both_worktree_and_committed_reads() {
+        let fixture = crate::test_support::TestRepo::new();
+        fixture.write("binary.dat", [0xff, 0xfe, 0x80]);
+        let oid = fixture.commit("invalid UTF-8");
+        assert!(read_file(&fixture.repo, &ProjectSource::Worktree, fixture.path(), "binary.dat").is_err());
+        let error = read_file(&fixture.repo, &ProjectSource::Commit { oid }, fixture.path(), "binary.dat").unwrap_err();
+        assert!(error.to_string().contains("not valid UTF-8"));
+    }
+
+    #[test]
+    fn invalid_or_unknown_commits_do_not_fall_back_to_the_worktree() {
+        let fixture = crate::test_support::TestRepo::new();
+        fixture.write("file.txt", "must not be returned");
+        for oid in ["bad", "1111111111111111111111111111111111111111"] {
+            assert!(read_file(&fixture.repo, &ProjectSource::Commit { oid: oid.into() }, fixture.path(), "file.txt").is_err());
+        }
+    }
+
+    #[test]
+    fn missing_files_and_directories_cannot_be_read_as_text() {
+        let fixture = crate::test_support::TestRepo::new();
+        fixture.write("dir/file.txt", "text");
+        let source = ProjectSource::Commit { oid: fixture.commit("directory") };
+        for source in [&source, &ProjectSource::Worktree] {
+            for path in ["missing", "dir"] {
+                assert!(read_file(&fixture.repo, source, fixture.path(), path).is_err());
+            }
+        }
+    }
 }

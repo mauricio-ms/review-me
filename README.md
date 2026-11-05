@@ -691,6 +691,29 @@ cd src-tauri && cargo check   # fast backend typecheck
 
 Logic is unit-tested in Rust against temporary git fixtures.
 
+Backend regressions cover commit preparation/recovery, tag persistence, command-driven
+note exports, filesystem browsing, revision reads and the recent-repository library.
+Failed preparation restores the original index when it is still safe to do so;
+commit and abort reject a different HEAD, branch or staged tree. Preparation records
+live in the worktree's Git directory as `review-me-prepared.json`. If a Git commit
+succeeds but clearing its review marks fails, the error identifies that commit.
+After repairing storage, retrying or reopening the commit dialog finishes cleanup
+without creating another commit. Tag and recent-repository JSON files are replaced
+atomically after their complete contents have been written.
+
+Resolver validation against larger local projects is opt-in. From the project root:
+
+```bash
+./scripts/make-java-sample.sh
+(cd src-tauri && cargo test --lib xref_validate -- --ignored --nocapture)
+./scripts/make-frontend-samples.sh
+(cd src-tauri && cargo test --lib xref::js::validate::validate -- --ignored --nocapture)
+```
+
+Explicit validation requires its fixtures: missing repositories or empty samples
+fail rather than passing without exercising the resolver. The two environment-driven
+xref audit helpers remain ignored.
+
 Frontend suites use Vite and headless Chromium, with no additional test dependencies.
 Set `CHROME_BIN` if Chromium has a different executable name. The shared runner serves
 each suite on an ephemeral loopback port and uses real browser time so layout and focus

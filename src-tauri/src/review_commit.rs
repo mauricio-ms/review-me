@@ -1,16 +1,20 @@
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use git2::{
     ApplyLocation, ApplyOptions, Delta, Diff, DiffDelta, DiffFindOptions, DiffHunk, DiffOptions,
     Patch, Repository, Tree,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::coverage::{covers, covers_file, file_tagged, names_file, overlaps};
 use crate::error::{AppError, AppResult};
 use crate::repo;
 use crate::tags::{self, AnchorSide, ReviewScope, TagStore};
+
+#[cfg(test)]
+#[path = "review_commit_regression_tests.rs"]
+mod regression_tests;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -35,6 +39,98 @@ pub struct PreparedReviewedCommit {
 pub struct ReviewedCommitResult {
     pub commit: String,
     pub tag_store: TagStore,
+}
+
+/// Kept in this worktree's Git directory so restarting the app cannot lose the
+/// prepared snapshot or turn a tag-cleanup retry into a second Git commit.
+#[derive(Debug, Serialize, Deserialize)]
+struct Preparation {
+    head: Option<String>,
+    head_ref: String,
+    index_tree: String,
+    tag_ids: Vec<String>,
+    commit: Option<String>,
+}
+
+fn preparation_path(repo: &Repository) -> PathBuf {
+    repo.path().join("review-me-prepared.json")
+}
+
+fn load_preparation(repo: &Repository) -> AppResult<Option<Preparation>> {
+    match std::fs::read(preparation_path(repo)) {
+        Ok(bytes) => Ok(Some(serde_json::from_slice(&bytes)?)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn save_preparation(repo: &Repository, state: &Preparation) -> AppResult<()> {
+    crate::storage::write(&preparation_path(repo), &serde_json::to_vec_pretty(state)?)
+}
+
+fn head_identity(repo: &Repository) -> AppResult<(Option<String>, String)> {
+    let head = match repo.head() {
+        Ok(head) => Some(head.peel_to_commit()?.id().to_string()),
+        Err(error)
+            if matches!(
+                error.code(),
+                git2::ErrorCode::UnbornBranch | git2::ErrorCode::NotFound
+            ) =>
+        {
+            None
+        }
+        Err(error) => return Err(error.into()),
+    };
+    let reference = repo.find_reference("HEAD")?;
+    Ok((
+        head,
+        reference.symbolic_target().unwrap_or("HEAD").to_string(),
+    ))
+}
+
+fn index_tree(repo: &Repository) -> AppResult<String> {
+    let mut index = repo.index()?;
+    if repo.path().join("index").exists() {
+        index.read(true)?;
+    }
+    Ok(index.write_tree()?.to_string())
+}
+
+fn verify_preparation(repo: &Repository, state: &Preparation) -> AppResult<()> {
+    let (head, head_ref) = head_identity(repo)?;
+    if head != state.head || head_ref != state.head_ref {
+        return Err(AppError::Repo(
+            "HEAD changed since preparation; review the repository before preparing again".into(),
+        ));
+    }
+    if index_tree(repo)? != state.index_tree {
+        return Err(AppError::Repo(
+            "index changed since preparation; preserve the new staged changes and prepare again"
+                .into(),
+        ));
+    }
+    Ok(())
+}
+
+fn finish_cleanup(
+    repo: &Repository,
+    state: &Preparation,
+    oid: &str,
+) -> AppResult<ReviewedCommitResult> {
+    let root = repo::root(repo)?;
+    let cleanup = || -> AppResult<TagStore> {
+        let store = tags::remove_reviewed_by_ids(&root, &ReviewScope::Worktree, &state.tag_ids)?;
+        std::fs::remove_file(preparation_path(repo))?;
+        Ok(store)
+    };
+    let tag_store = cleanup().map_err(|error| AppError::Repo(format!(
+        "commit {} was created, but review cleanup failed: {error}. Fix the storage problem and retry to finish cleanup; no second commit will be created",
+        short_oid(oid),
+    )))?;
+    Ok(ReviewedCommitResult {
+        commit: short_oid(oid),
+        tag_store,
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -89,6 +185,16 @@ impl Eligibility {
 }
 
 pub fn preflight(repo: &Repository) -> AppResult<ReviewedCommitPreflight> {
+    // Opening the commit dialog after a restart also finishes a previous commit's
+    // cleanup, once its storage problem has been repaired.
+    if let Some(state) = load_preparation(repo)? {
+        let (head, reference) = head_identity(repo)?;
+        if let Some(oid) = &state.commit {
+            if head.as_ref() == Some(oid) && reference == state.head_ref {
+                finish_cleanup(repo, &state, oid)?;
+            }
+        }
+    }
     let root = repo::root(repo)?;
     let head_tree = head_tree(repo)?;
     let staged_paths = staged_paths(repo, head_tree.as_ref())?;
@@ -102,28 +208,69 @@ pub fn preflight(repo: &Repository) -> AppResult<ReviewedCommitPreflight> {
     })
 }
 
-pub fn prepare(
+pub fn prepare(repo: &Repository, unstage_existing: bool) -> AppResult<PreparedReviewedCommit> {
+    prepare_with(repo, unstage_existing, save_preparation)
+}
+
+fn prepare_with(
     repo: &Repository,
     unstage_existing: bool,
+    persist: impl FnOnce(&Repository, &Preparation) -> AppResult<()>,
 ) -> AppResult<PreparedReviewedCommit> {
     let root = repo::root(repo)?;
     let head_tree = head_tree(repo)?;
+    let (head, head_ref) = head_identity(repo)?;
+    if let Some(previous) = load_preparation(repo)? {
+        if previous.commit.is_some() && previous.commit == head {
+            return Err(AppError::Repo(
+                "a commit was already created; retry its review cleanup before preparing another"
+                    .into(),
+            ));
+        }
+    }
     let staged = staged_paths(repo, head_tree.as_ref())?;
     if !staged.is_empty() && !unstage_existing {
         return Err(AppError::Repo(
             "staged changes must be unstaged before committing reviewed content".into(),
         ));
     }
-    if !staged.is_empty() || unstage_existing {
-        unstage_all(repo, head_tree.as_ref())?;
-    }
-
+    // Validate review storage before touching pre-existing staged work.
     let eligibility = reviewed_hunks(repo, &root)?;
-    if !eligibility.hunks.is_empty() {
-        stage_hunks(repo, &eligibility.hunks)?;
-    }
-    if !eligibility.files.is_empty() {
-        stage_files(repo, &eligibility.files)?;
+    let original = read_index_file(repo)?;
+    let mut expected = original.clone();
+    let prepared = (|| -> AppResult<()> {
+        if !staged.is_empty() || unstage_existing {
+            unstage_all(repo, head_tree.as_ref())?;
+            expected = read_index_file(repo)?;
+        }
+        if !eligibility.hunks.is_empty() {
+            stage_hunks(repo, &eligibility.hunks)?;
+            expected = read_index_file(repo)?;
+        }
+        if !eligibility.files.is_empty() {
+            stage_files(repo, &eligibility.files)?;
+            expected = read_index_file(repo)?;
+        }
+        let (now, reference) = head_identity(repo)?;
+        if now != head || reference != head_ref {
+            return Err(AppError::Repo("HEAD changed during preparation".into()));
+        }
+        persist(
+            repo,
+            &Preparation {
+                head,
+                head_ref,
+                index_tree: index_tree(repo)?,
+                tag_ids: eligibility.tag_ids.clone(),
+                commit: None,
+            },
+        )
+    })();
+    if let Err(error) = prepared {
+        // Restore only the index state this preparation last wrote. Another process's
+        // newer staging is never replaced, and its index.lock is never removed.
+        restore_index(repo, original.as_deref(), expected.as_deref())?;
+        return Err(error);
     }
 
     Ok(PreparedReviewedCommit {
@@ -135,8 +282,20 @@ pub fn prepare(
 }
 
 pub fn abort(repo: &Repository) -> AppResult<()> {
+    let Some(state) = load_preparation(repo)? else {
+        return Ok(());
+    };
+    let (head, reference) = head_identity(repo)?;
+    if let Some(oid) = &state.commit {
+        if head.as_ref() == Some(oid) && reference == state.head_ref {
+            return finish_cleanup(repo, &state, oid).map(|_| ());
+        }
+    }
+    verify_preparation(repo, &state)?;
     let head_tree = head_tree(repo)?;
-    unstage_all(repo, head_tree.as_ref())
+    unstage_all(repo, head_tree.as_ref())?;
+    std::fs::remove_file(preparation_path(repo))?;
+    Ok(())
 }
 
 pub fn commit(
@@ -144,30 +303,55 @@ pub fn commit(
     message: &str,
     reviewed_tag_ids: &[String],
 ) -> AppResult<ReviewedCommitResult> {
-    let root = repo::root(repo)?;
     let message = clean_commit_message(message);
     if message.is_empty() {
         return Err(AppError::Repo("commit message is empty".into()));
     }
 
-    let mut index = repo.index()?;
-    let tree_id = index.write_tree()?;
-    let head_commit = repo.head().ok().and_then(|h| h.peel_to_commit().ok());
+    let mut state = load_preparation(repo)?.ok_or_else(|| {
+        AppError::Repo("no prepared reviewed commit; prepare the review first".into())
+    })?;
+    let mut ids = reviewed_tag_ids.to_vec();
+    ids.sort();
+    ids.dedup();
+    if ids != state.tag_ids {
+        return Err(AppError::Repo(
+            "reviewed tag selection changed since preparation".into(),
+        ));
+    }
+    let (head, reference) = head_identity(repo)?;
+    if let Some(oid) = &state.commit {
+        if head.as_ref() == Some(oid) && reference == state.head_ref {
+            return finish_cleanup(repo, &state, oid);
+        }
+    }
+    verify_preparation(repo, &state)?;
+    let tree_id = git2::Oid::from_str(&state.index_tree)?;
+    let tree = repo.find_tree(tree_id)?;
+    let head_commit = state
+        .head
+        .as_ref()
+        .map(|oid| repo.find_commit(git2::Oid::from_str(oid)?))
+        .transpose()?;
     if let Some(parent) = head_commit.as_ref() {
         if parent.tree_id() == tree_id {
             return Err(AppError::Repo("nothing staged to commit".into()));
         }
-    } else if index.is_empty() {
+    } else if tree.is_empty() {
         return Err(AppError::Repo("nothing staged to commit".into()));
     }
 
-    let tree = repo.find_tree(tree_id)?;
-    let signature = repo.signature().map_err(|_| {
-        AppError::Git("git user.name and user.email must be configured".into())
-    })?;
+    let signature = repo
+        .signature()
+        .map_err(|_| AppError::Git("git user.name and user.email must be configured".into()))?;
     let parents = head_commit.iter().collect::<Vec<_>>();
+    // Record the exact commit object before updating HEAD. A retry after a cleanup
+    // failure (or process restart) can recognise it and perform only tag cleanup.
+    let candidate = repo.commit(None, &signature, &signature, &message, &tree, &parents)?;
+    state.commit = Some(candidate.to_string());
+    save_preparation(repo, &state)?;
     let commit_id = repo.commit(
-        Some("HEAD"),
+        Some(&state.head_ref),
         &signature,
         &signature,
         &message,
@@ -175,11 +359,55 @@ pub fn commit(
         &parents,
     )?;
 
-    let tag_store = tags::remove_reviewed_by_ids(&root, &ReviewScope::Worktree, reviewed_tag_ids)?;
-    Ok(ReviewedCommitResult {
-        commit: short_oid(&commit_id.to_string()),
-        tag_store,
-    })
+    finish_cleanup(repo, &state, &commit_id.to_string())
+}
+
+fn read_index_file(repo: &Repository) -> AppResult<Option<Vec<u8>>> {
+    match std::fs::read(repo.path().join("index")) {
+        Ok(bytes) => Ok(Some(bytes)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn restore_index(
+    repo: &Repository,
+    original: Option<&[u8]>,
+    expected: Option<&[u8]>,
+) -> AppResult<()> {
+    use std::io::Write;
+    if read_index_file(repo)?.as_deref() == original {
+        return Ok(());
+    }
+    let lock_path = repo.path().join("index.lock");
+    let mut lock = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&lock_path)?;
+    let mut renamed = false;
+    let result = (|| -> AppResult<()> {
+        if read_index_file(repo)?.as_deref() != expected {
+            return Err(AppError::Repo(
+                "index changed during preparation; newer staging was left untouched".into(),
+            ));
+        }
+        if let Some(bytes) = original {
+            lock.write_all(bytes)?;
+            lock.sync_all()?;
+            std::fs::rename(&lock_path, repo.path().join("index"))?;
+            renamed = true;
+            repo.index()?.read(true)?;
+        } else {
+            std::fs::remove_file(repo.path().join("index"))?;
+            repo.index()?.clear()?;
+        }
+        Ok(())
+    })();
+    // Only this helper owns this lock; a failed create_new above never reaches here.
+    if !renamed {
+        std::fs::remove_file(lock_path)?;
+    }
+    result
 }
 
 /// Reviewed units that can be staged from the working tree. Deliberately loads only
@@ -332,6 +560,22 @@ fn stage_hunks(repo: &Repository, hunks: &[EligibleHunk]) -> AppResult<()> {
 
     let mut diff = workdir_diff(repo)?;
     diff.find_similar(Some(DiffFindOptions::new().renames(true)))?;
+    if diff
+        .deltas()
+        .any(|delta| delta.status() == Delta::Untracked)
+    {
+        // apply_to_index expects added-file deltas. libgit2's workdir diff keeps
+        // untracked files as Untracked even when it includes their complete patch.
+        let mut patch = Vec::new();
+        diff.print(git2::DiffFormat::Patch, |_, _, line| {
+            if matches!(line.origin(), '+' | '-' | ' ') {
+                patch.push(line.origin() as u8);
+            }
+            patch.extend_from_slice(line.content());
+            true
+        })?;
+        diff = Diff::from_buffer(&patch)?;
+    }
     let current_path = std::cell::RefCell::new(None::<String>);
     let mut opts = ApplyOptions::new();
     opts.delta_callback(|delta| {

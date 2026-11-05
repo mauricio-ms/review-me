@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Recreate sample-java/ — a small Java project used to validate the cross-reference
-# resolver end to end (`cargo test --lib xref_validate -- --nocapture`) and to poke at
+# resolver end to end (`cargo test --lib xref_validate -- --ignored --nocapture`) and to poke at
 # M-. / M-, / M-? by hand in project mode, plus a Markdown design note (docs/design.md)
 # to read in the viewer, rendered.
 #
@@ -179,7 +179,7 @@ Rebuild the fixture and run the resolver's checks against it:
 
 ```bash
 ./scripts/make-java-sample.sh
-cd src-tauri && cargo test --lib xref_validate -- --nocapture
+cd src-tauri && cargo test --lib xref_validate -- --ignored --nocapture
 ```
 
 The last change to `Book`, as a diff:

@@ -15,10 +15,13 @@ mod repo_library;
 mod review_commit;
 mod review_dir;
 mod revision;
+mod storage;
 mod tags;
 mod tree;
 mod window;
 mod xref;
+#[cfg(test)]
+mod test_support;
 #[cfg(test)]
 mod xref_validate;
 

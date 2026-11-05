@@ -429,3 +429,7 @@ pub fn commit_reviewed_changes(
     let repository = repo::open(&PathBuf::from(repo))?;
     review_commit::commit(&repository, &message, &reviewed_tag_ids)
 }
+
+#[cfg(test)]
+#[path = "commands_tests.rs"]
+mod tests;

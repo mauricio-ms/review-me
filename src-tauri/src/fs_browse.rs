@@ -187,3 +187,95 @@ fn valid_child_name(name: &str) -> AppResult<&str> {
         _ => Err(AppError::Repo("invalid directory name".into())),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::TestRepo;
+    use std::fs;
+
+    #[test]
+    fn lists_directories_first_and_names_case_insensitively() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["Zoo", "alpha", ".hidden"] {
+            fs::create_dir(dir.path().join(name)).unwrap();
+        }
+        for name in ["Z.txt", "b.txt", "A.txt", ".secret"] {
+            fs::write(dir.path().join(name), "x").unwrap();
+        }
+        let result = list_file_system_entries(Some(dir.path().to_str().unwrap().into())).unwrap();
+        assert_eq!(result.entries.iter().map(|e| (e.name.as_str(), e.kind)).collect::<Vec<_>>(), vec![
+            ("alpha", FileSystemEntryKind::Directory), ("Zoo", FileSystemEntryKind::Directory),
+            ("A.txt", FileSystemEntryKind::File), ("b.txt", FileSystemEntryKind::File), ("Z.txt", FileSystemEntryKind::File),
+        ]);
+        assert!(!result.is_repo);
+        assert_eq!(result.parent.as_deref(), dir.path().parent().unwrap().to_str());
+    }
+
+    #[test]
+    fn recognises_repositories_without_mistaking_their_subdirectories_for_roots() {
+        let fixture = TestRepo::new();
+        fs::create_dir(fixture.path().join("plain")).unwrap();
+        let result = list_file_system_entries(Some(fixture.arg())).unwrap();
+        assert!(result.is_repo);
+        assert!(!result.entries.iter().find(|e| e.name == "plain").unwrap().is_repo);
+    }
+
+    #[test]
+    fn rejects_missing_paths_and_files_as_browse_roots() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("file");
+        fs::write(&file, "x").unwrap();
+        assert!(list_file_system_entries(Some(file.to_str().unwrap().into())).unwrap_err().to_string().contains("not a directory"));
+        assert!(list_file_system_entries(Some(dir.path().join("missing").to_str().unwrap().into())).is_err());
+    }
+
+    #[test]
+    fn creates_a_trimmed_child_and_returns_only_directories() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("file.txt"), "unchanged").unwrap();
+        let result = create_directory(dir.path().to_str().unwrap().into(), "  new folder  ".into()).unwrap();
+        assert!(dir.path().join("new folder").is_dir());
+        assert_eq!(result.entries.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), vec!["new folder"]);
+        assert_eq!(fs::read_to_string(dir.path().join("file.txt")).unwrap(), "unchanged");
+    }
+
+    #[test]
+    fn rejects_invalid_child_names_without_creating_anything() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["", "   ", ".", "..", "../escape", "child/name", "child\\name", "/absolute", "bad\0name"] {
+            assert!(create_directory(dir.path().to_str().unwrap().into(), name.into()).is_err(), "accepted {name:?}");
+        }
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn an_existing_destination_is_never_overwritten() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("existing"), "keep").unwrap();
+        assert!(create_directory(dir.path().to_str().unwrap().into(), "existing".into()).is_err());
+        assert_eq!(fs::read_to_string(dir.path().join("existing")).unwrap(), "keep");
+        fs::create_dir(dir.path().join("folder")).unwrap();
+        assert!(create_directory(dir.path().to_str().unwrap().into(), "folder".into()).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinks_are_labelled_and_broken_links_are_omitted() {
+        use std::os::unix::fs::symlink;
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir(dir.path().join("folder")).unwrap();
+        fs::write(dir.path().join("file"), "text").unwrap();
+        symlink("folder", dir.path().join("dir-link")).unwrap();
+        symlink("file", dir.path().join("file-link")).unwrap();
+        symlink("missing", dir.path().join("broken")).unwrap();
+        let result = list_file_system_entries(Some(dir.path().to_str().unwrap().into())).unwrap();
+        let link = result.entries.iter().find(|e| e.name == "dir-link").unwrap();
+        assert!(link.is_symlink);
+        assert_eq!(link.kind, FileSystemEntryKind::Directory);
+        let link = result.entries.iter().find(|e| e.name == "file-link").unwrap();
+        assert!(link.is_symlink);
+        assert_eq!(link.kind, FileSystemEntryKind::File);
+        assert!(!result.entries.iter().any(|e| e.name == "broken"));
+    }
+}

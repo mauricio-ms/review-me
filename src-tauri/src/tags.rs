@@ -457,9 +457,9 @@ pub fn resolve_flags(root: &Path, flags: &[FlagRef]) -> AppResult<()> {
 
 pub fn remove(root: &Path, scope: &ReviewScope, id: &str) -> AppResult<TagStore> {
     let mut store = read(root)?;
-    store.reviewed.retain(|t| t.id != id);
-    store.flags.retain(|t| t.id != id);
-    store.ignored.retain(|t| t.id != id);
+    store.reviewed.retain(|t| t.id != id || t.anchor.scope != *scope);
+    store.flags.retain(|t| t.id != id || t.anchor.scope != *scope);
+    store.ignored.retain(|t| t.id != id || t.anchor.scope != *scope);
     write(root, &store)?;
     load(root, scope)
 }
@@ -477,7 +477,7 @@ pub fn remove_reviewed_by_ids(
     }
     let ids: HashSet<&str> = ids.iter().map(String::as_str).collect();
     let mut store = read(root)?;
-    store.reviewed.retain(|t| !ids.contains(t.id.as_str()));
+    store.reviewed.retain(|t| t.anchor.scope != *scope || !ids.contains(t.id.as_str()));
     write(root, &store)?;
     load(root, scope)
 }
@@ -557,9 +557,12 @@ fn read(root: &Path) -> AppResult<TagStore> {
 
 fn write(root: &Path, store: &TagStore) -> AppResult<()> {
     review_dir::ensure(root)?;
-    std::fs::write(tags_path(root), serde_json::to_string_pretty(store)?)?;
-    Ok(())
+    crate::storage::write(&tags_path(root), &serde_json::to_vec_pretty(store)?)
 }
+
+#[cfg(test)]
+#[path = "tags_persistence_tests.rs"]
+mod persistence_tests;
 
 /// Capture the content a new tag anchors to, read from whichever snapshot `scope`
 /// resolves to. Add and re-anchor share `Snapshot`, so a tag is always compared
