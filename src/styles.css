@@ -1139,10 +1139,6 @@ kbd {
   white-space: nowrap;
 }
 
-.project-tree-mode-hint {
-  color: var(--fg-dim);
-}
-
 /* A changed file's review mark and status letter, at the right edge. */
 .tree-change {
   margin-left: auto;

@@ -453,7 +453,7 @@ in the changed view and three in the full one). The changed view opens its folde
 first appear in a comparison (`ProjectTree`'s seeding), after which they fold like any
 other; the full view lists every open folder it reaches (`unlisted`), a level at a time.
 The cursor is a path (`treeCursor`), so rows arriving or folding around it don't move it,
-and while its row isn't shown it sits on the nearest folder above. `c` / `M-x changed`
+and while its row isn't shown it sits on the nearest folder above. `C-x v c` / `M-x changed`
 (`toggleChangedOnly`) and `C-x C-j` / `M-x reveal` (`revealFile`, Emacs's dired-jump) put
 it on the file on screen, opening its folders; `reveal` takes the diff cursor's file from
 the diff (entering project mode, previewing it) and switches to all files for a file the
@@ -478,9 +478,10 @@ window shows something else, another window is selected, or project mode ends), 
 `applyComparison` clears it too. `currentPlace` falls back to the saved position because
 the covered window's own view is unmounted.
 
-`useProjectStore.filter` (`all` | `changed`, `c` in the tree / `M-x changed`) narrows the
-tree to **the applied comparison's files** (`useRepoStore.diff`): a commit's, a branch's,
-or the uncommitted ones. It is a standing preference — `setSource` and `reset` leave it
+`useProjectStore.filter` (`all` | `changed`, `C-x v c` / `M-x changed`) defaults to
+`changed`: it narrows the tree to **the applied comparison's files** (`useRepoStore.diff`)
+and shows deleted lines inline in the viewer. `all` lists the whole revision and hides
+deleted lines. The tree's plain `c` key is unbound. It is a standing preference — `setSource` and `reset` leave it
 alone — so it keeps following whatever is under review. The changed tree is synthesized
 from those paths (`buildChanged`), never listed from disk. The finder doesn't narrow — any
 file can still be found — but lists the changed files first, as a `changed` group (passed
@@ -490,8 +491,8 @@ so a deletion reads from `baseSource`. Xref still indexes the whole revision —
 definitions mostly live in files the change didn't touch.
 
 The viewer marks a file's changes (`editor/diff-marks.ts`): gutter signs and line
-tints always, and inline diffs — removed lines as block widgets, changed words as marks —
-for the blocks shown. Blocks come from `lib/project-diff.ts`'s `changeBlocks` (one per
+tints always, removed lines as block widgets while `changed` is on, and optional word
+emphasis in both modes. Blocks come from `lib/project-diff.ts`'s `changeBlocks` (one per
 maximal removed+added run of a hunk) and only while the buffer reads the comparison's
 new side (`changeForFile`: its source must be `ambientSource`, so a file opened at
 the merge base shows no marks). A deletion has no new side: read at the old side
@@ -506,14 +507,11 @@ the file at hand and wrapping — in the tree from its cursor, previewing; the m
 `changeBlocks` is cached per `ChangedFile`. `editor/overview-ruler.ts` draws the same
 blocks (`markedBlocks`) and the flags (`flaggedLines`) on a strip beside the scrollbar,
 placed by CodeMirror's height map; it shows only while there's something to mark, and
-makes room through `editorAttributes`, since CodeMirror owns the editor's classes. What is
-shown is `useProjectStore.inlineDiff` (on by default; `M-x hunks`, all files) XOR
-`inlineFlipped` (`M-x hunk`, the blocks at the cursor/selection, cleared when the comparison
-changes). Word emphasis is independent of hunk expansion: `ShownBlock.words` follows
-`useUIStore.diffHighlight` (`C-x v w` / `M-x diffmode`) on visible new and removed lines,
-including collapsed blocks and a block Swiper reveals. The changed-files view
-(`filter === "changed"`) always shows the removed lines (`ShownBlock.showRemoved`); the full
-inline diff still follows `M-x hunk`/`M-x hunks`. Block widgets must come from a
+makes room through `editorAttributes`, since CodeMirror owns the editor's classes.
+`ShownBlock.showRemoved` follows `useProjectStore.filter === "changed"`; there is no
+separate inline-diff preference, per-change expansion state, or reveal effect. Word emphasis
+is independent: `ShownBlock.words` follows `useUIStore.diffHighlight` (`C-x v w` /
+`M-x diffmode`) on visible new and removed lines. Block widgets must come from a
 `StateField`, never a view plugin — CodeMirror rejects them there.
 
 **Markdown renders in place** (`editor/markdown-view.ts`, on for `.md`/`.markdown`/`.mkd`
@@ -552,15 +550,13 @@ in-order words, `!` negation, smart case, Emacs regexp syntax (`(` literal, `\(`
 with a literal fallback. The selection is held as a *line*, so narrowing keeps it or moves
 on to the next match (`nearestHit`).
 
-A file's search also reads the lines the comparison's changes **took out** — shown or not —
-each just above where it went, labelled with its old number and `−` (`searchedLines`, from
-`markedBlocks`). Landing on one whose block hides them reveals that block's diff in that
-view only (`diff-marks.ts`'s `revealBlock`, which lasts until the marks are next set), and
-moving on closes it again, as the diff's search does folds; `RET` keeps it open through
-`flipChanges` (`M-x hunk`'s state), `C-g` closes it. The widget's lines aren't the document,
-so the cursor goes to the line below them, a frame later `scrollToRemoved` brings the line
-itself on screen, and their matches light through `markMatches`' CSS highlights (re-applied
-after every update, since a redrawn widget loses them).
+A file's search also reads the lines the comparison's changes **took out**, only while
+`changed` is on (`ShownBlock.showRemoved`). Each sits just above where it went, labelled
+with its old number and `−` (`searchedLines`, from `markedBlocks`). Search never changes
+deleted-line visibility. The widget's lines aren't the document, so the cursor goes to
+the line below them, a frame later `scrollToRemoved` brings the line itself on screen, and
+their matches light through `markMatches`' CSS highlights (re-applied after every update,
+since a redrawn widget loses them).
 
 The diff buffer and the log have `C-s` too (`lib/swiper-list.ts`'s `swipeList`; each
 registers its starter with `setListSwiper`, which `M-x swiper`'s `swiperHere` dispatches

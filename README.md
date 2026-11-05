@@ -63,10 +63,10 @@ Reviewing agent-generated code has a different shape than reviewing a human PR:
   make later, typically by an LLM. Every commit's notes are kept as structured Markdown
   under `.review-me/notes/`, and `M-x export` bundles a whole branch's into one file.
 - **Fuzzy file finder** — jump to any (non-ignored) file in the repo.
-- **Project mode** — a read-only, IDE-like browser over the *entire* repo, or (`c`) just
-  the files the comparison on screen changed — a commit's, a branch's, the uncommitted
-  ones. Review a whole file at a time here — from the tree or from the file itself — and
-  flag lines for later.
+- **Project mode** — a read-only, IDE-like browser, initially showing the files the
+  comparison on screen changed with deleted lines inline. `C-x v c` / `M-x changed`
+  switches to the entire repo and hides deleted lines. Review a whole file at a time
+  here — from the tree or from the file itself — and flag lines for later.
 - **Cross-references** — go-to-definition and find-references (tree-sitter, Java) so you
   can trace a changed symbol through the project.
 
@@ -353,6 +353,7 @@ just the current buffer's keys; `C-h k` tells you what a key does.
 | `C-x p k` | `close` | Close the repository |
 | `C-x v =` | `worktree` | Return to the working-tree diff |
 | `C-x v v` | `commit` | Commit the reviewed working-tree changes |
+| `C-x v c` | `changed` | Toggle changed files with inline deleted lines ↔ all files without deleted lines; initially on |
 | `C-x v w` | `diffmode` | Toggle word-diff ↔ whole-line highlighting in the diff buffer and project viewer |
 | `C-x x g` | `refresh` | Recompute the active comparison |
 | `C-x C-=` / `C-x C--` / `C-x C-0` | `text-scale-increase` / `-decrease` / `-reset` | Bigger / smaller / default text everywhere (then `=` `-` `0` alone keep adjusting); remembered |
@@ -371,9 +372,6 @@ just the current buffer's keys; `C-h k` tells you what a key does.
 | `note` | (diff, commit review) Note on the lines at the cursor — a fix for later |
 | `export` | Write the notes on the commits buffer's commits to one Markdown file |
 | `clear` | Clear this comparison's review, flag and ignore marks |
-| `changed` | Project tree: only the changed files ↔ all files (`c` in the tree); the finder lists changed files first |
-| `hunk` | (project) Show/hide the diff of the change at the cursor or selection |
-| `hunks` | (project) Show/hide the diff of every change, in every file |
 | `markdown-markup` | (project) A Markdown file's raw text ↔ rendered in place |
 | `flag` | (project) Flag the current selection |
 | `diff`, `project` | Switch to that buffer |
@@ -497,10 +495,12 @@ generated from the tag store and never read back: edit notes in the app.
 
 ### Project buffer
 
-**Tree (left)** lists the whole revision, or — `c` / `M-x changed` — **only the files the
-comparison on screen changed**: the commit's files while reviewing a commit, every file the
+**Tree (left)** initially lists **only the files the comparison on screen changed**:
+the commit's files while reviewing a commit, every file the
 branch touched in a branch comparison (`b` in the commits buffer), the uncommitted ones in
-the working-tree diff. The choice sticks as you move between comparisons, so it keeps
+the working-tree diff. **`C-x v c` / `M-x changed`** toggles between those files with
+deleted lines shown inline and all files with deleted lines hidden. It works from the
+tree or viewer and echoes the new state. The choice sticks as you move between comparisons, so it keeps
 following what's under review. The fuzzy finder (`C-x C-f`) then lists the changed files
 first and every other file after them, so a file the change didn't touch is still found.
 Changed files carry their status letter and a `✓` (fully reviewed) or `⚑` (flagged), and a
@@ -520,7 +520,7 @@ opens as a buffer of its own; the ones before it stay open (`C-x b`).
 | `o` | Open the file in the other window |
 | `h` | Collapse the directory, or jump to its parent |
 | `TAB` | Toggle the folder under the cursor |
-| `c` | Only the changed files ↔ all files |
+| `C-x v c` | Changed files with deleted lines ↔ all files without deleted lines (`M-x changed`) |
 | `r` | Mark the file **reviewed** (every hunk of it) |
 | `f` | **Flag** the file |
 | `i` | **Ignore** the file |
@@ -537,14 +537,11 @@ and a red notch between the lines where something was removed (the header adds t
 file's `+adds −dels`). `]c` / `[c` jump from change to change — the mode line says which
 one you're on, `change 2/5` — and `]f` / `[f` go on to the next or previous changed file,
 in the changed-files tree's order, the way they walk files in the diff buffer.
-Inline diffs are shown by default: removed lines appear in red above what replaced them,
-with changed words highlighted. **`C-x v w` / `M-x diffmode`** toggles word emphasis off
-or on, keeping the added and removed lines visible. The setting is shared with the diff
-buffer and survives switching files and comparisons during the session.
-`M-x hunk` hides or shows the diff of the change under the cursor or visual selection;
-`M-x hunks` does the same for every change in every file. Word emphasis works on visible
-changed lines even when the hunk is collapsed. While the tree lists only the changed files
-(`c`), removed lines remain visible and follow the word/line setting too.
+While **`changed` is on** (the default), removed lines appear in red above what replaced
+them. Turning it off with **`C-x v c` / `M-x changed`** hides those lines in every file and
+shows all files in the tree. **`C-x v w` / `M-x diffmode`** independently toggles word
+emphasis on visible changed text. That setting is shared with the diff buffer and survives
+switching files and comparisons during the session.
 
 A strip at the viewer's right edge, beside the scrollbar, maps the whole file: each change
 in its gutter sign's colour, flags in amber, the part on screen as a band and the cursor as
@@ -567,6 +564,7 @@ raw text and back.
 
 `C-s` searches the file the way Swiper does: the minibuffer lists the lines that match as
 you type, numbered, and the file follows the selected one, with every match on screen lit.
+Deleted lines are included only while `changed` is on; search never reveals hidden deletions.
 Words separated by a space must all match, in order; words after a `!` must not match; it
 ignores case until you type a capital. A word is a regexp written as in Emacs, so `(` and
 `|` match themselves. `C-s` / `C-r` (or `C-n` / `C-p`) move through the matches, `RET`

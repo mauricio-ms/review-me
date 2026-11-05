@@ -19,23 +19,16 @@ import type { ChangeBlock } from "../lib/project-diff";
 import type { WordSeg } from "../lib/word-diff";
 
 /**
- * A change block plus how much of its diff the viewer shows: `shown` is the full inline
- * diff (`M-x hunk`/`M-x hunks`), `showRemoved` just the removed lines — the changed-files view
- * always has those. `words` independently emphasizes changed words on visible lines.
+ * A change block plus its presentation: `showRemoved` follows `M-x changed`, and
+ * `words` independently emphasizes changed words on visible lines (`M-x diffmode`).
  */
-export type ShownBlock = ChangeBlock & { shown: boolean; showRemoved: boolean; words: boolean };
+export type ShownBlock = ChangeBlock & { showRemoved: boolean; words: boolean };
 
 /**
  * Replace the change marks of the file in the project viewer: gutter signs and line
- * tints always, optional word highlights, and — for blocks shown inline — the removed lines.
+ * tints always, optional word highlights, and removed lines while `changed` is on.
  */
 export const setDiffMarks = StateEffect.define<ShownBlock[]>();
-
-/**
- * Show one block's diff as `M-x hunk` would (null: none) — Swiper landing on a line the
- * block took out, which it hides. It lasts until the marks are next set.
- */
-export const revealBlock = StateEffect.define<string | null>();
 
 /**
  * Mark the whole file as one the comparison deletes (false: it doesn't). It has no new
@@ -66,7 +59,7 @@ class RemovedLines extends WidgetType {
     readonly id: string,
     readonly lines: string[],
     readonly segs: (WordSeg[] | null)[],
-    /** Highlight the changed words, independently of whether the hunk is expanded. */
+    /** Highlight the changed words when word emphasis is enabled. */
     readonly words: boolean,
   ) {
     super();
@@ -106,14 +99,12 @@ type Marks = {
   deco: DecorationSet;
   signs: RangeSet<GutterMarker>;
   blocks: ShownBlock[];
-  revealed: string | null;
 };
 
 const EMPTY_MARKS: Marks = {
   deco: Decoration.none,
   signs: RangeSet.empty,
   blocks: [],
-  revealed: null,
 };
 
 const lineClass = (cls: string) => Decoration.line({ attributes: { class: cls } });
@@ -125,7 +116,7 @@ const WORD = Decoration.mark({ class: "cm-diff-word" });
 const REMOVED_LINE = lineClass("cm-diff-line-removed");
 const REMOVED_SIGN = new ChangeSign("cm-diff-sign-removed-lines");
 
-function buildMarks(doc: Text, blocks: ShownBlock[], revealed: string | null): Marks {
+function buildMarks(doc: Text, blocks: ShownBlock[]): Marks {
   const deco: Range<Decoration>[] = [];
   // Per line: one sign, whose classes stack (a bar plus a removal notch).
   const signs = new Map<number, string[]>();
@@ -142,7 +133,7 @@ function buildMarks(doc: Text, blocks: ShownBlock[], revealed: string | null): M
 
   for (const block of blocks) {
     const valid = (ln: number) => ln >= 1 && ln <= doc.lines;
-    const shown = block.shown || block.id === revealed;
+    const shown = block.showRemoved;
     const words = block.words;
     for (const ln of block.modified.filter(valid)) {
       sign(ln, "cm-diff-sign-modified");
@@ -161,7 +152,7 @@ function buildMarks(doc: Text, blocks: ShownBlock[], revealed: string | null): M
       removalSign(written[written.length - 1] + 1);
     }
 
-    if (block.removed.length > 0 && (shown || block.showRemoved)) {
+    if (block.removed.length > 0 && shown) {
       const widget = new RemovedLines(
         block.id,
         block.removed.map((l) => l.content),
@@ -194,15 +185,14 @@ function buildMarks(doc: Text, blocks: ShownBlock[], revealed: string | null): M
   const signRanges = [...signs]
     .sort(([a], [b]) => a - b)
     .map(([ln, classes]) => new ChangeSign(classes.join(" ")).range(doc.line(ln).from));
-  return { deco: Decoration.set(deco, true), signs: RangeSet.of(signRanges), blocks, revealed };
+  return { deco: Decoration.set(deco, true), signs: RangeSet.of(signRanges), blocks };
 }
 
 const diffMarksField = StateField.define<Marks>({
   create: () => EMPTY_MARKS,
   update(marks, tr) {
     for (const effect of tr.effects) {
-      if (effect.is(setDiffMarks)) return buildMarks(tr.state.doc, effect.value, null);
-      if (effect.is(revealBlock)) return buildMarks(tr.state.doc, marks.blocks, effect.value);
+      if (effect.is(setDiffMarks)) return buildMarks(tr.state.doc, effect.value);
     }
     if (!tr.docChanged) return marks;
     return { ...marks, deco: marks.deco.map(tr.changes), signs: marks.signs.map(tr.changes) };
@@ -244,14 +234,13 @@ export function markedBlocks(state: EditorState): readonly ShownBlock[] {
 }
 
 /**
- * The lines (1-based) of the change blocks whose diff is shown inline — `M-x hunk`,
- * `M-x hunks`, or Swiper revealing one: what the comparison wrote.
+ * The new-side lines (1-based) whose diff is shown inline while `changed` is on.
  */
 export function shownChangeLines(state: EditorState): Set<number> {
   const marks = state.field(diffMarksField, false);
   const lines = new Set<number>();
   for (const block of marks?.blocks ?? []) {
-    if (!block.shown && block.id !== marks?.revealed) continue;
+    if (!block.showRemoved) continue;
     for (const ln of [...block.modified, ...block.added]) lines.add(ln);
   }
   return lines;

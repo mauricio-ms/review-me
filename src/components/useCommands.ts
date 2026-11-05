@@ -20,7 +20,6 @@ import {
 import { isMarkdownPath } from "../lib/markdown";
 import { applyComparison, refreshDiff } from "../lib/open-repo";
 import { resizeTree, revealFile, toggleChangedOnly, toggleTree } from "../lib/project";
-import { toggleChangesAtCursor } from "../lib/project-diff";
 import { flagHere, gotoFileToReview } from "../lib/project-review";
 import { ignoreGeneratedFiles } from "../lib/review-actions";
 import { adjustTextScale } from "../lib/text-scale";
@@ -74,8 +73,6 @@ export type CommandId =
   | "back"
   | "forward"
   | "changed"
-  | "hunk"
-  | "hunks"
   | "markdown-markup"
   | "next-unreviewed"
   | "prev-unreviewed"
@@ -163,8 +160,6 @@ export function useCommands(close: CommandClose): {
   const openMarkdown = openPath != null && isMarkdownPath(openPath);
   const rawMarkup = useFilesStore((s) => (openFile ? s.rawMarkup.has(openFile.id) : false));
   const projectFilter = useProjectStore((s) => s.filter);
-  const inlineDiff = useProjectStore((s) => s.inlineDiff);
-  const toggleInlineDiff = useProjectStore((s) => s.toggleInlineDiff);
   // Selecting lengths, not the arrays: the labels only need how far there is to go,
   // and a length never trips the fresh-reference rerender trap.
   const backDepth = useHistoryStore((s) => s.back.length);
@@ -280,16 +275,6 @@ export function useCommands(close: CommandClose): {
     toggleChangedOnly();
     close();
   }, [close]);
-
-  const handleToggleChangeAtCursor = useCallback(() => {
-    close();
-    toggleChangesAtCursor();
-  }, [close]);
-
-  const handleToggleAllChanges = useCallback(() => {
-    toggleInlineDiff();
-    close();
-  }, [close, toggleInlineDiff]);
 
   const handleProjectFlag = useCallback(async () => {
     close({ restoreFocus: false });
@@ -572,31 +557,10 @@ export function useCommands(close: CommandClose): {
       aliases: ["filter", "allfiles", "changedfiles"],
       label:
         projectFilter === "changed"
-          ? "project files → all files"
-          : "project files → only what this comparison changed",
-      // `c` in the project tree does the same.
+          ? "changed: on → off (all files, hide deleted lines)"
+          : "changed: off → on (changed files, show deleted lines)",
       enabled: !!repo,
       run: handleToggleProjectFilter,
-    },
-    {
-      id: "hunk",
-      name: "hunk",
-      aliases: ["preview", "showdiff", "inline"],
-      label: "show/hide the diff of the change at the cursor or selection",
-      buffer: "project",
-      enabled: !!openPath,
-      run: handleToggleChangeAtCursor,
-    },
-    {
-      id: "hunks",
-      name: "hunks",
-      aliases: ["diffs", "showdiffs", "inlineall"],
-      label: inlineDiff
-        ? "hide the inline diff of every change, in every file"
-        : "show the inline diff of every change, in every file",
-      buffer: "project",
-      enabled: !!repo,
-      run: handleToggleAllChanges,
     },
     {
       id: "markdown-markup",

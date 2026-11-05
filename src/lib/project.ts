@@ -185,12 +185,17 @@ export function revealInTree(path: string): void {
 }
 
 /**
- * `c` in the tree, `M-x changed`: all files ↔ only what the comparison changed. Both
- * views open the same folders, and the file on screen stays under the cursor — its
- * folders opened if this view had them closed.
+ * `C-x v c` / `M-x changed`: changed files with inline deleted lines ↔ all files
+ * without deleted lines. Both views share open folders and keep the file at the cursor.
  */
 export function toggleChangedOnly(): void {
   useProjectStore.getState().toggleFilter();
+  const changed = useProjectStore.getState().filter === "changed";
+  useUIStore.getState().showFlash(
+    changed
+      ? "Changed: on — changed files, deleted lines shown"
+      : "Changed: off — all files, deleted lines hidden",
+  );
   const path = fileOnScreen()?.path;
   if (!path) return;
   if (useProjectStore.getState().filter === "all" || changeAt(path)) revealInTree(path);

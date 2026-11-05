@@ -1,4 +1,3 @@
-import { useProjectStore } from "../state/project";
 import { useRepoStore } from "../state/repo";
 import { useUIStore } from "../state/ui";
 import type { ChangedFile, DiffLine, DiffSummary } from "../types/diff";
@@ -6,7 +5,7 @@ import { sameSource, type ProjectSource } from "../types/repo";
 import { currentFile } from "./buffers";
 import { changedFileOrder } from "./changed-tree";
 import { ambientSource, baseSource, openFileFromDiff } from "./project";
-import { projectCursor, projectSelectionRange, setProjectCursor } from "./project-view";
+import { projectCursor, setProjectCursor } from "./project-view";
 import { refineHunk, type WordSeg } from "./word-diff";
 
 /**
@@ -218,34 +217,4 @@ export function gotoChangedFile(step: 1 | -1, count = 1): void {
   const first = deleted ? undefined : changeBlocks(target)[0];
   openFileFromDiff(target.path, deleted ? "old" : "new", first ? blockStart(first) : 1);
   ui.showFlash(`${target.path} — changed file ${files.indexOf(target) + 1}/${files.length}`);
-}
-
-/**
- * `M-x hunk` — show or hide the diff of the change(s) at the viewer's cursor or visual
- * selection. Flashes why when there is nothing there to show.
- */
-export function toggleChangesAtCursor(): void {
-  const ui = useUIStore.getState();
-  const file = currentFile();
-  const change = file
-    ? changeForFile(useRepoStore.getState().diff, file.source, file.path)
-    : null;
-  const range = projectSelectionRange();
-  if (!change || !range) {
-    ui.showFlash(
-      file ? "this file has no changes in the comparison on screen" : "no file here",
-    );
-    return;
-  }
-  const ids = changeBlocks(change)
-    .filter((block) => {
-      const [lo, hi] = blockSpan(block);
-      return lo <= range.hi && hi >= range.lo;
-    })
-    .map((block) => block.id);
-  if (ids.length === 0) {
-    ui.showFlash("no change at the cursor");
-    return;
-  }
-  useProjectStore.getState().flipChanges(ids);
 }

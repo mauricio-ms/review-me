@@ -10,8 +10,8 @@ import {
 const EMPTY_ENTRIES: TreeEntry[] = [];
 
 /**
- * What the tree and the finder list: the whole revision, or only the files the
- * comparison on screen changed — a commit's, a branch's, or the uncommitted ones.
+ * What the tree lists: the whole revision, or only the files the comparison on screen
+ * changed. The changed view also shows deleted lines inline in the viewer.
  */
 export type ProjectFilter = "all" | "changed";
 
@@ -67,20 +67,10 @@ type ProjectState = {
   /** How to name `source` in the modeline (e.g. "feature@e780b4a"); null = worktree. */
   sourceLabel: string | null;
   /**
-   * A standing preference, not a property of the revision: it survives source changes
-   * (and closing the repo), so "changed" keeps following whatever is under review.
+   * `M-x changed` / `C-x v c`: changed files and inline deleted lines, on by default.
+   * A standing preference: it survives source changes and closing the repo.
    */
   filter: ProjectFilter;
-  /**
-   * Show every change's inline diff, in every file (`M-x hunks`). On by default;
-   * like `filter`, a standing preference. Word emphasis follows `diffHighlight`.
-   */
-  inlineDiff: boolean;
-  /**
-   * Change blocks (`lib/project-diff.ts`'s ids) `M-x hunk` flipped away from
-   * `inlineDiff`: a block's diff shows when `inlineDiff !== inlineFlipped.has(id)`.
-   */
-  inlineFlipped: Set<string>;
   /** The file tree's width in px (the layout clamps it to what fits). */
   treeWidth: number;
   /** `M-x toggle-tree`: the viewer alone. */
@@ -101,12 +91,6 @@ type ProjectState = {
    */
   setSource: (source: ProjectSource, label: string | null) => void;
   toggleFilter: () => void;
-  /** Flip every change's inline diff, dropping per-change exceptions. */
-  toggleInlineDiff: () => void;
-  /** Show `ids` if any of them is hidden, else hide them all. */
-  flipChanges: (ids: string[]) => void;
-  /** Forget per-change exceptions (they name the changes of one comparison). */
-  clearFlipped: () => void;
   /** Set the tree's width; `remember` once a drag or a key settles it. */
   setTreeWidth: (width: number, remember?: boolean) => void;
   setTreeHidden: (hidden: boolean) => void;
@@ -119,9 +103,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
   treeCursor: null,
   source: WORKTREE_SOURCE,
   sourceLabel: null,
-  filter: "all",
-  inlineDiff: true,
-  inlineFlipped: new Set(),
+  filter: "changed",
   treeWidth: savedTreeWidth(),
   treeHidden: false,
 
@@ -149,21 +131,6 @@ export const useProjectStore = create<ProjectState>((set) => ({
     ),
   toggleFilter: () =>
     set((s) => ({ filter: s.filter === "all" ? "changed" : "all" })),
-  toggleInlineDiff: () =>
-    set((s) => ({ inlineDiff: !s.inlineDiff, inlineFlipped: new Set<string>() })),
-  flipChanges: (ids) =>
-    set((s) => {
-      const shown = (id: string) => s.inlineDiff !== s.inlineFlipped.has(id);
-      const show = !ids.every(shown);
-      const next = new Set(s.inlineFlipped);
-      for (const id of ids) {
-        if (show !== s.inlineDiff) next.add(id);
-        else next.delete(id);
-      }
-      return { inlineFlipped: next };
-    }),
-  clearFlipped: () =>
-    set((s) => (s.inlineFlipped.size === 0 ? {} : { inlineFlipped: new Set<string>() })),
   setTreeWidth: (width, remember = false) => {
     const next = Math.max(TREE_WIDTH_MIN, Math.round(width));
     if (remember) saveTreeWidth(next);
@@ -177,7 +144,6 @@ export const useProjectStore = create<ProjectState>((set) => ({
       treeCursor: null,
       source: WORKTREE_SOURCE,
       sourceLabel: null,
-      inlineFlipped: new Set(),
     }),
 }));
 

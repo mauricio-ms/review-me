@@ -98,8 +98,6 @@ export default function FileView({ win, bufferId }: { win: WindowId; bufferId: F
   const diff = useRepoStore((s) => s.diff);
   const flags = useTagsStore((s) => s.flags);
   const changedOnly = useProjectStore((s) => s.filter === "changed");
-  const inlineDiff = useProjectStore((s) => s.inlineDiff);
-  const inlineFlipped = useProjectStore((s) => s.inlineFlipped);
   const diffHighlight = useUIStore((s) => s.diffHighlight);
   const focused = useWindowStore((s) => s.selected === win && !s.treeFocused);
   const focusRequest = useUIStore((s) => s.focusRequest);
@@ -157,19 +155,17 @@ export default function FileView({ win, bufferId }: { win: WindowId; bufferId: F
     view.dispatch({ effects: setFlagLines.of(ranges) });
   }, [content, flags, path, side, view]);
 
-  // The change marks; `content` re-pushes them onto a re-read document. Browsing only
-  // the changed files, the removed lines always show — there, what went matters as
-  // much as what came.
+  // The change marks; `content` re-pushes them onto a re-read document. `changed`
+  // controls deleted-line visibility; word emphasis is an independent preference.
   useEffect(() => {
     if (!view) return;
     const shown = blocks.map((b) => ({
       ...b,
-      shown: inlineDiff !== inlineFlipped.has(b.id),
       showRemoved: changedOnly,
       words: diffHighlight === "word",
     }));
     view.dispatch({ effects: setDiffMarks.of(shown) });
-  }, [blocks, changedOnly, content, diffHighlight, inlineDiff, inlineFlipped, view]);
+  }, [blocks, changedOnly, content, diffHighlight, view]);
 
   useEffect(() => {
     view?.dispatch({ effects: setDeletedFile.of(deleted) });
@@ -252,7 +248,7 @@ export default function FileView({ win, bufferId }: { win: WindowId; bufferId: F
         {change && (
           <span
             className="project-viewer-change"
-            title="changed in the comparison on screen — M-x hunk shows the diff at the cursor, M-x hunks every one"
+            title="changed in the comparison on screen — C-x v c / M-x changed toggles deleted lines"
           >
             <span className="stat-add">+{change.addedLines}</span>{" "}
             <span className="stat-del">−{change.removedLines}</span>

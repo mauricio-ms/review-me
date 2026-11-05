@@ -18,10 +18,9 @@ import { activeView } from "../lib/project-view";
 import type { SwiperHit, SwiperMatcher } from "../lib/swiper";
 import { listSwiper, markMatches } from "../lib/swiper-list";
 import { useMinibufferStore } from "../state/minibuffer";
-import { useProjectStore } from "../state/project";
 import { useUIStore } from "../state/ui";
 import { activeBuffer, useWindowStore } from "../state/windows";
-import { markedBlocks, removedLineElements, revealBlock, type ShownBlock } from "./diff-marks";
+import { markedBlocks, removedLineElements, type ShownBlock } from "./diff-marks";
 
 /** A line a change took out: the `index`th of its block's removed lines. */
 type RemovedLine = { block: string; index: number };
@@ -140,14 +139,14 @@ type Searched = { line: number } | RemovedLine;
 
 /**
  * The lines a search reads in `state`, in the order they read: the document's, with
- * each change's removed lines just above where they went — shown or not. Labelled
+ * each change's visible removed lines just above where they went. Labelled
  * (removed ones by their old number) only when there are removed lines among them.
  */
 function searchedLines(state: EditorState, cursorLine: number) {
   const { doc } = state;
   const above = new Map<number, ShownBlock[]>();
   for (const block of markedBlocks(state)) {
-    if (block.removed.length === 0) continue;
+    if (!block.showRemoved || block.removed.length === 0) continue;
     const at = Math.min(Math.max(1, block.removedAt), doc.lines + 1);
     above.set(at, [...(above.get(at) ?? []), block]);
   }
@@ -175,12 +174,10 @@ function searchedLines(state: EditorState, cursorLine: number) {
 
 /**
  * `C-s`: Swiper over the file in `view`. The minibuffer lists the lines that match as
- * you type — the lines the comparison's changes took out too, shown or not — and the
- * file follows the selected one: the cursor on its first match (a removed line's change
- * opens to show it, and closes again as the search moves on), recentered only when it's
- * off screen, with every match in view lit. `RET` stays there (a jump `M-,` comes back
- * from, the change left open as `M-x hunk` would); `C-g` puts the cursor and the scroll
- * back.
+ * you type, including deleted lines only while `changed` is on. The file follows the
+ * selected one: the cursor on its first match, recentered only when it's off screen,
+ * with every match in view lit. `RET` stays there (a jump `M-,` comes back from);
+ * `C-g` puts the cursor and the scroll back. Search never changes deleted-line visibility.
  */
 export function swiper(view: EditorView): void {
   const { state } = view;
@@ -198,13 +195,6 @@ export function swiper(view: EditorView): void {
   const show = (shown: Shown | null) => {
     if (alive()) view.dispatch({ effects: setSwiper.of(shown) });
   };
-  // The change opened to show a removed line its diff hides.
-  let revealed: string | null = null;
-  const reveal = (block: string | null) => {
-    if (block === revealed) return [];
-    revealed = block;
-    return [revealBlock.of(block)];
-  };
   // Bumped per move, so a removed line's late scroll can't follow a newer one.
   let moves = 0;
   const goto = (hit: SwiperHit) => {
@@ -218,24 +208,18 @@ export function swiper(view: EditorView): void {
       const at = Math.min(line.from + (hit.spans[0]?.[0] ?? 0), line.to);
       view.dispatch({
         selection: { anchor: at },
-        effects: [
-          ...reveal(null),
-          ...(onScreen(view, at) ? [] : [EditorView.scrollIntoView(at, { y: "center" })]),
-        ],
+        effects: onScreen(view, at) ? [] : [EditorView.scrollIntoView(at, { y: "center" })],
       });
       return;
     }
     // The cursor goes to the line the removed ones sat above.
     const block = markedBlocks(view.state).find((b) => b.id === entry.block);
-    if (!block) return;
+    if (!block?.showRemoved) return;
     const at = block.removedAt > doc.lines ? doc.length : doc.line(Math.max(1, block.removedAt)).from;
     const near = at >= view.viewport.from && at <= view.viewport.to;
     view.dispatch({
       selection: { anchor: at },
-      effects: [
-        ...reveal(block.shown || block.showRemoved ? null : block.id),
-        ...(near ? [] : [EditorView.scrollIntoView(at, { y: "center" })]),
-      ],
+      effects: near ? [] : [EditorView.scrollIntoView(at, { y: "center" })],
     });
     // The widget is drawn by the next frame, scrolled to if it was far: then the line.
     const move = moves;
@@ -262,7 +246,6 @@ export function swiper(view: EditorView): void {
     onAccept: (hit) => {
       show(null);
       goto(hit);
-      if (revealed) useProjectStore.getState().flipChanges([revealed]);
       recordJump(from);
     },
     onCancel: () => {
@@ -272,7 +255,7 @@ export function swiper(view: EditorView): void {
       const end = view.state.doc.length;
       view.dispatch({
         selection: { anchor: Math.min(selection.anchor, end), head: Math.min(selection.head, end) },
-        effects: [...reveal(null), scroll],
+        effects: scroll,
       });
     },
   });

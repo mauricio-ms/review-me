@@ -114,6 +114,7 @@ const GLOBAL_KEYS = [
   { keys: ["C-x p k"], command: "close", doc: "close the repository" },
   { keys: ["C-x v ="], command: "worktree", doc: "the working-tree diff" },
   { keys: ["C-x v v"], command: "commit-reviewed", doc: "commit the reviewed changes" },
+  { keys: ["C-x v c"], command: "changed", doc: "toggle changed files and inline deleted lines" },
   { keys: ["C-x v w"], command: "diff-mode", doc: "toggle word or whole-line diff highlighting" },
   { keys: ["C-x x g"], command: "refresh", doc: "refresh" },
   {
@@ -218,12 +219,6 @@ const TREE_KEYS = [
   { keys: ["RET", "l", "<right>"], action: "open", doc: "open the file or the folder" },
   { keys: ["o"], action: "open-other", doc: "open the file in the other window" },
   { keys: ["h", "<left>"], action: "close", doc: "close the folder, or go to its parent" },
-  {
-    keys: ["c"],
-    action: "filter",
-    command: "changed",
-    doc: "all files ↔ only what the comparison changed",
-  },
   { keys: ["r"], action: "review", doc: "mark the file reviewed" },
   { keys: ["f"], action: "flag", doc: "flag the file" },
   { keys: ["i"], action: "ignore", doc: "ignore the file" },

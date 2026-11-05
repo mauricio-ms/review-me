@@ -13,7 +13,6 @@ import {
   previewFile,
   projectChoice,
   sideChoice,
-  toggleChangedOnly,
   toggleDir,
 } from "../lib/project";
 import {
@@ -89,7 +88,7 @@ function buildVisible(
 /**
  * The file tree, fixed at the left of project mode (`inProjectMode`: the main window
  * shows a file, or you're in the tree) and hidden everywhere else: the revision under
- * review, or only the files its comparison changed (`c`) — the same folders open in both.
+ * review, or only the files its comparison changed (`C-x v c`) — the same folders open in both.
  * The file under the cursor — moved to, or clicked — is previewed in the selected window
  * while the tree keeps the keyboard; opening one (`RET`, a double-click, or going into the
  * preview) shows it there for good. `C-x o` moves between the tree and the windows.
@@ -341,8 +340,6 @@ export default function ProjectTree({ hidden }: { hidden: boolean }) {
     open: () => activate(nodes[cursor]),
     "open-other": () => activate(nodes[cursor], { other: true }),
     close: () => collapseOrParent(nodes[cursor]),
-    // The whole revision ↔ only what the comparison on screen changed.
-    filter: toggleChangedOnly,
     review: markFile(reviewFile),
     flag: markFile(flagFile),
     ignore: markFile(ignoreFile),
@@ -365,9 +362,6 @@ export default function ProjectTree({ hidden }: { hidden: boolean }) {
             {changedOnly
               ? `changed · ${changedFiles.length} file${changedFiles.length === 1 ? "" : "s"}`
               : "all files"}
-          </span>
-          <span className="project-tree-mode-hint">
-            <kbd>c</kbd> {changedOnly ? "all files" : "changed only"}
           </span>
         </div>
         {nodes.length === 0 ? (

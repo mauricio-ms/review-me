@@ -45,9 +45,6 @@ export async function applyComparison(spec: DiffSpec): Promise<void> {
     const same = sameSpec(before.comparison, spec);
     useRepoStore.getState().applyComparison(spec, diff);
     useTagsStore.getState().setStore(tags);
-    // `M-x hunk`'s per-change exceptions name the changes of the comparison they were
-    // made in.
-    if (!same) useProjectStore.getState().clearFlipped();
     // The tree and the finder follow the comparison. Re-pointing them drops listings
     // when the revision changed — including when a branch has moved under a plain
     // refresh — and is a no-op when it hasn't.
