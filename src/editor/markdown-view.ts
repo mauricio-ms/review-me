@@ -24,6 +24,7 @@ import { linkHref } from "../lib/markdown";
 import { markedChangeLines, shownChangeLines } from "./diff-marks";
 import { flaggedLines } from "./flag-decorations";
 import { swiperLine } from "./swiper";
+import { pickerPreviewLine } from "./preview-location";
 
 /** Text drawn in place of markup: an image's tag, an alert's name. */
 class TextWidget extends WidgetType {
@@ -748,6 +749,8 @@ const proseFlow = StateField.define<ProseFlow>({
  */
 function revealedLines(state: EditorState, focused: boolean): Set<number> {
   const lines = shownChangeLines(state);
+  const previewed = pickerPreviewLine(state);
+  if (previewed != null) lines.add(previewed);
   if (!focused && state.selection.main.empty) return lines;
   for (const range of state.selection.ranges) {
     const first = state.doc.lineAt(range.from).number;

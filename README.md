@@ -64,13 +64,16 @@ Reviewing agent-generated code has a different shape than reviewing a human PR:
   under `.review-me/notes/`, and `M-x export` bundles a whole branch's into one file.
 - **Fuzzy file finder** — jump to any (non-ignored) file in the repo.
 - **Repository grep** — search literal text across the revision under review in a
-  bottom picker showing each matching line, and narrow to changed files.
+  bottom picker showing each matching line, and narrow to changed files. The selected
+  result previews its surrounding code while the keyboard stays in the search input.
+  `RET` opens it; `C-g` or `Escape` returns to where you were.
 - **Project mode** — a read-only, IDE-like browser, initially showing the files the
   comparison on screen changed with deleted lines inline. `C-x v c` / `M-x changed`
   switches to the entire repo and hides deleted lines. Review a whole file at a time
   here — from the tree or from the file itself — and flag lines for later.
 - **Cross-references** — go-to-definition and find-references (tree-sitter, Java and
-  JS/TS) so you can trace a changed symbol through the project.
+  JS/TS) so you can trace a changed symbol through the project. Reference lists and
+  ambiguous definitions preview the selected location before you commit to a jump.
 
 The interface is the point: **vim motions everywhere** and a **magit-like** model of
 files → hunks → lines, with Emacs keys: `M-x` and a minibuffer at the bottom of the window.
@@ -110,6 +113,12 @@ file's test), `C-x 4 C-f` finds a file there, `C-x 4 b` switches it to another b
 one split off to the right — so from `OrderServiceTest.java`, `C-x 4 .` on `OrderService`
 puts the class beside the test, and `C-x 4 t` from the class brings you back to the test.
 `q` in a window that was split off to show something closes it again.
+
+`C-x b` previews open file candidates as you choose between them, preserving the
+original view until `RET` accepts. `C-g` cancels without changing buffer order or jump
+history. `C-x 4 b` previews in the other window; a split created only for a preview goes
+away when you cancel. Files unavailable for automatic preview show a message; accepting
+still uses normal file opening. Automatic reads are limited to 2 MiB of text.
 
 Switching to the diff from your files — `q`, `M-x diff`, `C-x b diff`, entering a commit —
 gives it the whole screen, as magit's status does, and keeps your windows: come back to

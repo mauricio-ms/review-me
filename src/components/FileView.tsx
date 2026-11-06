@@ -15,6 +15,7 @@ import { languages } from "../editor/languages";
 import { markdownView } from "../editor/markdown-view";
 import { occurrenceHighlight } from "../editor/occurrences";
 import { overviewRuler } from "../editor/overview-ruler";
+import { previewLocation, setPreviewLocation } from "../editor/preview-location";
 import { swiperHighlight } from "../editor/swiper";
 import { viewerKeymap } from "../editor/viewer-keymap";
 import { defineNavVim } from "../editor/vim-nav";
@@ -33,6 +34,7 @@ import {
 } from "../lib/project-view";
 import { bufferOnScreen, useFilesStore } from "../state/files";
 import { useProjectStore } from "../state/project";
+import type { PickerPreview } from "../state/picker-preview";
 import { useRepoStore } from "../state/repo";
 import { useTagsStore } from "../state/tags";
 import { useUIStore, type VimMode } from "../state/ui";
@@ -92,15 +94,19 @@ function trackPosition(win: WindowId, buffer: FileBufferId): Extension {
  * comparison under review, and its flags. Keyed by buffer, so each buffer gets a fresh editor that opens at the place
  * this window left it — and a preview that gets opened keeps the one it has.
  */
-export default function FileView({ win, bufferId }: { win: WindowId; bufferId: FileBufferId }) {
-  const buffer = useFilesStore((s) => bufferOnScreen(s, bufferId));
+export default function FileView({ win, bufferId, peek }: { win: WindowId; bufferId: FileBufferId; peek?: PickerPreview }) {
+  const transient = peek != null;
+  const stored = useFilesStore((s) => bufferOnScreen(s, bufferId));
+  const buffer = peek?.buffer ?? stored;
   // The tree's cursor is on it: shown here, not open yet.
   const preview = useWindowStore((s) => s.preview?.win === win && s.preview.key === bufferId);
   const diff = useRepoStore((s) => s.diff);
   const flags = useTagsStore((s) => s.flags);
   const changedOnly = useProjectStore((s) => s.filter === "changed");
   const diffHighlight = useUIStore((s) => s.diffHighlight);
-  const focused = useWindowStore((s) => s.selected === win && !s.treeFocused);
+  const windowFocused = useWindowStore((s) => s.selected === win && !s.treeFocused);
+  const modalDepth = useUIStore((s) => s.modalDepth);
+  const focused = windowFocused && modalDepth === 0 && !peek;
   const focusRequest = useUIStore((s) => s.focusRequest);
   const rawMarkup = useFilesStore((s) => s.rawMarkup.has(bufferId));
   const setVimMode = useUIStore((s) => s.setVimMode);
@@ -137,7 +143,13 @@ export default function FileView({ win, bufferId }: { win: WindowId; bufferId: F
     if (focused) view?.focus();
   }, [focused, focusRequest, view]);
 
-  useEffect(() => () => registerFileView(win, bufferId, null), [bufferId, win]);
+  useEffect(() => () => { if (!transient) registerFileView(win, bufferId, null); }, [bufferId, win, transient]);
+
+  useEffect(() => {
+    if (!peek || !view || content == null) return;
+    applyPosition(view, peek.position);
+    if (peek.position.center) view.dispatch({ effects: setPreviewLocation.of({ line: peek.position.line, ranges: peek.ranges }) });
+  }, [peek, content, view]);
 
   // The flags on the side of the comparison this buffer reads: their line numbers count
   // that side's lines, so a revision that is neither side shows none.
@@ -176,11 +188,11 @@ export default function FileView({ win, bufferId }: { win: WindowId; bufferId: F
   // back where the reader was.
   const shownContent = useRef(content);
   useEffect(() => {
-    if (!view || shownContent.current === content) return;
+    if (transient || !view || shownContent.current === content) return;
     shownContent.current = content;
     const pos = positionOf(win, bufferId);
     if (pos) applyPosition(view, pos);
-  }, [bufferId, content, view, win]);
+  }, [bufferId, content, view, win, transient]);
 
   // Lazily load the CodeMirror language for the file, dispatched by file name
   // (extension, plus special names like Dockerfile). The Gruber Darker theme supplies
@@ -200,10 +212,10 @@ export default function FileView({ win, bufferId }: { win: WindowId; bufferId: F
     };
   }, [path]);
 
-  const tracker = useMemo(() => trackPosition(win, bufferId), [bufferId, win]);
+  const tracker = useMemo(() => transient ? [] : trackPosition(win, bufferId), [bufferId, win, transient]);
   const occurrences = useMemo(
-    () => occurrenceHighlight(source && path ? occurrenceLookup(source, path) : null),
-    [path, source],
+    () => transient ? [] : occurrenceHighlight(source && path ? occurrenceLookup(source, path) : null),
+    [path, source, transient],
   );
   const extensions = useMemo(() => {
     const ext = [
@@ -220,6 +232,7 @@ export default function FileView({ win, bufferId }: { win: WindowId; bufferId: F
       occurrences,
       swiperHighlight,
       tracker,
+      previewLocation,
       jsdocHighlight,
       EditorState.readOnly.of(true),
       EditorView.lineWrapping,
@@ -231,20 +244,21 @@ export default function FileView({ win, bufferId }: { win: WindowId; bufferId: F
 
   const onCreateEditor = useCallback(
     (created: EditorView) => {
-      registerFileView(win, bufferId, created);
-      applyPosition(created, positionOf(win, bufferId) ?? { line: 1, col: 0 });
-      getCM(created)?.on("vim-mode-change", (e: { mode: string }) =>
+      if (!transient) registerFileView(win, bufferId, created);
+      applyPosition(created, peek?.position ?? positionOf(win, bufferId) ?? { line: 1, col: 0 });
+      if (!transient) getCM(created)?.on("vim-mode-change", (e: { mode: string }) =>
         setVimMode(VIM_MODE_MAP[e.mode] ?? "normal"),
       );
       setView(created);
     },
-    [bufferId, setVimMode, win],
+    [bufferId, setVimMode, win, transient],
   );
 
   if (!buffer) return null;
 
   return (
-    <div className={`project-viewer${preview ? " is-preview" : ""}`}>
+    <div className={`project-viewer${preview || peek ? " is-preview" : ""}`}
+      onMouseDownCapture={peek ? (event) => event.preventDefault() : undefined}>
       <div className="project-viewer-path">
         <PathLabel className="project-viewer-file" path={buffer.path} oldPath={change?.oldPath} />
         {change && (
@@ -272,7 +286,9 @@ export default function FileView({ win, bufferId }: { win: WindowId; bufferId: F
             @ {buffer.sourceLabel}
           </span>
         )}
-        {preview && (
+        {peek ? (
+          <span className="project-viewer-preview">preview · <kbd>RET</kbd> opens · <kbd>C-g</kbd> cancels</span>
+        ) : preview && (
           <span
             className="project-viewer-preview"
             title="the file under the tree's cursor — not open until you go into it"
@@ -281,7 +297,9 @@ export default function FileView({ win, bufferId }: { win: WindowId; bufferId: F
           </span>
         )}
       </div>
-      {content == null ? (
+      {peek?.error ? (
+        <div className="project-viewer-empty" role="status">Preview unavailable: {peek.error}</div>
+      ) : content == null ? (
         <div className="project-viewer-empty">reading {buffer.path}…</div>
       ) : (
         <CodeMirror

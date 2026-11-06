@@ -11,6 +11,7 @@ import {
 import { openPreview } from "../lib/project";
 import { focusTree } from "../lib/windows";
 import { useProjectStore } from "../state/project";
+import { usePickerPreviewStore } from "../state/picker-preview";
 import FileView from "./FileView";
 import HelpBuffer from "./HelpBuffer";
 
@@ -110,6 +111,7 @@ function Window({
   style: CSSProperties;
 }) {
   const key = useWindowStore((s) => onScreen(s, id));
+  const pane = usePickerPreviewStore((s) => s.shown?.win === id ? s.shown : null);
   const rootRef = useRef<HTMLDivElement | null>(null);
 
   // A native listener: the diff and the log are portals, so their React focus events
@@ -118,6 +120,7 @@ function Window({
     const root = rootRef.current;
     if (!root) return;
     const onFocusIn = () => {
+      if (usePickerPreviewStore.getState().owner != null) return;
       if (!openPreview(id)) useWindowStore.getState().select(id);
     };
     root.addEventListener("focusin", onFocusIn);
@@ -126,15 +129,20 @@ function Window({
 
   return (
     <div ref={rootRef} className={className} style={style} data-window={id}>
-      {key === "diff" || key === "log" ? (
-        <BufferSlot name={key} />
-      ) : key === "help" ? (
-        <HelpBuffer />
-      ) : key === "project" ? (
-        <NoFileOpen win={id} />
-      ) : key && isFileKey(key) ? (
-        <FileView key={key} win={id} bufferId={key} />
-      ) : null}
+      <div className="window-content" style={pane ? { visibility: "hidden" } : undefined} aria-hidden={pane ? true : undefined}>
+        {key === "diff" || key === "log" ? (
+          <BufferSlot name={key} />
+        ) : key === "help" ? (
+          <HelpBuffer />
+        ) : key === "project" ? (
+          <NoFileOpen win={id} />
+        ) : key && isFileKey(key) ? (
+          <FileView key={key} win={id} bufferId={key} />
+        ) : null}
+      </div>
+      {pane && <div className="picker-file-preview" data-preview-path={pane.buffer.path}>
+        <FileView key={pane.buffer.id} win={id} bufferId={pane.buffer.id} peek={pane} />
+      </div>}
     </div>
   );
 }

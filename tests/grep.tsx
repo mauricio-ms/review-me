@@ -36,6 +36,7 @@ beforeEach(() => {
   mock("cancel_repo_search", () => {});
   mock("search_repo", () => found());
   mock("read_file", () => "first\n😀 needle needle\nthird needle");
+  mock("read_preview", () => "first\n😀 needle needle\nthird needle");
   mock("symbol_occurrences", () => null);
   mock("list_repo_dir", ({ path }) => ({ path, entries: path === "" ? [
     { name: "src", path: "src", isDir: true },
@@ -106,7 +107,7 @@ test("the global shortcut opens a full-width picker below the current buffer wit
   assert(!document.querySelector(".grep-buffer"));
 });
 
-test("candidate navigation only changes selection and scroll, without opening or previewing files", async () => {
+test("candidate navigation previews source while preserving focus, buffers and histories", async () => {
   mock("search_repo", () => found(Array.from({ length: 40 }, (_, i) => hit({ path: "src/file" + i + ".txt", line: i + 1 }))));
   await mount(); const before = windowSnapshot(); const input = await search();
   key("n", { ctrlKey: true }, input);
@@ -115,6 +116,8 @@ test("candidate navigation only changes selection and scroll, without opening or
   key("p", { ctrlKey: true }, input); await waitFor(() => gs().selected === 0);
   key("p", { ctrlKey: true }, input); await waitFor(() => gs().selected === 39);
   await waitFor(() => document.querySelector(".grep-list")!.scrollTop > 0);
+  await waitFor(() => document.querySelector('[data-preview-path="src/file39.txt"] .cm-editor'));
+  equal(calls.filter((c) => c.command === "read_preview").length, 1);
   equal(windowSnapshot(), before); equal(fileReads().length, 0);
   equal(useHistoryStore.getState().back, []); equal(useFilesStore.getState().buffers, []);
   assert(document.activeElement === input);

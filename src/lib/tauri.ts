@@ -110,6 +110,11 @@ export function readFile(
   return invoke<string>("read_file", { repo, source, path });
 }
 
+/** Read at most 2 MiB of text for a temporary preview, on a backend worker. */
+export function readPreview(repo: string, source: ProjectSource, path: string): Promise<string> {
+  return invoke<string>("read_preview", { repo, source, path });
+}
+
 export function loadTags(repo: string, scope: ReviewScope): Promise<TagStore> {
   return invoke<TagStore>("load_tags", { repo, scope });
 }

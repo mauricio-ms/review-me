@@ -1,6 +1,6 @@
 import { useRepoStore } from "../state/repo";
 import { useXrefStore } from "../state/xref";
-import type { ProjectSource } from "../types/repo";
+import { sameSource, type ProjectSource } from "../types/repo";
 import type { Occurrences, XrefResult } from "../types/xref";
 import { currentFile } from "./buffers";
 import { recordJump } from "./jumps";
@@ -22,11 +22,19 @@ import {
  * selected window — and land in files of that same revision.
  */
 function ctx() {
-  const repo = useRepoStore.getState().repoPath;
+  const snapshot = useRepoStore.getState();
+  const repo = snapshot.repoPath;
   const file = currentFile();
   if (!repo || !file) return null;
   const choice: SourceChoice = { source: file.source, label: file.sourceLabel };
-  return { repo, source: file.source, path: file.path, choice };
+  return { repo, source: file.source, path: file.path, choice, buffer: file.id, diff: snapshot.diff };
+}
+
+/** A late lookup must not open a picker (and start preview reads) in a newer review. */
+function current(c: NonNullable<ReturnType<typeof ctx>>): boolean {
+  const repo = useRepoStore.getState();
+  const file = currentFile();
+  return repo.repoPath === c.repo && repo.diff === c.diff && file?.id === c.buffer && sameSource(file.source, c.source);
 }
 
 /**
@@ -58,8 +66,9 @@ export async function gotoDefinitionAt(line: number, col: number, other = false)
     if (await followLink(view.state, pos, other)) return;
   }
   const symbol = await symbolAt(c.repo, c.source, c.path, line, col);
-  if (!symbol) return;
+  if (!symbol || !current(c)) return;
   const defs = await findDefinition(c.repo, c.source, symbol);
+  if (!current(c)) return;
   if (defs.length === 0) {
     useXrefStore.getState().show(`no definition for ${symbol.name}`, [], c.choice);
   } else if (defs.length === 1) {
@@ -84,8 +93,9 @@ export async function findUsages(): Promise<void> {
   const cursor = projectCursor();
   if (!c || !cursor) return;
   const symbol = await symbolAt(c.repo, c.source, c.path, cursor.line, cursor.col);
-  if (!symbol) return;
+  if (!symbol || !current(c)) return;
   const refs = await findReferences(c.repo, c.source, symbol);
+  if (!current(c)) return;
   const proven = refs.filter((r) => r.confirmed).length;
   const title =
     proven === refs.length

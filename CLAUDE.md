@@ -56,6 +56,8 @@ symbol index per language in a global `Mutex`.
 - `commits.rs` `list(repo, ref, skip, limit)` → a newest-first page of `CommitInfo`s, each with its ref `Decoration`s (filled by `list` only), and `resolve(repo, rev)` → (oid, **first** parent oid, info, full message). Any revision resolves (full oid, abbreviation, `HEAD~2`), but only full oids may reach a `DiffSpec`/`ReviewScope`.
 - `diff.rs` `compute(repo, &DiffSpec)` → `DiffSummary { comparison, files }` (`ChangedFile`/`Hunk`/`DiffLine`). See "Comparisons" below.
 - `revision.rs` `ProjectSource` (worktree | commit) and tree-backed content/listing/file-list reads.
+- `preview.rs` bounded text reads for picker previews (2 MiB, regular files only,
+  UTF-8 without NUL bytes); `read_preview` runs on a blocking worker and never writes.
 - `grep.rs` literal smart-case search over `ProjectSource`, bounded text reads and
   UTF-16 match ranges. `SearchRegistry` holds cancellation tokens for async searches;
   `search_repo` runs blocking Git/filesystem reads on Tauri's worker pool.
@@ -134,7 +136,10 @@ The frame's last line is **`Minibuffer.tsx`**: the echo area (`useUIStore.flash`
 It sits under the mode line (`BufferStatusBar`) and grows upward.
 
 `C-x p g` / `M-x grep` opens `GrepPrompt` in that same bottom minibuffer: a temporary
-picker of `path:line: matching text`, with no file preview or persistent results buffer.
+picker of `path:line: matching text`, with a temporary file preview and no persistent
+results buffer. After a 150 ms rest, the selected current result shows its surrounding
+code and highlighted UTF-16 match ranges; the input keeps the keyboard. Old rows retained
+while a query updates cannot preview or navigate, and their previous preview is cleared.
 `lib/grep.ts` captures the originating place and selected project window. Accepting a
 candidate closes the picker and visits the file in that window, or enters project mode
 when invoked elsewhere; cancelling closes it without navigation. Closing/replacing the
@@ -530,6 +535,22 @@ window shows something else, another window is selected, or project mode ends), 
 `applyComparison` clears it too. `currentPlace` falls back to the saved position because
 the covered window's own view is unmounted.
 
+**Picker previews** (`lib/picker-preview.ts`, `components/useFilePreview.ts`,
+`state/picker-preview.ts`) belong to a single picker session. Grep and xref lists follow
+the selected current location after 150 ms; `C-x b` / `C-x 4 b` preview existing file
+candidates immediately, leaving singleton candidates as names. `Window` keeps the
+covered view mounted and laid out beneath a separate `FileView` (`peek`), so its exact
+selection, scroll, and registered command view survive. Peek views never register as
+the window's active view, track persistent positions, request occurrences, or take focus.
+Location previews mark the target source line (kept visible in rendered Markdown too).
+RET/result click hands loaded content to the normal navigation path before ending the
+picker, which records one jump; C-g/Escape restores the covered view. Other-window
+previews reuse a neighbor or create a temporary split, removed on cancellation or before
+normal acceptance recreates it. A session caches at most eight reads, keyed by source
+and path; late successes/failures, replaced pickers, and repo/comparison refreshes cannot
+restore a cancelled preview. Tree previews stay underneath; pending tree reads are
+suppressed while a modal owns the keyboard. The fuzzy finder does not preview yet.
+
 `useProjectStore.filter` (`all` | `changed`, `C-x v c` / `M-x changed`) defaults to
 `changed`: it narrows the tree to **the applied comparison's files** (`useRepoStore.diff`)
 and shows deleted lines inline in the viewer. `all` lists the whole revision and hides
@@ -905,6 +926,7 @@ Existing suites: `test:coverage` (review classification/progress, not code-cover
 instrumentation), `test:algorithms`, `test:navigation`, `test:loading`, `test:keyboard`,
 `test:review`, `test:log` (full-range progress, paging, refresh and stale replies),
 `test:grep` (bottom search picker, scopes, dismissal, project navigation and cancellation),
+`test:previews` (grep/xref/buffer candidates, focus, adoption, restoration and stale reads),
 `test:jsdoc` (documentation highlighting), `test:markdown` (layout and
 navigation), and `test:resolve` (flag selection, confirmation and resolution).
 

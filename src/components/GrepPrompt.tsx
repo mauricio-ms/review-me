@@ -7,6 +7,7 @@ import { useGrepStore } from "../state/grep";
 import type { SearchHit } from "../types/grep";
 import PathLabel from "./PathLabel";
 import { useModalFocus } from "./useModalFocus";
+import { useFilePreview } from "./useFilePreview";
 
 function marked(hit: SearchHit): ReactNode {
   const pieces: ReactNode[] = [];
@@ -20,7 +21,7 @@ function marked(hit: SearchHit): ReactNode {
   return pieces;
 }
 
-/** A temporary horizontal picker below the current buffer, with no file previews. */
+/** A bottom search picker that previews the selected current result without visiting. */
 export default function GrepPrompt({ atPoint }: { atPoint: string | null }) {
   const { context, query, scope, results, selected, status, error } = useGrepStore();
   const remaining = grepCharsRemaining(query);
@@ -28,6 +29,18 @@ export default function GrepPrompt({ atPoint }: { atPoint: string | null }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const selectedRef = useRef<HTMLDivElement | null>(null);
   useModalFocus({ open: true, rootRef, initialFocusRef: inputRef });
+  const hit = status === "ready" ? results?.hits[selected] : null;
+  const finishPreview = useFilePreview(true, context, hit && context ? {
+    path: hit.path, choice: context.choice, line: hit.line, col: hit.col, ranges: hit.ranges,
+    current: () => {
+      const state = useGrepStore.getState();
+      return state.context === context && state.status === "ready" && state.results?.hits[state.selected] === hit;
+    },
+  } : null, { window: context?.window ?? undefined }, 150, cancelGrep);
+  const accept = (index: number) => {
+    const candidate = results?.hits[index];
+    if (status === "ready" && candidate && finishPreview(true, candidate.path)) visitGrepHit(index);
+  };
 
   useEffect(() => {
     selectedRef.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
@@ -38,7 +51,7 @@ export default function GrepPrompt({ atPoint }: { atPoint: string | null }) {
     prev: () => moveGrep(-1),
     "yank-symbol": () => { if (atPoint) editGrep(atPoint); },
     complete: () => false,
-    accept: () => visitGrepHit(selected),
+    accept: () => accept(selected),
     quit: cancelGrep,
     yes: () => false,
     no: () => false,
@@ -64,7 +77,7 @@ export default function GrepPrompt({ atPoint }: { atPoint: string | null }) {
           {context?.choice.label ?? "working tree"}
         </span>
         <span className="mb-hint" role="status" aria-live="polite">
-          {status === "loading" && results ? "Updating…" : "C-n / C-p choose · M-n symbol · RET open · C-g cancel"}
+          {status === "loading" && results ? "Updating…" : "C-n / C-p preview · M-n symbol · RET open · C-g cancel"}
         </span>
       </div>
       <div id="grep-results" className="mb-list grep-list" role="listbox" aria-label="Matching lines" aria-busy={status === "loading"}>
@@ -72,7 +85,7 @@ export default function GrepPrompt({ atPoint }: { atPoint: string | null }) {
           <div key={`${hit.path}:${hit.line}`} id={`grep-hit-${index}`}
             className={`grep-row${index === selected ? " is-selected" : ""}`} role="option" aria-selected={index === selected}
             aria-disabled={status !== "ready"}
-            ref={index === selected ? selectedRef : undefined} onClick={() => visitGrepHit(index)}>
+            ref={index === selected ? selectedRef : undefined} onClick={() => accept(index)}>
             <span className="grep-location"><PathLabel path={hit.path} />:<span className="grep-line">{hit.line}</span>:</span>
             <span className="grep-snippet">{marked(hit)}</span>
           </div>

@@ -144,7 +144,7 @@ const START_KEYS = [
 ] as const satisfies readonly KeyBinding[];
 
 const DIFF_KEYS = [
-  { keys: ["j", "<down>"], action: "down", doc: "next row (a file shows as a preview)" },
+  { keys: ["j", "<down>"], action: "down", doc: "next row" },
   { keys: ["k", "<up>"], action: "up", doc: "previous row" },
   { keys: ["g g"], action: "first", doc: "first row" },
   { keys: ["G"], action: "last", doc: "last row" },

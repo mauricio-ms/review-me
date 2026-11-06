@@ -173,6 +173,15 @@ pub fn read_file(repo: String, source: ProjectSource, path: String) -> AppResult
     revision::read_file(&repository, &source, &root, &path)
 }
 
+#[tauri::command]
+pub async fn read_preview(repo: String, source: ProjectSource, path: String) -> AppResult<String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let repository = crate::repo::open(&PathBuf::from(repo))?;
+        let root = crate::repo::root(&repository)?;
+        crate::preview::read(&repository, &source, &root, &path)
+    }).await.map_err(|e| crate::error::AppError::Repo(format!("preview failed: {e}")))?
+}
+
 /// Tags belonging to `scope` (the active comparison), re-anchored against it.
 #[tauri::command]
 pub fn load_tags(repo: String, scope: ReviewScope) -> AppResult<TagStore> {

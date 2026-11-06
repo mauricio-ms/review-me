@@ -7,6 +7,7 @@ import { useUIStore } from "../state/ui";
 import { useXrefStore } from "../state/xref";
 import { splitPath } from "./PathLabel";
 import { useModalFocus } from "./useModalFocus";
+import { useFilePreview } from "./useFilePreview";
 
 export default function XrefHost() {
   const open = useXrefStore((s) => s.open);
@@ -20,6 +21,10 @@ export default function XrefHost() {
   const rootRef = useRef<HTMLDivElement | null>(null);
   useModalFocus({ open, rootRef });
   const [selected, setSelected] = useState(0);
+  const result = results[selected];
+  const finishPreview = useFilePreview(open, results, result && choice ? {
+    path: result.file, choice, line: result.line, col: result.col,
+  } : null, { other }, 150, closeStore);
 
   useEffect(() => {
     if (open) setSelected(0);
@@ -34,10 +39,11 @@ export default function XrefHost() {
     (idx: number) => {
       const result = results[idx];
       if (!result || !choice) return;
+      if (!finishPreview(true, result.file)) return;
       closeStore();
       navigateTo(result, choice, other);
     },
-    [choice, closeStore, other, results],
+    [choice, closeStore, other, results, finishPreview],
   );
 
   const move = (delta: number) => {
@@ -84,7 +90,7 @@ export default function XrefHost() {
       <div className="mb-line">
         <span className="mb-count">{results.length}</span>
         <span className="mb-prompt">{title}</span>
-        <span className="mb-hint">RET go · C-g quit</span>
+        <span className="mb-hint">j / k preview · RET go · C-g quit</span>
       </div>
       <div className="mb-list" role="listbox" aria-label={title}>
         {results.length === 0 ? (

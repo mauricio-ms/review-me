@@ -314,7 +314,7 @@ let previewSeq = 0;
 /** A preview is for while the tree has the keyboard. */
 function treeBrowsing(): boolean {
   const ws = useWindowStore.getState();
-  return ws.treeFocused && inProjectMode(ws);
+  return ws.treeFocused && inProjectMode(ws) && useUIStore.getState().modalDepth === 0;
 }
 
 /** Drop the file read for a preview, with every place a window had in it. */

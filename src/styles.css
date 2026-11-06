@@ -169,6 +169,32 @@ kbd {
   min-height: 0;
 }
 
+.window-content {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.window-content > * { flex: 1; min-height: 0; }
+
+.picker-file-preview {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-0);
+}
+
+.picker-file-preview .cm-preview-line {
+  background: color-mix(in srgb, var(--accent-amber) 12%, transparent);
+}
+
+.picker-file-preview .cm-preview-match,
+.picker-file-preview .cm-preview-match * {
+  color: var(--bg-0);
+  background: var(--accent-amber);
+}
+
 /* The diff and the log are moved into whichever window shows them (Window.tsx). */
 .buffer-host {
   height: 100%;

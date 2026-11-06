@@ -13,7 +13,9 @@ import { contextScope, dispatchKey, type KeyHandler } from "../lib/key-dispatch"
 import { commandKeys, KEYMAP, type MinibufferAction } from "../lib/keymap";
 import { showLog } from "../lib/log";
 import { showProject } from "../lib/windows";
+import { activeView, applyPosition, savePosition } from "../lib/project-view";
 import { useFilesStore } from "../state/files";
+import { usePickerPreviewStore } from "../state/picker-preview";
 import {
   useMinibufferStore,
   type MinibufferRequest,
@@ -33,6 +35,7 @@ import SwiperPrompt from "./SwiperPrompt";
 import GrepPrompt from "./GrepPrompt";
 import { type CommandClose, useCommands } from "./useCommands";
 import { useModalFocus } from "./useModalFocus";
+import { useFilePreview } from "./useFilePreview";
 
 /**
  * The bottom line of the window, Emacs-style: the echo area (messages, a half-typed
@@ -148,6 +151,7 @@ function Prompt({ request }: { request: Exclude<MinibufferRequest, SwiperRequest
   const { commands } = useCommands(close);
   // The keymap in force when the minibuffer opened: the one M-x shows keys from.
   const [scope] = useState(contextScope);
+  const previewFinish = useRef<(accept?: boolean, path?: string) => boolean>(() => false);
 
   const candidates = useMemo<Candidate[] | null>(() => {
     if (request.kind === "command") {
@@ -215,6 +219,9 @@ function Prompt({ request }: { request: Exclude<MinibufferRequest, SwiperRequest
             : label[key as keyof typeof label],
           enabled: true,
           run: () => {
+            const peek = usePickerPreviewStore.getState().shown;
+            const position = peek?.buffer.id === key ? peek.position : null;
+            if (!previewFinish.current(!!file, file?.path)) return;
             close({ restoreFocus: false });
             // A switch is a move `M-,` comes back from (help is nowhere to come back to).
             if (key !== "help") recordJump();
@@ -222,7 +229,14 @@ function Prompt({ request }: { request: Exclude<MinibufferRequest, SwiperRequest
             else if (key === "help") openHelp(scope, false, { other });
             else if (key === "project" && !other) showProject();
             else if (key === "diff") showDiff({ other });
-            else showBuffer(key, { other });
+            else {
+              showBuffer(key, { other });
+              if (file && position) {
+                savePosition(useWindowStore.getState().selected, file.id, position);
+                const view = activeView();
+                if (view) applyPosition(view, position);
+              }
+            }
           },
         };
       });
@@ -259,6 +273,10 @@ function Prompt({ request }: { request: Exclude<MinibufferRequest, SwiperRequest
   }, [candidates, needle]);
 
   const current = rows && selected >= 0 ? rows[Math.min(selected, rows.length - 1)] : undefined;
+  const previewFile = request.kind === "buffer" ? fileBuffers.find((file) => file.id === current?.id) : null;
+  previewFinish.current = useFilePreview(request.kind === "buffer", request, previewFile ? {
+    path: previewFile.path, choice: { source: previewFile.source, label: previewFile.sourceLabel },
+  } : null, { other: request.kind === "buffer" && request.other, bufferSwitch: true }, 0, closeMinibuffer);
 
   const move = (delta: number) => {
     if (!rows || rows.length === 0) return;
@@ -372,6 +390,7 @@ function Prompt({ request }: { request: Exclude<MinibufferRequest, SwiperRequest
             else setSelected(value.trim() || picksDefault ? 0 : -1);
           }}
         />
+        {request.kind === "buffer" && <span className="mb-hint">files preview · RET switch · C-g cancel</span>}
       </div>
       {rows && (
         <div

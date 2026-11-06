@@ -10,6 +10,7 @@ mod fuzzy;
 mod generated;
 mod grep;
 mod notes;
+mod preview;
 mod queries;
 mod repo;
 mod repo_library;
@@ -44,6 +45,7 @@ pub fn run() {
             commands::list_file_system_entries,
             commands::create_directory,
             commands::read_file,
+            commands::read_preview,
             commands::load_tags,
             commands::flags_for_commits,
             commands::resolve_flags,
