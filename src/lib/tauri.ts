@@ -6,6 +6,7 @@ import type {
   CommitInfo,
   CommitLog,
   CommitReview,
+  Coverage,
   Counterpart,
   DirectoryListing,
   FileMatch,
@@ -65,6 +66,11 @@ export function listCommits(
 /** Review progress for whichever of `oids` have a mark; untouched commits are omitted. */
 export function commitReviews(repo: string, oids: string[]): Promise<CommitReview[]> {
   return invoke<CommitReview[]>("commit_reviews", { repo, oids });
+}
+
+/** Review units across the whole log range, including untouched and unloaded commits. */
+export function logCoverage(repo: string, refName: string, baseRef: string | null): Promise<Coverage> {
+  return invoke<Coverage>("log_coverage", { repo, refName, baseRef });
 }
 
 /** Expand a typed revision (short sha, `HEAD~2`, a ref) to a full commit. */

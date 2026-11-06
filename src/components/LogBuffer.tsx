@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ShowOptions } from "../lib/buffers";
 import { dispatchKey, type KeyHandler } from "../lib/key-dispatch";
 import { KEYMAP, type LogAction } from "../lib/keymap";
-import { loadMoreLog, setLogHandle } from "../lib/log";
+import { loadMoreLog, refreshCommitReviews, setLogHandle } from "../lib/log";
 import { enterCommit, enterLogRange } from "../lib/open-repo";
 import { confirmAndResolve, setResolveHandler } from "../lib/resolve-flags";
 import { flagsForCommits } from "../lib/tauri";
@@ -12,6 +12,7 @@ import { markMatches, setListSwiper, swipeList } from "../lib/swiper-list";
 import { timeAgo } from "../lib/time";
 import { useLogStore } from "../state/log";
 import { useRepoStore } from "../state/repo";
+import { useTagsStore } from "../state/tags";
 import { useUIStore } from "../state/ui";
 import { hasKeyboard, isShown, useWindowStore } from "../state/windows";
 import type { CommitInfo, CommitReview, Decoration, LogRange } from "../types/repo";
@@ -60,6 +61,38 @@ function ReviewBadges({ review }: { review: CommitReview | undefined }) {
         </span>
       )}
     </span>
+  );
+}
+
+/** Pinned above the scrolling history; the denominator covers the entire log range. */
+function ReviewProgress() {
+  const coverage = useLogStore((s) => s.coverage);
+  const loading = useLogStore((s) => s.coverageLoading);
+  const error = useLogStore((s) => s.coverageError);
+  const done = coverage ? coverage.reviewed + coverage.ignored : 0;
+  // Never display 100% while even one change remains unfinished.
+  const percent = coverage?.total ? Math.floor((done * 100) / coverage.total) : 0;
+  return (
+    <div className="log-review-progress" aria-label="Review progress" aria-busy={loading}>
+      <span className="log-status-label">Review progress</span>
+      {loading ? (
+        <span className="log-status-hint" role="status">calculating…</span>
+      ) : error ? (
+        <span className="diff-header-error" role="status" title={error}>progress unavailable</span>
+      ) : coverage && coverage.total > 0 ? (
+        <>
+          <progress aria-label="Changes complete" max={coverage.total} value={done} />
+          <span className="log-progress">{percent}%</span>
+          <span className="log-review-count" title="Each text hunk or binary file is one change. Reviewed and ignored changes are complete; flagged changes remain pending.">
+            {done}/{coverage.total} changes complete
+          </span>
+          <span className="mark-flagged">· {coverage.flagged} flagged</span>
+          <span className="status-ignored">· {coverage.ignored} ignored</span>
+        </>
+      ) : (
+        <span className="log-status-hint">{coverage ? "no changes to review" : "progress not loaded"}</span>
+      )}
+    </div>
   );
 }
 
@@ -156,6 +189,16 @@ export default function LogBuffer() {
   useEffect(() => {
     if (focused) rootRef.current?.focus({ preventScroll: true });
   }, [focused, focusRequest]);
+
+  // A split can show the log while marks change in a commit's diff or project file.
+  // Hidden logs refresh on return through leaveHistory/loadLog instead.
+  useEffect(() => {
+    if (!visible) return;
+    return useTagsStore.subscribe(() => {
+      const { comparison } = useRepoStore.getState();
+      if (comparison.kind === "commit") void refreshCommitReviews([comparison.oid]);
+    });
+  }, [visible]);
 
   useEffect(() => {
     if (!visible) return;
@@ -354,6 +397,8 @@ export default function LogBuffer() {
         {loading && !entering && <span className="diff-header-status">loading…</span>}
         {shownError && <span className="diff-header-error">{shownError}</span>}
       </div>
+
+      <ReviewProgress />
 
       <div className="log-list" ref={listRef} onScroll={onScroll} role="listbox" aria-label="Commits" aria-multiselectable="true">
         <div className="log-status">

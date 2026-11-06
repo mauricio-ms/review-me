@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use crate::branches::{self, BranchInfo};
 use crate::commits::{self, CommitInfo, CommitLog};
 use crate::counterpart::{self, Counterpart};
-use crate::coverage::{self, CommitReview};
+use crate::coverage::{self, CommitReview, Coverage};
 use crate::diff::{self, DiffSpec, DiffSummary};
 use crate::error::AppResult;
 use crate::fs_browse::{self, DirectoryListing, FileSystemListing};
@@ -96,6 +96,25 @@ pub fn commit_reviews(repo: String, oids: Vec<String>) -> AppResult<Vec<CommitRe
     let repository = repo::open(&PathBuf::from(repo))?;
     let root = repo::root(&repository)?;
     coverage::commit_reviews(&repository, &root, &oids)
+}
+
+/// The full log's change-weighted progress. Walking large histories must not block
+/// the app's event loop or prevent paging and reviewing while it is calculated.
+#[tauri::command]
+pub async fn log_coverage(
+    repo: String,
+    ref_name: String,
+    base_ref: Option<String>,
+) -> AppResult<Coverage> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let repository = repo::open(&PathBuf::from(repo))?;
+        let root = repo::root(&repository)?;
+        coverage::log_coverage(&repository, &root, &ref_name, base_ref.as_deref())
+    })
+    .await
+    .map_err(|error| {
+        crate::error::AppError::Repo(format!("could not calculate log coverage: {error}"))
+    })?
 }
 
 /// Resolve a typed revision (abbreviated sha, `HEAD~2`, a ref) to a full commit, so

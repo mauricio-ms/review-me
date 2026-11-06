@@ -1,7 +1,7 @@
 import { useLogStore } from "../state/log";
 import { useRepoStore } from "../state/repo";
 import { showBuffer, type ShowOptions } from "./buffers";
-import { commitReviews, listCommits } from "./tauri";
+import { commitReviews, listCommits, logCoverage } from "./tauri";
 
 /**
  * Commits per page. Deep enough that most reviews never page; the next one loads as
@@ -9,8 +9,12 @@ import { commitReviews, listCommits } from "./tauri";
  */
 const PAGE = 200;
 
-/** Guards against an older page landing after a newer load of the log. */
-let requestSeq = 0;
+/** Only the newest aggregate request may replace the full-range progress. */
+let coverageSeq = 0;
+
+function isCurrent(repo: string, epoch: number): boolean {
+  return useRepoStore.getState().repoPath === repo && useLogStore.getState().epoch === epoch;
+}
 
 /** The history the log lists: the branch under review, else whatever HEAD is on. */
 export function logRef(): string {
@@ -32,15 +36,16 @@ export async function loadLog(): Promise<void> {
   if (!repo) return;
   const ref = logRef();
   const base = logBase();
-  const ticket = ++requestSeq;
-  useLogStore.getState().begin(ref, base);
+  useLogStore.getState().begin(ref, base, true);
+  const epoch = useLogStore.getState().epoch;
+  void refreshLogCoverage();
   try {
     const { range, commits } = await listCommits(repo, ref, base, 0, PAGE);
-    if (ticket !== requestSeq) return;
+    if (!isCurrent(repo, epoch)) return;
     useLogStore.getState().setPage(ref, base, range, commits, commits.length < PAGE);
-    void refreshCommitReviews(commits.map((c) => c.oid));
+    void refreshCommitReviews(commits.map((c) => c.oid), false);
   } catch (e) {
-    if (ticket === requestSeq) useLogStore.getState().fail(String(e));
+    if (isCurrent(repo, epoch)) useLogStore.getState().fail(String(e));
   }
 }
 
@@ -49,32 +54,49 @@ export async function loadMoreLog(): Promise<void> {
   const repo = useRepoStore.getState().repoPath;
   const { ref, base, commits, complete, loading } = useLogStore.getState();
   if (!repo || !ref || complete || loading) return;
-  const ticket = ++requestSeq;
   useLogStore.getState().begin(ref, base);
+  const epoch = useLogStore.getState().epoch;
   try {
     const { commits: page } = await listCommits(repo, ref, base, commits.length, PAGE);
-    if (ticket !== requestSeq) return;
+    if (!isCurrent(repo, epoch)) return;
     // The branch can move between pages; never list a commit twice.
     const seen = new Set(useLogStore.getState().commits.map((c) => c.oid));
     const fresh = page.filter((c) => !seen.has(c.oid));
     useLogStore.getState().appendPage(fresh, page.length < PAGE);
-    void refreshCommitReviews(fresh.map((c) => c.oid));
+    void refreshCommitReviews(fresh.map((c) => c.oid), false);
   } catch (e) {
-    if (ticket === requestSeq) useLogStore.getState().fail(String(e));
+    if (isCurrent(repo, epoch)) useLogStore.getState().fail(String(e));
   }
 }
 
 /** Re-read the review progress of `oids` (e.g. the commit just left). */
-export async function refreshCommitReviews(oids: string[]): Promise<void> {
+export async function refreshCommitReviews(oids: string[], refreshCoverage = true): Promise<void> {
   const repo = useRepoStore.getState().repoPath;
   if (!repo || oids.length === 0) return;
+  const epoch = useLogStore.getState().epoch;
+  const progress = refreshCoverage ? refreshLogCoverage() : Promise.resolve();
   try {
     const reviews = await commitReviews(repo, oids);
-    // A different repo opened meanwhile: these oids mean nothing there.
-    if (useRepoStore.getState().repoPath !== repo) return;
+    if (!isCurrent(repo, epoch)) return;
     useLogStore.getState().setReviews(oids, reviews);
   } catch {
     // Progress is decoration; a failure leaves the rows as they were.
+  }
+  await progress;
+}
+
+/** Compute progress for every change in the range, independently of loaded pages. */
+export async function refreshLogCoverage(): Promise<void> {
+  const repo = useRepoStore.getState().repoPath;
+  const { ref, base, epoch } = useLogStore.getState();
+  if (!repo || !ref) return;
+  const ticket = ++coverageSeq;
+  useLogStore.getState().beginCoverage();
+  try {
+    const coverage = await logCoverage(repo, ref, base);
+    if (ticket === coverageSeq && isCurrent(repo, epoch)) useLogStore.getState().setCoverage(coverage);
+  } catch (error) {
+    if (ticket === coverageSeq && isCurrent(repo, epoch)) useLogStore.getState().failCoverage(String(error));
   }
 }
 

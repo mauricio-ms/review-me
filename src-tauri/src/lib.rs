@@ -35,6 +35,7 @@ pub fn run() {
             commands::review_base,
             commands::list_commits,
             commands::commit_reviews,
+            commands::log_coverage,
             commands::resolve_commit,
             commands::list_recent_repos,
             commands::forget_repo,

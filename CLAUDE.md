@@ -282,7 +282,15 @@ the backend resolved, the pages loaded so far, and `reviews` by oid. `loadLog` r
 page one and is called whenever the log is shown, on `refresh`, and when the review
 branch or its base changes; `loadMoreLog` pages (`skip`) as the cursor or scrollbar nears
 the end. Row progress comes from `commit_reviews`, which only computes a diff for commits
-with a mark in their scope (`tags::marked_scopes`) — an untouched history costs nothing.
+with a mark in their scope (`tags::marked_scopes`). The pinned review summary uses
+`log_coverage`: it walks the full `commits::resolve_range`, including untouched commits
+and those beyond the loaded pages, and sums text hunks + binary files. Completion is
+`(reviewed + ignored) / total`; flags remain pending. The command runs on a blocking
+worker so large histories leave the log usable. `useLogStore.epoch` invalidates replies
+on reload/range changes/reset, and the aggregate has its own latest-request guard so
+paging cannot cancel it. Mark refreshes also update the aggregate; a visible log
+subscribes to commit tag changes for split-window review. Loading, failure and empty
+ranges have explicit summary states.
 
 `openRepoByPath` lands on the log when the freshly applied worktree diff is empty (and
 the repo has a HEAD); a dirty tree lands on the diff buffer. Only *opening* chooses — a
@@ -878,7 +886,8 @@ and keep their TypeScript included in `tsconfig.tests.json`.
 
 Existing suites: `test:coverage` (review classification/progress, not code-coverage
 instrumentation), `test:algorithms`, `test:navigation`, `test:loading`, `test:keyboard`,
-`test:review`, `test:jsdoc` (documentation highlighting), `test:markdown` (layout and
+`test:review`, `test:log` (full-range progress, paging, refresh and stale replies),
+`test:jsdoc` (documentation highlighting), `test:markdown` (layout and
 navigation), and `test:resolve` (flag selection, confirmation and resolution).
 
 ### Backend tests

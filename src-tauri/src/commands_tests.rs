@@ -40,6 +40,213 @@ fn document(fixture: &TestRepo, oid: &str) -> PathBuf {
 }
 
 #[test]
+fn log_progress_weights_changes_and_keeps_review_scopes_separate() {
+    let fixture = TestRepo::new();
+    fixture.write(
+        "a.txt",
+        (1..=20).map(|n| format!("line {n}\n")).collect::<String>(),
+    );
+    fixture.write("deleted.txt", "one\ntwo\nthree\n");
+    let base = fixture.commit("base");
+    fixture
+        .repo
+        .branch(
+            "base",
+            &fixture.repo.find_commit(fixture.head()).unwrap(),
+            false,
+        )
+        .unwrap();
+    let lines = (1..=20)
+        .map(|n| {
+            if n == 2 || n == 18 {
+                format!("changed {n}\n")
+            } else {
+                format!("line {n}\n")
+            }
+        })
+        .collect::<String>();
+    fixture.write("a.txt", lines);
+    fixture.write("deleted.txt", "one\n");
+    fixture.write("image.bin", b"binary\0content");
+    let large = fixture.commit("four changes");
+    fixture.write("small.txt", "one change\n");
+    let small = fixture.commit("one change");
+    add_reviewed_tag(
+        fixture.arg(),
+        scope(&small),
+        "small.txt".into(),
+        1,
+        1,
+        AnchorKind::Hunk,
+        AnchorSide::New,
+    )
+    .unwrap();
+    let progress = || {
+        tauri::async_runtime::block_on(log_coverage(
+            fixture.arg(),
+            "refs/heads/master".into(),
+            Some("refs/heads/base".into()),
+        ))
+        .unwrap()
+    };
+    assert_eq!(
+        progress(),
+        Coverage {
+            total: 5,
+            reviewed: 1,
+            flagged: 0,
+            ignored: 0
+        }
+    );
+
+    // An identical path and range in the working tree cannot complete this commit.
+    add_reviewed_tag(
+        fixture.arg(),
+        ReviewScope::Worktree,
+        "a.txt".into(),
+        1,
+        20,
+        AnchorKind::Range,
+        AnchorSide::New,
+    )
+    .unwrap();
+    add_reviewed_tag(
+        fixture.arg(),
+        scope(&base),
+        "a.txt".into(),
+        1,
+        20,
+        AnchorKind::Range,
+        AnchorSide::New,
+    )
+    .unwrap();
+    add_ignored_tag(
+        fixture.arg(),
+        scope(&large),
+        "deleted.txt".into(),
+        2,
+        3,
+        AnchorKind::Hunk,
+        AnchorSide::Old,
+    )
+    .unwrap();
+    add_reviewed_tag(
+        fixture.arg(),
+        scope(&large),
+        "image.bin".into(),
+        0,
+        0,
+        AnchorKind::File,
+        AnchorSide::File,
+    )
+    .unwrap();
+    add_flag_tag(
+        fixture.arg(),
+        scope(&large),
+        "image.bin".into(),
+        0,
+        0,
+        AnchorKind::File,
+        AnchorSide::File,
+        None,
+        None,
+    )
+    .unwrap();
+    assert_eq!(
+        progress(),
+        Coverage {
+            total: 5,
+            reviewed: 1,
+            flagged: 1,
+            ignored: 1
+        }
+    );
+    clear_tags(fixture.arg(), scope(&small)).unwrap();
+    assert_eq!(
+        progress(),
+        Coverage {
+            total: 5,
+            reviewed: 0,
+            flagged: 1,
+            ignored: 1
+        }
+    );
+
+    // A range whose tip is already contained in its base has no changes to review.
+    let empty = tauri::async_runtime::block_on(log_coverage(
+        fixture.arg(),
+        "refs/heads/base".into(),
+        Some("refs/heads/master".into()),
+    ))
+    .unwrap();
+    assert_eq!(empty, Coverage::default());
+    assert!(tauri::async_runtime::block_on(log_coverage(
+        fixture.arg(),
+        "missing-ref".into(),
+        None
+    ))
+    .is_err());
+}
+
+#[test]
+fn log_progress_includes_untouched_commits_beyond_the_first_page() {
+    let fixture = TestRepo::new();
+    fixture.write("a.txt", "base\n");
+    fixture.commit("base");
+    fixture
+        .repo
+        .branch(
+            "base",
+            &fixture.repo.find_commit(fixture.head()).unwrap(),
+            false,
+        )
+        .unwrap();
+    let mut oldest = String::new();
+    for n in 0..205 {
+        fixture.write("a.txt", format!("change {n}\n"));
+        let oid = fixture.commit("change");
+        if n == 0 {
+            oldest = oid;
+        }
+    }
+    add_reviewed_tag(
+        fixture.arg(),
+        scope(&oldest),
+        "a.txt".into(),
+        1,
+        1,
+        AnchorKind::Hunk,
+        AnchorSide::New,
+    )
+    .unwrap();
+    let page = list_commits(
+        fixture.arg(),
+        "refs/heads/master".into(),
+        Some("refs/heads/base".into()),
+        0,
+        200,
+    )
+    .unwrap();
+    assert_eq!(page.commits.len(), 200);
+    assert!(!page.commits.iter().any(|c| c.oid == oldest));
+    let coverage = tauri::async_runtime::block_on(log_coverage(
+        fixture.arg(),
+        "refs/heads/master".into(),
+        Some("refs/heads/base".into()),
+    ))
+    .unwrap();
+    assert_eq!(
+        coverage,
+        Coverage {
+            total: 205,
+            reviewed: 1,
+            flagged: 0,
+            ignored: 0
+        }
+    );
+}
+
+#[test]
 fn flag_edit_resolve_and_export_use_the_actual_command_composition() {
     let (fixture, _, oid) = fixture();
     let id = note(&fixture, &oid, "Original concern");

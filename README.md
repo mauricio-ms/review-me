@@ -467,6 +467,14 @@ upstream or nothing unpushed, its whole history under **Recent commits**.
 `✎ n` notes. History pages in as you approach the end, and reloads whenever the buffer is
 shown, on `C-x x g`, and when the review branch or its base changes.
 
+A pinned **Review progress** summary above the list shows the percentage of changes
+completed across the entire listed range, including commits that have not loaded yet.
+Each text hunk or binary file counts as one change, so commits with more changes carry
+more weight. Reviewed and explicitly ignored changes count as complete; flagged changes
+remain pending. The summary shows completed/total changes plus flagged and ignored counts,
+and refreshes as you review a commit or resolve flags. Marks from a whole-branch comparison
+remain separate from the commit reviews this summary counts.
+
 To close concerns after checking the fixes, select commits with `v`, extend with
 `j` / `k` (or the arrows), then press `x`. Selected rows are highlighted and the
 header counts their commits and flags. The minibuffer asks, for example,

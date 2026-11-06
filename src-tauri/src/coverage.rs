@@ -3,6 +3,7 @@ use std::path::Path;
 use git2::Repository;
 use serde::Serialize;
 
+use crate::commits;
 use crate::diff::{self, ChangedFile, DiffLineKind, DiffSpec, Hunk};
 use crate::error::AppResult;
 use crate::tags::{self, Anchor, AnchorSide, ReviewScope, ReviewedTag, TagStore};
@@ -62,6 +63,47 @@ pub fn commit_reviews(
             flags: store.flags.len() as u32,
             notes: store.flags.iter().filter(|t| has_note(t.note.as_deref())).count() as u32,
         });
+    }
+    Ok(out)
+}
+
+/// Coverage of the entire log range, including untouched and not-yet-paged commits.
+/// Sum review units, never commit percentages. A diff failure must fail the summary
+/// rather than silently dropping work from its denominator.
+pub fn log_coverage(
+    repo: &Repository,
+    root: &Path,
+    ref_name: &str,
+    base_ref: Option<&str>,
+) -> AppResult<Coverage> {
+    let range = commits::resolve_range(repo, ref_name, base_ref)?;
+    let mut walk = repo.revwalk()?;
+    walk.push(range.tip)?;
+    for oid in range.hide {
+        walk.hide(oid)?;
+    }
+    let marked = tags::marked_scopes(root)?;
+    let mut out = Coverage::default();
+    for oid in walk {
+        let oid = oid?.to_string();
+        let summary = diff::compute(
+            repo,
+            &DiffSpec::Commit {
+                oid: oid.clone(),
+                branch_ref: None,
+            },
+        )?;
+        let scope = ReviewScope::Commit { oid };
+        let store = if marked.contains(&scope) {
+            tags::load(root, &scope)?
+        } else {
+            TagStore::default()
+        };
+        let coverage = summarize(&summary.files, &store);
+        out.total += coverage.total;
+        out.reviewed += coverage.reviewed;
+        out.flagged += coverage.flagged;
+        out.ignored += coverage.ignored;
     }
     Ok(out)
 }

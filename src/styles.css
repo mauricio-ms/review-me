@@ -992,6 +992,47 @@ kbd {
   line-height: 1.55;
 }
 
+.log-review-progress {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--bg-3);
+  background: var(--bg-1);
+  color: var(--fg-1);
+  font-size: var(--fs-ui);
+  font-variant-numeric: tabular-nums;
+}
+
+.log-review-progress .log-status-label {
+  flex-basis: auto;
+}
+
+.log-review-progress progress {
+  appearance: none;
+  width: 100px;
+  height: 6px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 3px;
+  background: var(--bg-3);
+  color: var(--accent-teal);
+}
+
+.log-review-progress progress::-webkit-progress-bar {
+  background: var(--bg-3);
+}
+
+.log-review-progress progress::-webkit-progress-value {
+  background: var(--accent-teal);
+}
+
+.log-review-progress progress::-moz-progress-bar {
+  background: var(--accent-teal);
+}
+
 /* Magit-status preamble: Head / Review / Changes, labels in a fixed column. */
 .log-status {
   padding: 4px 14px 8px;

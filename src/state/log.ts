@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-import type { CommitInfo, CommitReview, LogRange } from "../types/repo";
+import type { CommitInfo, CommitReview, Coverage, LogRange } from "../types/repo";
 
 // Module-level stable empties — never return fresh []/{} from selectors (avoids the
 // Zustand infinite-rerender trap).
@@ -8,6 +8,8 @@ const EMPTY_COMMITS: CommitInfo[] = [];
 const EMPTY_REVIEWS: Record<string, CommitReview> = {};
 
 type LogState = {
+  /** Invalidates pending replies on reload, range change, or repository reset. */
+  epoch: number;
   /**
    * The ref whose history is listed: the review branch's canonical ref, or `HEAD`
    * when there is no branch to review. Null until the log is first loaded.
@@ -28,8 +30,12 @@ type LogState = {
   error: string | null;
   /** Review progress by oid, for commits with a mark. Absent means untouched. */
   reviews: Record<string, CommitReview>;
+  /** Change counts for the entire range, independently of row pagination. */
+  coverage: Coverage | null;
+  coverageLoading: boolean;
+  coverageError: string | null;
 
-  begin: (ref: string, base: string | null) => void;
+  begin: (ref: string, base: string | null, reload?: boolean) => void;
   setPage: (
     ref: string,
     base: string | null,
@@ -39,11 +45,15 @@ type LogState = {
   ) => void;
   appendPage: (commits: CommitInfo[], complete: boolean) => void;
   setReviews: (oids: string[], reviews: CommitReview[]) => void;
+  beginCoverage: () => void;
+  setCoverage: (coverage: Coverage) => void;
+  failCoverage: (message: string) => void;
   fail: (message: string) => void;
   reset: () => void;
 };
 
 export const useLogStore = create<LogState>((set) => ({
+  epoch: 0,
   ref: null,
   base: null,
   range: null,
@@ -52,14 +62,24 @@ export const useLogStore = create<LogState>((set) => ({
   loading: false,
   error: null,
   reviews: EMPTY_REVIEWS,
+  coverage: null,
+  coverageLoading: false,
+  coverageError: null,
 
-  begin: (ref, base) =>
+  begin: (ref, base, reload = false) =>
     set((s) =>
       // A different branch, or the same one over a different base, is a different
       // list: nothing on screen carries over.
       s.ref === ref && s.base === base
-        ? { loading: true, error: null }
+        ? {
+            loading: true,
+            error: null,
+            ...(reload
+              ? { epoch: s.epoch + 1, coverage: null, coverageLoading: false, coverageError: null }
+              : {}),
+          }
         : {
+            epoch: s.epoch + 1,
             ref,
             base,
             range: null,
@@ -68,6 +88,9 @@ export const useLogStore = create<LogState>((set) => ({
             commits: EMPTY_COMMITS,
             complete: false,
             reviews: EMPTY_REVIEWS,
+            coverage: null,
+            coverageLoading: false,
+            coverageError: null,
           },
     ),
   setPage: (ref, base, range, commits, complete) =>
@@ -88,9 +111,13 @@ export const useLogStore = create<LogState>((set) => ({
       for (const review of reviews) next[review.oid] = review;
       return { reviews: next };
     }),
+  beginCoverage: () => set({ coverageLoading: true, coverageError: null }),
+  setCoverage: (coverage) => set({ coverage, coverageLoading: false, coverageError: null }),
+  failCoverage: (message) => set({ coverage: null, coverageLoading: false, coverageError: message }),
   fail: (message) => set({ loading: false, error: message }),
   reset: () =>
-    set({
+    set((s) => ({
+      epoch: s.epoch + 1,
       ref: null,
       base: null,
       range: null,
@@ -99,5 +126,8 @@ export const useLogStore = create<LogState>((set) => ({
       loading: false,
       error: null,
       reviews: EMPTY_REVIEWS,
-    }),
+      coverage: null,
+      coverageLoading: false,
+      coverageError: null,
+    })),
 }));

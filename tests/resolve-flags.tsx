@@ -54,6 +54,7 @@ function reviews() {
 (window as any).__TAURI_INTERNALS__ = { invoke: async (command: string, args: any) => {
   if (command === "flags_for_commits") return saved.flags.filter((f) => f.anchor.scope.kind === "commit" && args.oids.includes(f.anchor.scope.oid));
   if (command === "commit_reviews") return reviews().filter((r) => args.oids.includes(r.oid));
+  if (command === "log_coverage") return { total: 4, reviewed: 0, ignored: 0, flagged: reviews().length };
   if (command === "resolve_flags") {
     if (failResolve) throw new Error("Simulated write failure");
     calls.push(args.flags);
@@ -140,6 +141,7 @@ test("batch confirmation preserves selection on cancel and resolves exact commit
   equal(saved.resolvedFlags.length, 4);
   assert(saved.resolvedFlags.every((f) => f.note), "notes were lost");
   equal(Object.keys(useLogStore.getState().reviews), [commits[3].oid]);
+  assert(document.querySelector(".log-review-progress")?.textContent?.includes("1 flagged"), "summary did not refresh after resolving flags");
 });
 
 test("M-x resolve handler targets the single commit and a write failure keeps selection", async () => {
