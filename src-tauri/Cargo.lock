@@ -2554,6 +2554,7 @@ version = "0.1.0"
 dependencies = [
  "git2",
  "nucleo-matcher",
+ "regex",
  "serde",
  "serde_json",
  "sha2",

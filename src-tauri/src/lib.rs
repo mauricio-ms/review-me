@@ -8,6 +8,7 @@ mod error;
 mod fs_browse;
 mod fuzzy;
 mod generated;
+mod grep;
 mod notes;
 mod queries;
 mod repo;
@@ -27,6 +28,7 @@ mod xref_validate;
 
 pub fn run() {
     tauri::Builder::default()
+        .manage(grep::SearchRegistry::default())
         .setup(|app| window::create_main(app))
         .invoke_handler(tauri::generate_handler![
             commands::open_repo,
@@ -58,6 +60,8 @@ pub fn run() {
             commands::abort_reviewed_commit,
             commands::commit_reviewed_changes,
             commands::fuzzy_files,
+            commands::search_repo,
+            commands::cancel_repo_search,
             commands::find_counterpart,
             commands::list_repo_dir,
             commands::build_symbol_index,

@@ -8,6 +8,7 @@ use crate::diff::{self, DiffSpec, DiffSummary};
 use crate::error::AppResult;
 use crate::fs_browse::{self, DirectoryListing, FileSystemListing};
 use crate::fuzzy::{self, FileMatch};
+use crate::grep::{self, SearchRegistry, SearchRequest, SearchResults};
 use crate::notes::{self, NotesExport};
 use crate::repo::{self, RepoInfo};
 use crate::repo_library::{self, RememberedRepo};
@@ -22,6 +23,24 @@ use crate::xref::{self, Audit, IndexStats, Occurrences, SymbolRef, XrefResult};
 /// Resolve and validate the repo at `repo`, returning its canonical working-dir root.
 fn repo_root(repo: String) -> AppResult<PathBuf> {
     repo::root(&repo::open(&PathBuf::from(repo))?)
+}
+
+#[tauri::command]
+pub async fn search_repo(
+    searches: tauri::State<'_, SearchRegistry>,
+    search_id: String,
+    request: SearchRequest,
+) -> AppResult<SearchResults> {
+    let token = searches.begin(&search_id);
+    let worker_token = token.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || grep::search(request, &worker_token)).await;
+    searches.finish(&search_id, &token);
+    result.map_err(|e| crate::error::AppError::Repo(format!("search failed: {e}")))?
+}
+
+#[tauri::command]
+pub fn cancel_repo_search(searches: tauri::State<'_, SearchRegistry>, search_id: String) {
+    searches.cancel(&search_id);
 }
 
 /// After a mark changes in a commit's scope, regenerate that commit's exported notes.
