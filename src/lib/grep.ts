@@ -2,14 +2,14 @@ import { useGrepStore, type GrepContext } from "../state/grep";
 import { useMinibufferStore } from "../state/minibuffer";
 import { useRepoStore } from "../state/repo";
 import { useUIStore } from "../state/ui";
-import { hasKeyboard, isShown, useWindowStore } from "../state/windows";
+import { inProjectMode, useWindowStore, windowOrder } from "../state/windows";
 import { sameSource } from "../types/repo";
 import type { GrepScope } from "../types/grep";
-import { showBuffer } from "./buffers";
-import { recordJump } from "./jumps";
+import { currentPlace, recordJump } from "./jumps";
 import { ambientSource, visitFile } from "./project";
 import { activeView } from "./project-view";
 import { cancelRepoSearch, searchRepo } from "./tauri";
+import { selectWindow, showProject } from "./windows";
 
 let timer: ReturnType<typeof setTimeout> | null = null;
 let pending: string | null = null;
@@ -27,16 +27,26 @@ function invalidate(): void {
 function current(context: GrepContext): boolean {
   const repo = useRepoStore.getState();
   return useGrepStore.getState().context === context &&
+    useMinibufferStore.getState().request?.kind === "grep" &&
     repo.repoPath === context.repo && repo.comparisonEpoch === context.epoch &&
     sameSource(ambientSource(repo.diff?.comparison).source, context.choice.source);
 }
 
-export function resetGrep(): void {
+function discardGrep(): void {
   invalidate();
   useGrepStore.getState().reset();
+}
+
+export function resetGrep(): void {
   const mb = useMinibufferStore.getState();
   if (mb.request?.kind === "grep") mb.close();
+  else discardGrep();
 }
+
+// Closing or replacing the picker also stops its work and drops its candidates.
+useMinibufferStore.subscribe((now, before) => {
+  if (before.request?.kind === "grep" && now.request !== before.request) discardGrep();
+});
 
 /** Opening a different review invalidates both its results and its outstanding reads. */
 useRepoStore.subscribe((now, before) => {
@@ -77,6 +87,8 @@ export async function runGrep(): Promise<void> {
 
 /** Debounce edits, clearing obsolete matches immediately so they cannot be opened. */
 export function editGrep(query: string, scope = useGrepStore.getState().scope): void {
+  const { context } = useGrepStore.getState();
+  if (!context || !current(context)) return;
   invalidate();
   useGrepStore.setState({ query, scope, results: null, selected: 0, error: null, status: query ? "loading" : "idle" });
   if (query) timer = setTimeout(() => { timer = null; void runGrep(); }, 150);
@@ -87,20 +99,24 @@ export function setGrepScope(scope: GrepScope): void {
 }
 
 export function cancelGrep(): void {
-  invalidate();
-  if (useGrepStore.getState().status === "loading") useGrepStore.setState({ status: "cancelled" });
+  resetGrep();
+  useUIStore.getState().requestFocus();
 }
 
-/** A match opens beside the results, preserving the selected results window on preview. */
-export function visitGrepHit(index: number, select: boolean): void {
+/** Accept a candidate, close the picker, then visit it in the originating project window. */
+export function visitGrepHit(index: number): void {
   const { context, results } = useGrepStore.getState();
   const hit = results?.hits[index];
-  if (!context || !current(context) || !hit || !isShown(useWindowStore.getState(), "grep")) return;
-  // A mouse click can choose a result while the file window has the keyboard.
-  if (!hasKeyboard(useWindowStore.getState(), "grep")) showBuffer("grep");
-  useGrepStore.getState().select(index);
-  if (select) recordJump({ kind: "grep", index });
-  visitFile(hit.path, context.choice, { line: hit.line, col: hit.col }, { other: true, select });
+  if (!context || !current(context) || !hit) return;
+  recordJump(context.origin);
+  resetGrep();
+  const ws = useWindowStore.getState();
+  if (context.window != null && inProjectMode(ws) && windowOrder(ws.layout).includes(context.window)) {
+    selectWindow(context.window);
+  } else {
+    showProject();
+  }
+  visitFile(hit.path, context.choice, { line: hit.line, col: hit.col });
 }
 
 export function moveGrep(delta: number): void {
@@ -116,20 +132,12 @@ export function openGrep(): void {
   const view = activeView();
   const word = view?.state.wordAt(view.state.selection.main.head);
   const atPoint = view && word ? view.state.sliceDoc(word.from, word.to) : null;
-  let { context } = useGrepStore.getState();
-  if (!context || !current(context)) {
-    resetGrep();
-    context = {
-      repo: repo.repoPath, epoch: repo.comparisonEpoch, choice: ambientSource(repo.diff?.comparison),
-    };
-    useGrepStore.setState({ context });
-  }
-  if (!hasKeyboard(useWindowStore.getState(), "grep")) recordJump();
-  showBuffer("grep");
+  const ws = useWindowStore.getState();
+  resetGrep();
+  useGrepStore.setState({ context: {
+    repo: repo.repoPath, epoch: repo.comparisonEpoch, choice: ambientSource(repo.diff?.comparison),
+    window: inProjectMode(ws) ? ws.selected : null,
+    origin: currentPlace(),
+  } });
   useMinibufferStore.getState().open({ kind: "grep", atPoint });
-}
-
-export function finishGrep(): void {
-  useMinibufferStore.getState().close();
-  useUIStore.getState().requestFocus();
 }

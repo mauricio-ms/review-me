@@ -20,9 +20,9 @@ import HelpBuffer from "./HelpBuffer";
  * scroll live in the component, which must never remount just because it moved. While
  * no window shows one, its element is detached — mounted, but laid out at zero size.
  */
-const hosts = new Map<"diff" | "log" | "grep", HTMLDivElement>();
+const hosts = new Map<"diff" | "log", HTMLDivElement>();
 
-export function bufferHost(name: "diff" | "log" | "grep"): HTMLDivElement {
+export function bufferHost(name: "diff" | "log"): HTMLDivElement {
   let host = hosts.get(name);
   if (!host) {
     host = document.createElement("div");
@@ -43,7 +43,7 @@ const detached = new WeakMap<
 >();
 
 /** Where a window holds a persistent buffer's element while it shows it. */
-function BufferSlot({ name }: { name: "diff" | "log" | "grep" }) {
+function BufferSlot({ name }: { name: "diff" | "log" }) {
   const slotRef = useRef<HTMLDivElement | null>(null);
   useLayoutEffect(() => {
     const slot = slotRef.current;
@@ -126,7 +126,7 @@ function Window({
 
   return (
     <div ref={rootRef} className={className} style={style} data-window={id}>
-      {key === "diff" || key === "log" || key === "grep" ? (
+      {key === "diff" || key === "log" ? (
         <BufferSlot name={key} />
       ) : key === "help" ? (
         <HelpBuffer />

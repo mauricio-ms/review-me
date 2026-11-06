@@ -116,7 +116,7 @@ function highlight(text: string, query: string): ReactNode {
 }
 
 /** The buffers that always exist, after whatever was shown most recently. */
-const STANDING: BufferKey[] = ["diff", "log", "grep", "project", "help"];
+const STANDING: BufferKey[] = ["diff", "log", "project", "help"];
 
 /** The name column's width for a list of buffers: the longest name, 16 to 48ch. */
 function nameWidth(candidates: Candidate[] | null): number {
@@ -185,7 +185,6 @@ function Prompt({ request }: { request: Exclude<MinibufferRequest, SwiperRequest
       const label = {
         diff: "the changes under review",
         log: `commits on ${reviewBranch?.display ?? "HEAD"}`,
-        grep: "repository search results",
         project: "the files of the revision under review",
         help: "every key binding and command",
       };

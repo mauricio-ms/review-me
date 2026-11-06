@@ -9,10 +9,10 @@ export type FileBufferId = `file:${string}`;
  * open file is the project buffer showing it. The diff, the log, help and `project` each
  * show in one window at most; a file can show in several, each with its own cursor.
  */
-export type BufferKey = "diff" | "log" | "grep" | "help" | "project" | FileBufferId;
+export type BufferKey = "diff" | "log" | "help" | "project" | FileBufferId;
 
 /** What has the keyboard, by kind — what buffer-scoped commands and keymaps key on. */
-export type BufferName = "diff" | "log" | "grep" | "project" | "help";
+export type BufferName = "diff" | "log" | "project" | "help";
 
 export function isFileKey(key: BufferKey): key is FileBufferId {
   return key.startsWith("file:");

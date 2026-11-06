@@ -63,8 +63,8 @@ Reviewing agent-generated code has a different shape than reviewing a human PR:
   make later, typically by an LLM. Every commit's notes are kept as structured Markdown
   under `.review-me/notes/`, and `M-x export` bundles a whole branch's into one file.
 - **Fuzzy file finder** — jump to any (non-ignored) file in the repo.
-- **Repository grep** — search literal text across the revision under review, preview
-  matches beside a persistent results buffer, and narrow to changed files.
+- **Repository grep** — search literal text across the revision under review in a
+  bottom picker showing each matching line, and narrow to changed files.
 - **Project mode** — a read-only, IDE-like browser, initially showing the files the
   comparison on screen changed with deleted lines inline. `C-x v c` / `M-x changed`
   switches to the entire repo and hides deleted lines. Review a whole file at a time
@@ -88,7 +88,6 @@ All stay mounted; you switch between them and keep your cursor/scroll position.
 | **Diff** | The active comparison as a navigable file/hunk/line list. | Review, flag **and** note |
 | **Commits** | The review branch's history, magit-style; `Enter` opens a commit in the diff buffer. | — |
 | **Project** | Read-only file tree + syntax-highlighted viewer over the whole repo, at the compared revision. Every file you open in it stays open as a buffer of its own. | Review whole files, flag lines |
-| **Grep** | Repository search results, grouped by file, with matches previewed in another window. | — |
 
 The file tree belongs to the project buffer only: the diff, the commits and help never show
 it. Opening a file *beside* the diff (`o`) keeps you in the diff, with no tree; `RET` takes
@@ -644,18 +643,19 @@ search brings back the last one, and `M-n` searches for the symbol at the cursor
 
 ### Repository search
 
-`C-x p g` / `M-x grep` opens a live search in the minibuffer and keeps its matches in
-the **grep** buffer, grouped by file with line and column numbers. It searches literal
-text: punctuation and spaces match themselves, and case is ignored until the query
-contains a capital. `M-n` inserts the symbol at the cursor when the search was opened.
+`C-x p g` / `M-x grep` opens a live search in a horizontal picker below the main view.
+Each candidate shows `path:line: matching text`, with the matches highlighted. It
+searches literal text: punctuation and spaces match themselves, and case is ignored
+until the query contains a capital. `M-n` inserts the symbol at the cursor when the
+search was opened.
 
-`C-n` / `C-p` select matches and show their files beside the results while the input
-keeps the keyboard. `RET` opens the selected match there, and `M-,` returns to its
-result. `C-g` closes the prompt and stops pending work, keeping any completed results.
-`C-x b grep` returns to the results at any time. In that buffer, `j` / `k`, `gg` / `G`
-move, `/` or `C-s` edits the search, `r` repeats it, and `q` quits the window.
+`C-n` / `C-p` or the arrows select a candidate while the main view stays in place.
+`RET` or a click opens that result and closes the picker. From project mode the result
+replaces the file in the current window; from elsewhere it opens in project mode.
+`M-,` returns to where the search started. `C-g` / `ESC` cancels pending work and
+closes the picker without navigating. Each new search starts with an empty query.
 
-The prompt's scope button, or `s` in the results buffer, switches between the whole
+The prompt's scope button switches between the whole
 **repository** and **changed files**. Changed files means their full current content,
 including unchanged lines; deleted files have no content on this side and are excluded.
 Working-tree searches include tracked files and untracked files Git doesn't ignore.
@@ -717,7 +717,7 @@ React component → src/lib/*.ts action → invoke() in src/lib/tauri.ts
   `notes` (the Markdown export), `review_dir` (the `.review-me/` folder and its local
   exclusion), `tree` (ignore-aware listing), `fuzzy` (nucleo matcher), `queries` + `xref`
   (tree-sitter symbol index).
-- **Frontend (`src/`)** — `AppShell` keeps the diff, log and grep buffers mounted; a single command registry
+- **Frontend (`src/`)** — `AppShell` keeps the diff and log buffers mounted; a single command registry
   (`components/useCommands.ts`) feeds `M-x`, and one keymap table (`lib/keymap.ts`) drives
   every key, `M-x`'s key column, and the `C-h b` help buffer; state is
   Zustand (`src/state/`). The diff buffer is a custom keyboard-navigable list (not

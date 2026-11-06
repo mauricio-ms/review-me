@@ -1,5 +1,4 @@
 import { useHistoryStore, type Place } from "../state/history";
-import { useGrepStore } from "../state/grep";
 import { useUIStore } from "../state/ui";
 import { useWindowStore, windowShowing } from "../state/windows";
 import { findFileBuffer, showBuffer, showDiff } from "./buffers";
@@ -37,10 +36,6 @@ function visitPlace(place: Place): void {
     case "log":
       showBuffer("log");
       if (place.oid) moveLogCursor(place.oid);
-      return;
-    case "grep":
-      useGrepStore.getState().select(place.index);
-      showBuffer("grep");
       return;
   }
 }

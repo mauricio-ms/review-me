@@ -74,7 +74,7 @@ symbol index per language in a global `Mutex`.
 
 **Frontend (`src/`)** — Emacs's model: a **frame** (`AppShell`'s `Frame`) holds the
 **windows** (`Window`), each showing one **buffer** (`state/windows.ts`'s `BufferKey`):
-`"diff"`, `"log"`, `"grep"`, `"help"`, or the **project buffer** — an open file (`file:<n>`,
+`"diff"`, `"log"`, `"help"`, or the **project buffer** — an open file (`file:<n>`,
 `state/files.ts`), or `"project"` with none open ("no file open"). The project buffer is
 what it always was — the file tree (`ProjectTree`) fixed at the left, the viewer beside
 it — and the tree exists **only there**: project mode (`inProjectMode`) is the main window
@@ -100,8 +100,8 @@ always has. `useWindowStore` holds what each window shows, what it showed before
 where help's `q` — `quitWindow` — and `C-x ←` go back to), what `C-x ←` stepped back from
 (`ahead`, where `C-x →` goes), the selected window, `treeFocused`, and `recent` (`C-x b`'s
 order); which kind of buffer has the keyboard (`activeBuffer`: diff/log/help, or `project`
-for the project buffer or the tree) is derived, never stored. `DiffBuffer`, `LogBuffer`
-and `GrepBuffer` are rendered **once**, as portals into
+for the project buffer or the tree) is derived, never stored. `DiffBuffer` and
+`LogBuffer` are rendered **once**, as portals into
 persistent host elements that `Window`'s `BufferSlot` moves into whichever window shows
 them — so their cursor, folds and scroll survive any move — and the slot carries scroll
 offsets and focus across the detach/re-attach (StrictMode re-runs it in dev). Each holds
@@ -132,6 +132,14 @@ The frame's last line is **`Minibuffer.tsx`**: the echo area (`useUIStore.flash`
 `confirm` for a `y` / `n` question — Emacs's `y-or-n-p` — and `swiper`, which
 `SwiperPrompt.tsx` reads).
 It sits under the mode line (`BufferStatusBar`) and grows upward.
+
+`C-x p g` / `M-x grep` opens `GrepPrompt` in that same bottom minibuffer: a temporary
+picker of `path:line: matching text`, with no file preview or persistent results buffer.
+`lib/grep.ts` captures the originating place and selected project window. Accepting a
+candidate closes the picker and visits the file in that window, or enters project mode
+when invoked elsewhere; cancelling closes it without navigation. Closing/replacing the
+minibuffer cancels backend work and discards candidates, and only an accepted match
+records a jump. Search content still comes from the comparison's target revision.
 
 **Commands and keys are Emacs-style; there is no `:` command line and no Space palette**
 (the user removed both). A single **`components/useCommands.ts`** registry (typed
@@ -891,7 +899,7 @@ and keep their TypeScript included in `tsconfig.tests.json`.
 Existing suites: `test:coverage` (review classification/progress, not code-coverage
 instrumentation), `test:algorithms`, `test:navigation`, `test:loading`, `test:keyboard`,
 `test:review`, `test:log` (full-range progress, paging, refresh and stale replies),
-`test:grep` (live repository search, scopes, previews, focus and cancellation),
+`test:grep` (bottom search picker, scopes, dismissal, project navigation and cancellation),
 `test:jsdoc` (documentation highlighting), `test:markdown` (layout and
 navigation), and `test:resolve` (flag selection, confirmation and resolution).
 

@@ -35,7 +35,6 @@ import ConfirmClearHost from "./ConfirmClearHost";
 import DiffBuffer from "./DiffBuffer";
 import FuzzyFinderHost from "./FuzzyFinderHost";
 import HelpBuffer from "./HelpBuffer";
-import GrepBuffer from "./GrepBuffer";
 import LogBuffer from "./LogBuffer";
 import Minibuffer from "./Minibuffer";
 import NoteEditorHost from "./NoteEditorHost";
@@ -188,7 +187,6 @@ export default function AppShell() {
           on its row in the log. */}
       {hasRepo && createPortal(<DiffBuffer />, bufferHost("diff"))}
       {hasRepo && createPortal(<LogBuffer />, bufferHost("log"))}
-      {hasRepo && createPortal(<GrepBuffer />, bufferHost("grep"))}
       {hasRepo && <BufferStatusBar />}
       <Minibuffer />
       <OpenRepoHost />

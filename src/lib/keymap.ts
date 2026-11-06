@@ -17,7 +17,6 @@ export type KeyScope =
   | "start"
   | "diff"
   | "log"
-  | "grep"
   | "tree"
   | "viewer"
   | "help"
@@ -204,19 +203,6 @@ const LOG_KEYS = [
   },
 ] as const satisfies readonly KeyBinding[];
 
-const GREP_KEYS = [
-  { keys: ["j", "<down>", "C-n"], action: "down", doc: "next match, previewed beside the results" },
-  { keys: ["k", "<up>", "C-p"], action: "up", doc: "previous match, previewed beside the results" },
-  { keys: ["g g"], action: "first", doc: "first match" },
-  { keys: ["G"], action: "last", doc: "last match" },
-  { keys: ["RET", "o"], action: "open", doc: "focus the selected match's file (M-, comes back)" },
-  { keys: ["C-s", "/"], action: "search", command: "grep", doc: "edit the repository search" },
-  { keys: ["s"], action: "scope", doc: "toggle repository / changed files" },
-  { keys: ["r"], action: "refresh", doc: "repeat this search" },
-  { keys: ["ESC", "C-g"], action: "cancel", doc: "cancel the running search" },
-  { keys: ["q"], action: "quit", doc: "quit this window, keeping search results" },
-] as const satisfies readonly KeyBinding[];
-
 const TREE_KEYS = [
   { keys: ["j", "<down>"], action: "down", doc: "next row (a file shows as a preview)" },
   { keys: ["k", "<up>"], action: "up", doc: "previous row" },
@@ -361,7 +347,6 @@ export type GlobalAction = ActionOf<typeof GLOBAL_KEYS>;
 export type StartAction = ActionOf<typeof START_KEYS>;
 export type DiffAction = ActionOf<typeof DIFF_KEYS>;
 export type LogAction = ActionOf<typeof LOG_KEYS>;
-export type GrepAction = ActionOf<typeof GREP_KEYS>;
 export type TreeAction = ActionOf<typeof TREE_KEYS>;
 export type ViewerAction = ActionOf<typeof VIEWER_KEYS>;
 export type HelpAction = ActionOf<typeof HELP_KEYS>;
@@ -373,7 +358,6 @@ export const KEYMAP: Record<KeyScope, readonly KeyBinding[]> = {
   start: START_KEYS,
   diff: DIFF_KEYS,
   log: LOG_KEYS,
-  grep: GREP_KEYS,
   tree: TREE_KEYS,
   viewer: VIEWER_KEYS,
   help: HELP_KEYS,
@@ -386,7 +370,6 @@ export const SCOPE_TITLE: Record<KeyScope, string> = {
   start: "Start screen",
   diff: "Diff buffer",
   log: "Commits buffer (log)",
-  grep: "Repository search (grep)",
   tree: "Project tree",
   viewer: "Code viewer",
   help: "Help",

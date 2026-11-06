@@ -1,12 +1,17 @@
 import { create } from "zustand";
 
 import type { SourceChoice } from "../lib/project";
+import type { Place } from "./history";
+import type { WindowId } from "./windows";
 import type { GrepScope, SearchResults } from "../types/grep";
 
 export type GrepContext = {
   repo: string;
   epoch: number;
   choice: SourceChoice;
+  /** Reuse the selected project window; null means enter project mode on accept. */
+  window: WindowId | null;
+  origin: Place | null;
 };
 
 const initial = () => ({

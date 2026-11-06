@@ -976,36 +976,33 @@ kbd {
 
 /* ---------- log buffer (commits) ---------- */
 
-.grep-buffer {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  min-width: 0;
-  outline: none;
-  font-size: var(--fs);
-  color: var(--fg-0);
-}
-.grep-header {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.5em 1em;
-  padding: 0.75em 1em;
-  border-bottom: 1px solid var(--fg-3);
+.grep-picker { border-top: 1px solid var(--bg-3); }
+.grep-revision {
+  max-width: 24ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-dim);
   font-size: var(--fs-ui);
 }
-.grep-header strong { color: var(--fg-0); overflow-wrap: anywhere; }
-.grep-header > span, .grep-summary { color: var(--fg-dim); }
-.grep-hint { margin-left: auto; font-size: var(--fs-sm); }
-.grep-revision { overflow-wrap: anywhere; }
-.grep-summary { padding: 0.5em 1em; font-size: var(--fs-ui); overflow-wrap: anywhere; }
-.grep-list { flex: 1; min-height: 0; overflow: auto; padding-bottom: 1em; }
-.grep-file { padding: 0.75em 1em 0.25em; font-size: var(--fs-ui); }
-.grep-row { display: flex; gap: 1em; padding: 0.2em 1em; cursor: pointer; }
-.grep-row.is-selected { background: var(--bg-1); box-shadow: inset 2px 0 var(--accent-amber); }
-.grep-row:hover { background: var(--bg-1); }
-.grep-line { flex: 0 0 7ch; text-align: right; color: var(--fg-dim); font-size: var(--fs-ui); }
-.grep-snippet { white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; tab-size: 4; }
+.grep-summary { padding: 2px 12px; font-size: var(--fs-ui); color: var(--fg-dim); }
+.grep-picker .grep-list { max-height: min(35vh, calc(10 * (1.5em + 4px))); overflow: auto; }
+.grep-row {
+  display: flex;
+  align-items: baseline;
+  width: max-content;
+  min-width: 100%;
+  padding: 2px 12px;
+  cursor: pointer;
+}
+.grep-row.is-selected {
+  background: rgba(var(--accent-teal-rgb), 0.16);
+  box-shadow: inset 3px 0 var(--accent-amber);
+}
+.grep-location { display: flex; flex: none; white-space: nowrap; color: var(--accent-green); }
+.grep-location .path-base { color: var(--accent-green); }
+.grep-line { color: var(--accent-amber); font-variant-numeric: tabular-nums; }
+.grep-snippet { white-space: pre; padding-left: 0.5ch; tab-size: 4; color: var(--fg-0); }
 .grep-scope {
   color: var(--fg-dim);
   background: var(--bg-1);
