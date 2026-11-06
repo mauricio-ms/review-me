@@ -90,6 +90,7 @@ pub struct ModuleInfo {
 }
 
 pub struct Parsed {
+    pub docs: super::jsdoc::Docs,
     /// The text the tree was parsed from when it isn't the file's own: a single-file
     /// component's script and template expressions, laid out at their own offsets.
     pub code: Option<String>,
@@ -133,6 +134,7 @@ pub fn parse(rel: &str, source: &str) -> Option<Parsed> {
     // An HTML page's scripts are scripts; a component's top level is its own.
     let module = module_info(tree.root_node(), text, rel.ends_with(".d.ts"), component && !rel.ends_with(".html"));
     Some(Parsed {
+        docs: super::jsdoc::collect(tree.root_node(), text),
         typed: grammar != Grammar::Js,
         component: component && !rel.ends_with(".html"),
         code,

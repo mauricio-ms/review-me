@@ -1,3 +1,4 @@
+import { isJSDocSymbolAt } from "./jsdoc";
 import { syntaxTree } from "@codemirror/language";
 import {
   CharCategory,
@@ -77,13 +78,13 @@ function isSymbol(state: EditorState, pos: number): boolean {
 }
 
 /** The symbol whose word the cursor is on (vim's block cursor: the character at `head`). */
-function wordUnder(state: EditorState, head: number): string | null {
+function wordUnder(state: EditorState, head: number, indexed = false): string | null {
   const isWord = state.charCategorizer(head);
   if (isWord(state.sliceDoc(head, head + 1)) !== CharCategory.Word) return null;
   const range = state.wordAt(head);
   if (!range) return null;
   const word = state.sliceDoc(range.from, range.to);
-  if (/^\d/.test(word) || !isSymbol(state, head)) return null;
+  if (/^\d/.test(word) || (!indexed && !isSymbol(state, head))) return null;
   return word;
 }
 
@@ -157,7 +158,7 @@ export function occurrenceHighlight(lookup: OccurrenceLookup | null): Extension 
       async mark(ticket: number) {
         const { state } = this.view;
         const sel = state.selection.main;
-        const word = sel.empty ? wordUnder(state, sel.head) : null;
+        const word = sel.empty ? wordUnder(state, sel.head, lookup !== null && isJSDocSymbolAt(state, sel.head)) : null;
         if (!word) return this.show(ticket, []);
         if (lookup) {
           const line = state.doc.lineAt(sel.head);
@@ -166,6 +167,7 @@ export function occurrenceHighlight(lookup: OccurrenceLookup | null): Extension 
           const spans = found && fromIndex(this.view.state, found, sel.head);
           if (spans) return this.show(ticket, spans);
         }
+        if (!isSymbol(this.view.state, sel.head)) return this.show(ticket, []);
         this.show(ticket, byName(this.view.state, word));
       }
 

@@ -67,8 +67,8 @@ Reviewing agent-generated code has a different shape than reviewing a human PR:
   comparison on screen changed with deleted lines inline. `C-x v c` / `M-x changed`
   switches to the entire repo and hides deleted lines. Review a whole file at a time
   here — from the tree or from the file itself — and flag lines for later.
-- **Cross-references** — go-to-definition and find-references (tree-sitter, Java) so you
-  can trace a changed symbol through the project.
+- **Cross-references** — go-to-definition and find-references (tree-sitter, Java and
+  JS/TS) so you can trace a changed symbol through the project.
 
 The interface is the point: **vim motions everywhere** and a **magit-like** model of
 files → hunks → lines, with Emacs keys: `M-x` and a minibuffer at the bottom of the window.
@@ -563,16 +563,30 @@ switching files and comparisons during the session.
 JSDoc comments in JavaScript and TypeScript distinguish documentation text, tags such as
 `@param`, type expressions, parameter names and inline `{@link …}` references. The same
 highlighting applies inside HTML, Vue and Svelte scripts, Astro frontmatter and expressions,
-and JavaScript/TypeScript code fences in Markdown.
+and JavaScript/TypeScript code fences in Markdown. Repeated tags on one line are
+supported, including `/** @param {User} user @param {Options} options */`.
+
+In indexed scripts, JSDoc type names, parameter names and symbol links support the
+same definition and reference commands as code. Typedefs, callbacks, record properties,
+`@import` bindings and inline `import("./types.js").User` types participate in lookup.
+`@param`, `@type` and `@returns` also supply receiver and return types for JavaScript
+member navigation. Explicit TypeScript annotations take precedence. Markdown code
+fences support highlighting only.
+
+For a runnable standalone example, run `./scripts/make-jsdoc-sample.sh` and open
+`sample-jsdoc/` as a repository. Its README lists navigation and reference checks;
+`npm --prefix sample-jsdoc start` runs it without installing dependencies. The generator
+preserves existing samples and edits.
 
 A strip at the viewer's right edge, beside the scrollbar, maps the whole file: each change
 in its gutter sign's colour, flags in amber, the part on screen as a band and the cursor as
 a line, so a change out of sight still shows. Click a mark to go to that change, or
 anywhere else on the strip to go to that part of the file.
 
-Rest the cursor on a symbol and its other occurrences in the file light up. In Java they
-come from the cross-reference index, so a field and a local of the same name stay apart;
-in other files the word is matched by name, leaving out keywords, comments and strings.
+Rest the cursor on a symbol and its other occurrences in the file light up. Indexed
+languages use cross-reference resolution, including recognized JSDoc symbols, so a
+field and a local of the same name stay apart. Other files match by name, leaving out
+keywords, ordinary comments and strings.
 
 **Markdown reads rendered.** A `.md` file shows as it renders, in place: headings, emphasis,
 code, links by their text, bullets and task boxes, quotes and GitHub's `> [!NOTE]` alerts,
@@ -618,11 +632,12 @@ search brings back the last one, and `M-n` searches for the symbol at the cursor
 
 ### Cross-references
 
-Definitions and usages resolve via a tree-sitter index (currently **Java**) that warms in
-the background on open/refresh. Navigation follows the emacs-xref keys: **`M-.`** go to
-definition, **`M-,`** back, **`M-?`** find references.
+Definitions and usages resolve via tree-sitter indexes for **Java, JavaScript and
+TypeScript**, including script regions in Vue, Svelte, Astro and HTML. The indexes warm
+in the background on open/refresh; JavaScript files are parsed lazily. Navigation
+follows the emacs-xref keys: **`M-.`** go to definition, **`M-,`** back, **`M-?`** find references.
 
-Resolution walks scopes for locals and parameters, resolves types through a file's
+Java resolution walks scopes for locals and parameters, resolves types through a file's
 `package`/`import`s, and types a call's receiver to find the member on the right class —
 following supertypes and splitting overloads by argument count. A call with no receiver
 is found in the enclosing classes, then through `import static` (single or `.*`). So
@@ -734,8 +749,9 @@ UI tests wait for observable state or DOM conditions.
 
 ## Known limitations
 
-- Cross-references currently cover **Java** only, and resolve by name + kind (no full
-  semantic/type resolution).
+- Cross-references use declaration-based resolution rather than a full compiler or
+  language server. Unsupported type expressions and full generic inference remain
+  uncertain; reference searches retain unconfirmed matches.
 - The project viewer is **read-only** — this is a review tool, not an editor.
 - Branch comparison never fetches, so remote-tracking branches are only as fresh as your
   last `git fetch`. Comparison is always merge-base (`base...target`); there's no

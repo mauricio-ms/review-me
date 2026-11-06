@@ -14,6 +14,7 @@ mod builtins;
 mod config;
 mod css;
 mod jsonc;
+mod jsdoc;
 mod parse;
 mod project;
 mod resolve;
@@ -196,6 +197,10 @@ impl JsIndex {
 
     fn result(&self, target: &Target, kind: XrefKind) -> XrefResult {
         match target {
+            Target::Doc { file, byte } => {
+                let f = &self.files[*file]; let (line, col) = position(&f.source, *byte);
+                XrefResult { file: f.rel.clone(), line, col, snippet: line_text(&f.source, line as usize-1), kind, symbol_kind: self.parsed(*file).and_then(|p| p.docs.declarations.iter().find(|d| d.start == *byte)).map_or(SymbolKind::Type, |d| d.kind), confirmed: true }
+            }
             Target::Decl { file, byte } => {
                 let f = &self.files[*file];
                 let (line, col) = position(&f.source, *byte);
@@ -242,6 +247,7 @@ impl JsIndex {
     fn resolve_located(&self, fi: usize, located: &Located) -> Resolution {
         match located {
             Located::Node(node) => self.resolve(fi, *node),
+            Located::Doc(r) => self.resolve_doc(fi, r),
             Located::Tag(tag) => self.resolve_tag(fi, tag, 0),
         }
     }
@@ -266,6 +272,11 @@ impl JsIndex {
                 continue;
             };
             let code = self.code(fi);
+            for d in &parsed.docs.declarations {
+                if d.name == symbol.name && (symbol.kind != SymbolKind::Type || d.kind == SymbolKind::Type) {
+                    out.push(self.result(&Target::Doc { file: fi, byte: d.start }, XrefKind::Definition));
+                }
+            }
             walk(parsed.tree.root_node(), &mut |n| {
                 if NAME_KINDS.contains(&n.kind())
                     && text(n, code) == symbol.name
@@ -282,6 +293,7 @@ impl JsIndex {
             out.push(self.result(&Target::File(rel), XrefKind::Definition));
         }
         out.truncate(MAX_FALLBACK);
+        for result in &mut out { result.confirmed = false; }
         out
     }
 }
@@ -290,12 +302,16 @@ const MAX_FALLBACK: usize = 100;
 
 /// A symbol's place in a parsed file: a node of its tree, or a template's component tag.
 enum Located<'a> {
+    Doc(&'a jsdoc::Reference),
     Node(Node<'a>),
     Tag(&'a Tag),
 }
 
 /// The name (or module specifier) at `byte`.
 fn find<'a>(parsed: &'a Parsed, code: &str, byte: usize) -> Option<Located<'a>> {
+    if let Some(r) = parsed.docs.refs.iter().find(|r| r.start <= byte && byte < r.end) {
+        return Some(Located::Doc(r));
+    }
     if let Some(tag) = parsed.template.tag_at(byte) {
         return Some(Located::Tag(tag));
     }
@@ -386,6 +402,7 @@ fn provably_different(want: &Resolution, got: &Resolution) -> bool {
         (Found(_), External) | (External, Found(_)) => true,
         (Ambiguous(_), External) | (External, Ambiguous(_)) => true,
         (Ambiguous(ts), Found(t)) | (Found(t), Ambiguous(ts)) => !ts.contains(t),
+        (Ambiguous(a), Ambiguous(b)) => !a.iter().any(|t| b.contains(t)),
         _ => false,
     }
 }
@@ -446,6 +463,7 @@ pub fn symbol_at(
         return Ok(None);
     };
     let (start, name, kind) = match find(&parsed, code, byte) {
+        Some(Located::Doc(r)) => (r.start, r.name.clone(), r.kind),
         Some(Located::Tag(tag)) => (tag.byte, tag.name.clone(), SymbolKind::Identifier),
         Some(Located::Node(node)) => {
             let kind = if node.kind() == "type_identifier" {
@@ -558,9 +576,38 @@ pub fn find_references(
         written_as.push(css::camel(name));
     }
 
+    let mut spellings = std::collections::HashSet::from([symbol.name.clone()]);
+    if let Some(Target::Decl { file, byte } | Target::Doc { file, byte }) = &found {
+        if let Some(d) = index.parsed(*file).and_then(|p| p.docs.declarations.iter().find(|d| d.start == *byte)) {
+            spellings.insert(d.name.clone());
+        } else if let Some(node) = index.node_at(*file, *byte) { spellings.insert(text(node, index.code(*file)).to_string()); }
+    }
+    if let Some(want) = &found {
+        let mut modules = std::collections::HashSet::new();
+        if let Target::Decl { file, .. } | Target::Doc { file, .. } = want { modules.insert(module_stem(&index.files[*file].rel).to_string()); }
+        let mut inspected = std::collections::HashSet::new();
+        let mut changed = true;
+        while changed {
+            changed = false;
+            for fi in 0..index.files.len() {
+                if inspected.contains(&fi) || (!spellings.iter().any(|n| index.files[fi].source.contains(n)) && !modules.iter().any(|n| index.files[fi].source.contains(n))) { continue; }
+                inspected.insert(fi);
+                let Some(parsed) = index.parsed(fi) else { continue; };
+                for (name, imp) in parsed.module.imports.iter().chain(parsed.docs.imports.iter().flat_map(|(name, imports)| imports.iter().map(move |i| (name, &i.binding)))) {
+                    if matches!(index.resolve_import(fi, imp, 0), Resolution::Found(ref t) if t == want) { changed |= spellings.insert(name.clone()); }
+                }
+                for name in parsed.module.exports.keys() {
+                    if matches!(index.resolve_export(fi, name, 0, &mut Vec::new()), Resolution::Found(ref t) if t == want) {
+                        changed |= spellings.insert(name.clone());
+                        changed |= modules.insert(module_stem(&index.files[fi].rel).to_string());
+                    }
+                }
+            }
+        }
+    }
     for fi in 0..index.files.len() {
         let src = &index.files[fi].source;
-        let by_name = src.contains(&symbol.name);
+        let by_name = spellings.iter().any(|n| src.contains(n));
         let by_stem = stem.as_ref().is_some_and(|s| src.contains(s.as_str()));
         let by_selector = written_as.iter().any(|w| src.contains(w.as_str()));
         if !by_name && !by_stem && !by_selector {
@@ -571,7 +618,7 @@ pub fn find_references(
         };
         let code = index.code(fi);
         // The names this file knows the symbol by: its own, and an import's alias.
-        let mut names = vec![symbol.name.clone()];
+        let mut names: Vec<String> = spellings.iter().cloned().collect();
         names.extend(written_as.iter().cloned());
         let proven_only = style.is_some();
         if let Some(want) = &found {
@@ -592,6 +639,7 @@ pub fn find_references(
             }
         }
         let keep = |byte: usize, res: Resolution, results: &mut Vec<XrefResult>| {
+            if want.as_ref().is_some_and(|w| provably_different(w, &res)) { return; }
             let confirmed = match &found {
                 None => false,
                 Some(w) => match &res {
@@ -622,6 +670,9 @@ pub fn find_references(
                 hits.push((n.start_byte(), index.resolve(fi, n)));
             }
         });
+        for r in &parsed.docs.refs {
+            if names.contains(&r.name) { hits.push((r.start, index.resolve_doc(fi, r))); }
+        }
         for tag in &parsed.template.tags {
             if names.iter().any(|x| x == &tag.name) {
                 hits.push((tag.byte, index.resolve_tag(fi, tag, 0)));
@@ -634,6 +685,8 @@ pub fn find_references(
             keep(byte, res, &mut results);
         }
     }
+    results.sort_by(|a, b| (&a.file, a.line, a.col).cmp(&(&b.file, b.line, b.col)));
+    results.dedup_by(|a, b| a.file == b.file && a.line == b.line && a.col == b.col);
     rank(&mut results, &symbol.file);
     Ok(results)
 }
@@ -767,6 +820,7 @@ pub fn occurrences(
         return none();
     };
     let (name, at) = match &located {
+        Located::Doc(r) => (r.name.clone(), r.start),
         Located::Node(n) if n.kind() != "string_fragment" => (text(*n, code).to_string(), n.start_byte()),
         Located::Tag(t) => (t.name.clone(), t.byte),
         _ => return none(),
@@ -794,6 +848,9 @@ pub fn occurrences(
         {
             push(tag.byte);
         }
+    }
+    for r in &parsed.docs.refs {
+        if r.name == name && !provably_different(&want, &index.resolve_doc(fi, r)) { push(r.start); }
     }
     spans.sort_by_key(|s| (s.line, s.col));
     spans.dedup();

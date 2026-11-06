@@ -632,3 +632,212 @@ fn typescript_constructs_resolve_by_declaration() {
     assert_eq!(f.def(use_, "label="), want("label: string"), "a prop typed by an interface");
     assert_eq!(f.def("lib/main.js", "get()"), vec![f.line_of("lib/api.js", "get()")], "CommonJS exporting an instance");
 }
+
+#[test]
+fn jsdoc_types_and_typed_receivers_navigate() {
+    let f = fixture(&[
+        ("model.js", "export class User {\n  save() {}\n}\nexport class Other {\n  save() {}\n}\n"),
+        ("main.js", "import {User, Other} from './model.js';\n/** @param {User} user @param {Other} other */\nexport function run(user, other) {\n user.save();\n other.save();\n}\n/** @returns {User} */\nexport function create() { return null; }\ncreate().save();\n"),
+    ]);
+    assert_eq!(f.def("main.js", "User} user"), s(&["model.js:1"]));
+    assert_eq!(f.def_nth("main.js", "user.save", 0, 5), s(&["model.js:2"]));
+    assert_eq!(f.def_nth("main.js", "other.save", 0, 6), s(&["model.js:5"]));
+    assert_eq!(f.def_nth("main.js", "create().save", 0, 9), s(&["model.js:2"]));
+    let (confirmed, unconfirmed) = f.refs("model.js", "save", 0);
+    assert!(confirmed.contains(&"main.js:4".to_string()));
+    assert!(!confirmed.contains(&"main.js:5".to_string()));
+    assert!(unconfirmed.is_empty(), "{unconfirmed:?}");
+}
+
+#[test]
+fn jsdoc_typedef_properties_and_import_types() {
+    let f = fixture(&[
+        ("types.js", "/** @typedef {object} User\n * @property {string} name\n */\nexport {};\n"),
+        ("main.js", "/** @param {import('./types.js').User} user */\nexport function greet(user) { return user.name; }\n"),
+    ]);
+    assert_eq!(f.def("main.js", "User}"), s(&["types.js:1"]));
+    assert_eq!(f.def_nth("main.js", "user.name", 0, 5), s(&["types.js:2"]));
+}
+
+#[test]
+fn jsdoc_references_follow_renamed_exports_and_keep_unknown_receivers() {
+    let f = fixture(&[
+        ("a.js", "export class User { save() {} }\n"),
+        ("b.js", "export {User as Person} from './a.js';\n"),
+        ("c.js", "import {Person as Customer} from './b.js';\n/** @param {Customer} user */\nexport function update(user) { user.save(); }\nexport function unknown(x) { x.save(); }\n"),
+    ]);
+    let (confirmed, _) = f.refs("a.js", "User", 0);
+    assert!(confirmed.contains(&"c.js:2".into()), "{confirmed:?}");
+    let (confirmed, unconfirmed) = f.refs("a.js", "save", 0);
+    assert!(confirmed.contains(&"c.js:3".into()), "{confirmed:?}");
+    assert!(unconfirmed.contains(&"c.js:4".into()), "{unconfirmed:?}");
+}
+
+#[test]
+fn jsdoc_import_bindings_are_type_only_and_declarations_are_navigable() {
+    let f = fixture(&[
+        ("types.js", "/** @typedef {object} User\n * @property {string} name\n */\nexport {};\n"),
+        ("main.js", "/** @import {User as Person} from './types.js' */\n/** @param {Person} user */\nexport function greet(user) { return user.name; }\n"),
+    ]);
+    assert_eq!(f.def("main.js", "Person}"), s(&["types.js:1"]));
+    assert_eq!(f.def_nth("main.js", "user.name", 0, 5), s(&["types.js:2"]));
+    assert_eq!(f.def("types.js", "User"), s(&["types.js:1"]));
+    assert_eq!(f.def("main.js", "user */"), s(&["main.js:3"]));
+}
+
+#[test]
+fn jsdoc_structured_types_callbacks_and_nested_properties() {
+    let f = fixture(&[
+        ("main.js", "export class User { save() {} }\n/** @typedef {{user: User, nested: {owner: User}}} Record */\n/** @callback Loader\n * @param {User} user\n * @returns {User}\n */\n/** @type {Loader} */\nconst load = user => user;\nload(new User()).save();\n/** @param {Record} record */\nfunction read(record) { record.nested.owner.save(); }\n/** @param {object} opts @param {User} opts.user */\nfunction options(opts) { opts.user.save(); }\n/** @param {Array<User>} users */\nfunction list(users) { users[0].save(); }\n"),
+    ]);
+    assert_eq!(f.def("main.js", "Loader}"), s(&["main.js:3"]));
+    assert_eq!(f.def_nth("main.js", "load(new User()).save", 0, 17), s(&["main.js:1"]));
+    assert_eq!(f.def_nth("main.js", "record.nested.owner.save", 0, 20), s(&["main.js:1"]));
+    assert_eq!(f.def_nth("main.js", "opts.user.save", 0, 10), s(&["main.js:1"]));
+    assert_eq!(f.def_nth("main.js", "users[0].save", 0, 9), s(&["main.js:1"]));
+}
+
+#[test]
+fn jsdoc_annotations_do_not_leak_to_locals_nested_functions_or_other_values() {
+    let f = fixture(&[
+        ("main.js", "export class User { save() {} }\nexport class Other { save() {} }\n/** @param {User} user */\nfunction outer(user) {\n function inner(user) { return user.save(); }\n { const user = new Other(); user.save(); }\n return user.save();\n}\n/** @type {User} */\nlet value;\nvalue.save();\n/** @param {Other} x */\nfunction second(x) { return x.save(); }\n"),
+    ]);
+    assert_eq!(f.def_nth("main.js", "user.save", 1, 5), s(&["main.js:2"]));
+    assert_eq!(f.def_nth("main.js", "user.save", 2, 5), s(&["main.js:1"]));
+    assert_eq!(f.def_nth("main.js", "value.save", 0, 6), s(&["main.js:1"]));
+    let (confirmed, uncertain) = f.refs("main.js", "save", 0);
+    assert!(confirmed.contains(&"main.js:7".into()));
+    assert!(confirmed.contains(&"main.js:11".into()));
+    assert!(!confirmed.contains(&"main.js:6".into()));
+    assert!(uncertain.contains(&"main.js:5".into()));
+}
+
+#[test]
+fn jsdoc_links_use_individual_symbol_spans_and_utf16_columns() {
+    let f = fixture(&[("main.js", "export class User { save() {} }\n/** 😀 {@link User#save|method} and {@link https://example.com/User}. */\n/** @param {User} user @param {User} another */\nfunction f(user, another) {}\n")]);
+    assert_eq!(f.def("main.js", "User#save"), s(&["main.js:1"]));
+    assert_eq!(f.def("main.js", "save|method"), s(&["main.js:1"]));
+    let symbol = f.symbol("main.js", "save|method", 0, 0);
+    assert_eq!(symbol.name, "save");
+    assert_eq!(symbol.col, 19);
+    assert_eq!(f.occurrences("main.js", "User#save", 0).len(), 4);
+}
+
+#[test]
+fn jsdoc_revision_selection_and_embedded_scripts_preserve_positions() {
+    let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let f = crate::test_support::TestRepo::new();
+    f.write("model.js", "export class User { old() {} }\n");
+    f.write("main.js", "import {User} from './model.js';\n/** @param {User} user */\nexport function read(user) { user.old(); }\n");
+    let oid = f.commit("original");
+    f.write("model.js", "export class User { current() {} }\n");
+    f.write("main.js", "import {User} from './model.js';\n/** @param {User} user */\nexport function read(user) { user.current(); }\n");
+    let files = vec!["main.js".into(), "model.js".into()];
+    for source in [ProjectSource::Commit { oid }, ProjectSource::Worktree] {
+        let code = revision::read_file(&f.repo, &source, f.path(), "main.js").unwrap();
+        let (line, col) = position(&code, code.find("user.").unwrap()+5);
+        let symbol = symbol_at(&f.repo, f.path(), &source, "main.js", line, col).unwrap().unwrap();
+        let defs = find_definition(&f.repo, f.path(), &source, &files, &symbol).unwrap();
+        assert_eq!(defs.len(), 1);
+        assert_eq!(defs[0].file, "model.js");
+        let expected = if source == ProjectSource::Worktree { "current" } else { "old" };
+        assert!(defs[0].snippet.contains(expected), "{:?}", defs[0]);
+    }
+    drop(_guard);
+    let f = fixture(&[("App.vue", "<script>\nclass User { save() {} }\n/** @param {User} user */\nfunction run(user) { user.save(); }\n</script>\n<style>/* @param {Fake} x */</style>")]);
+    assert_eq!(f.def("App.vue", "User} user"), s(&["App.vue:2"]));
+    assert_eq!(f.def_nth("App.vue", "user.save", 0, 5), s(&["App.vue:2"]));
+}
+
+#[test]
+fn jsdoc_malformed_types_recover_and_type_only_imports_do_not_bind_values() {
+    let f = fixture(&[
+        ("model.js", "export class User { save() {} }\n"),
+        ("main.js", "/** @import {User} from './model.js' */\n/** @param {Array<Broken\n * @returns {User}\n */\nexport function make() { return null; }\nmake().save();\n/** @type {User} */\nlet user;\nuser.save();\nconst literal = '/** @param {Fake} nope */';\n/** mention @param {Fake} prose */\nexport const value = User;\n"),
+    ]);
+    assert_eq!(f.def("main.js", "User}\n"), s(&["model.js:1"]));
+    assert_eq!(f.def_nth("main.js", "make().save", 0, 7), s(&["model.js:1"]));
+    let guard = INDEX.lock().unwrap();
+    let index = guard.as_ref().unwrap();
+    let fi = index.file_index["main.js"];
+    let node = index.node_at(fi, 0).unwrap();
+    assert!(matches!(index.resolve_name(fi, node, "User", Space::Value, 0), Resolution::Unresolved));
+
+}
+
+#[test]
+fn jsdoc_explicit_types_win_and_recursive_aliases_stay_uncertain() {
+    let f = fixture(&[
+        ("main.ts", "class User { save() {} }\nclass Other { save() {} }\n/** @param {Other} user @returns {Other} */\nfunction typed(user: User): User { return user; }\nlet u = new User();\ntyped(u).save();\n/** @typedef {B} A */\n/** @typedef {A} B */\n/** @param {A} recursive */\nfunction cycle(recursive) { recursive.save(); }\n"),
+    ]);
+    assert_eq!(f.def_nth("main.ts", "typed(u).save", 0, 9), s(&["main.ts:1"]));
+    let (confirmed, uncertain) = f.refs("main.ts", "save", 0);
+    assert!(confirmed.contains(&"main.ts:6".into()));
+    assert!(uncertain.contains(&"main.ts:10".into()));
+}
+
+#[test]
+fn jsdoc_generated_sample_supports_its_documented_navigation() {
+    let dir = tempfile::tempdir().unwrap();
+    let sample = dir.path().join("sample");
+    let script = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().join("scripts/make-jsdoc-sample.sh");
+    let output = std::process::Command::new("bash").arg(&script).arg(&sample).output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let original = fs::read(sample.join("src/main.js")).unwrap();
+    fs::write(sample.join("local.txt"), "keep").unwrap();
+    let output = std::process::Command::new("bash").arg(&script).arg(&sample).output().unwrap();
+    assert!(output.status.success());
+    assert_eq!(fs::read(sample.join("src/main.js")).unwrap(), original);
+    assert_eq!(fs::read_to_string(sample.join("local.txt")).unwrap(), "keep");
+    let names = ["package.json", "src/user.js", "src/other.js", "src/index.js", "src/main.js"];
+    let source: Vec<_> = names.iter().map(|name| (*name, fs::read_to_string(sample.join(name)).unwrap())).collect();
+    let files: Vec<_> = source.iter().map(|(name, text)| (*name, text.as_str())).collect();
+    let f = fixture(&files);
+    let want_save = vec![f.line_of("src/user.js", "save()")];
+    assert_eq!(f.def("src/main.js", "Customer} user"), vec![f.line_of("src/user.js", "class User")]);
+    assert_eq!(f.def_nth("src/main.js", "user.save", 0, 5), want_save);
+    assert_eq!(f.def("src/main.js", "save}"), want_save);
+    assert_eq!(f.def_nth("src/main.js", "options.greeting", 0, 8), vec![f.line_of("src/user.js", "@property")]);
+    assert_eq!(f.def("src/main.js", "Loader}"), vec![f.line_of("src/main.js", "@callback")]);
+    assert_eq!(f.def_nth("src/main.js", "session.user.save", 0, 13), want_save);
+    let (confirmed, uncertain) = f.refs("src/user.js", "save", 0);
+    assert!(confirmed.contains(&f.line_of("src/main.js", "function greet")));
+    assert!(!confirmed.contains(&f.line_of("src/main.js", "function other")));
+    assert_eq!(uncertain, vec![f.line_of("src/main.js", "function uncertain")]);
+}
+
+#[test]
+fn jsdoc_scoped_imports_and_callable_record_members() {
+    let f = fixture(&[
+        ("a.js", "export class User { save() {} }"),
+        ("b.js", "export class User { save() {} }"),
+        ("main.js", "export function a() {\n /** @import {User} from './a.js' */\n /** @type {User} */\n let user; user.save();\n}\nexport function b() {\n /** @import {User} from './b.js' */\n /** @type {User} */\n let user; user.save();\n}\n/** @import {User as Person} from './a.js' */\n/** @type {{load: () => Person}} */\nlet api;\napi.load().save();\n"),
+    ]);
+    assert_eq!(f.def_nth("main.js", "user.save", 0, 5), s(&["a.js:1"]));
+    assert_eq!(f.def_nth("main.js", "user.save", 1, 5), s(&["b.js:1"]));
+    assert_eq!(f.def_nth("main.js", "api.load().save", 0, 11), s(&["a.js:1"]));
+}
+
+#[test]
+fn jsdoc_unknown_unions_remain_unconfirmed_and_global_typedefs_are_type_only() {
+    let f = fixture(&[
+        ("types.js", "/** @typedef {{name: string}} Person */\n"),
+        ("main.js", "class User { save() {} }\n/** @param {User|*} user */\nfunction run(user) { user.save(); }\n/** @type {Person} */\nlet person;\nperson.name;\nconst notAValue = Person;\n"),
+    ]);
+    assert_eq!(f.def("main.js", "Person}"), s(&["types.js:1"]));
+    assert_eq!(f.def_nth("main.js", "person.name", 0, 7), s(&["types.js:1"]));
+    let (confirmed, uncertain) = f.refs("main.js", "save", 0);
+    assert!(!confirmed.contains(&"main.js:3".into()));
+    assert_eq!(uncertain, s(&["main.js:3"]));
+    let guard = INDEX.lock().unwrap(); let index = guard.as_ref().unwrap();
+    let fi = index.file_index["main.js"];
+    let symbol = index.node_at(fi, index.code(fi).rfind("Person;").unwrap()).unwrap();
+    assert!(matches!(index.resolve(fi, symbol), Resolution::Unresolved));
+}
+
+#[test]
+fn jsdoc_property_names_exclude_optional_brackets_defaults_and_descriptions() {
+    let f = fixture(&[("main.js", "class User { save() {} }\n/** @typedef {object} Options\n * @property {User} [user] The selected user\n */\n/** @param {Options} opts */\nfunction one(opts) { opts.user.save(); }\n/** @param {object} opts\n * @param {User} [opts.user=new User()] The selected user\n */\nfunction two(opts) { opts.user.save(); }\n")]);
+    assert_eq!(f.def_nth("main.js", "opts.user.save", 0, 10), s(&["main.js:1"]));
+    assert_eq!(f.def_nth("main.js", "opts.user.save", 1, 10), s(&["main.js:1"]));
+}

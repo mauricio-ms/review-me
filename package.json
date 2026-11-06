@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "test:jsdoc": "node scripts/test-jsdoc.mjs",
+    "test:jsdoc": "node scripts/test-jsdoc.mjs && node scripts/browser-tests.mjs tests/jsdoc-navigation.ts",
     "test:markdown": "node scripts/test-markdown.mjs",
     "test:resolve": "node scripts/test-resolve.mjs",
     "preview": "vite preview",

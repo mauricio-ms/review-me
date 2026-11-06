@@ -22,6 +22,7 @@ pub enum Target {
     Decl { file: usize, byte: usize },
     /// A module as a whole: an indexed file, or any other (a stylesheet, an image).
     File(String),
+    Doc { file: usize, byte: usize },
     /// A stylesheet's definition: a custom property, a Sass variable, a module's class.
     Style { file: String, byte: usize },
 }
@@ -40,7 +41,8 @@ pub enum Resolution {
 }
 
 pub fn finish(mut hits: Vec<Target>) -> Resolution {
-    hits.dedup();
+    let mut seen = std::collections::HashSet::new();
+    hits.retain(|t| seen.insert(t.clone()));
     match hits.len() {
         0 => Resolution::Unresolved,
         1 => Resolution::Found(hits.pop().unwrap()),
@@ -66,6 +68,8 @@ pub(super) enum Ty<'a> {
     Shape { file: usize, node: Node<'a> },
     /// A module's exports.
     Module(usize),
+    DocShape { file: usize, fields: &'a [usize] },
+    DocFunction { file: usize, at: usize, params: &'a [usize], returns: usize },
     /// An intersection: the members of all of them.
     All(Vec<Ty<'a>>),
     /// A union: a member is any variant's that declares it — the one a narrowed
@@ -234,7 +238,14 @@ impl JsIndex {
     pub fn resolve_name<'a>(&'a self, file: usize, node: Node<'a>, name: &str, space: Space, depth: usize) -> Resolution {
         let code = self.code(file);
         if let Some(decl) = scope::find_local(node, code, name, space) {
+            if space == Space::Type {
+                if let Some(d) = self.doc_declaration(file, name, node.start_byte()).filter(|d| decl.start_byte() < d.scope.0 || decl.end_byte() > d.scope.1) { return Resolution::Found(Target::Doc { file, byte: d.start }); }
+            }
             return Resolution::Found(Target::Decl { file, byte: decl.start_byte() });
+        }
+        if space == Space::Type {
+            if let Some(d) = self.doc_declaration(file, name, node.start_byte()) { return Resolution::Found(Target::Doc { file, byte: d.start }); }
+            if let Some(import) = self.parsed(file).and_then(|p| p.docs.import(name, node.start_byte())) { return self.resolve_import(file, import, depth+1); }
         }
         if let Some(parsed) = self.parsed(file) {
             if let Some(b) = parsed.template.binding(name, node.start_byte()) {
@@ -319,6 +330,7 @@ impl JsIndex {
             return Resolution::Unresolved;
         };
         let m = &parsed.module;
+        if let Some(d) = self.doc_declaration(file, name, 0).filter(|d| d.exported) { return Resolution::Found(Target::Doc { file, byte: d.start }); }
         let via = |spec: &str, inner: &dyn Fn(usize, &mut Vec<(usize, String)>) -> Resolution, seen: &mut Vec<(usize, String)>| {
             match self.module(file, spec) {
                 Module::Indexed(fi) => inner(fi, seen),
@@ -376,6 +388,7 @@ impl JsIndex {
             .into_iter()
             .filter(|t| match t {
                 Target::Decl { file, byte } => self.node_at(*file, *byte).is_some_and(|n| in_space(n, space)),
+                Target::Doc { .. } => space == Space::Type,
                 Target::File(_) | Target::Style { .. } => true,
             })
             .collect();
@@ -408,6 +421,9 @@ impl JsIndex {
         for (fi, f) in self.files.iter().enumerate() {
             if !f.global_scope || !f.source.contains(name) {
                 continue;
+            }
+            if let Some(parsed) = self.parsed(fi).filter(|p| !p.module.is_module) {
+                out.extend(parsed.docs.declarations.iter().filter(|d| d.exported && d.name == name && d.kind == super::SymbolKind::Type).map(|d| Target::Doc { file: fi, byte: d.start }));
             }
             if let Some(bytes) = self.parsed(fi).and_then(|p| p.module.globals.get(name)) {
                 out.extend(bytes.iter().map(|&byte| Target::Decl { file: fi, byte }));
@@ -729,7 +745,7 @@ impl JsIndex {
     }
 
     /// The type of the value a target denotes.
-    fn target_type<'a>(&'a self, target: &Target, depth: usize) -> Ty<'a> {
+    pub(super) fn target_type<'a>(&'a self, target: &Target, depth: usize) -> Ty<'a> {
         match target {
             Target::File(rel) if super::css::is_css_module(rel) && self.sheets.contains_key(rel) => {
                 Ty::CssModule(rel.clone())
@@ -738,6 +754,7 @@ impl JsIndex {
                 Some(&fi) => Ty::Module(fi),
                 None => Ty::Unknown,
             },
+            Target::Doc { file, byte } => self.doc_target(*file, *byte, depth+1),
             Target::Style { .. } => Ty::External,
             Target::Decl { file, byte } => {
                 if let Some(ty) = self.template_binding_type(*file, *byte, depth + 1) {
@@ -775,6 +792,9 @@ impl JsIndex {
         let Some(parent) = node.parent() else {
             return Ty::Unknown;
         };
+        if parent.child_by_field_name("type").is_none() {
+            if let Some(ty) = self.doc_type(file, node, false, depth + 1) { return ty; }
+        }
         let typed = |p: Node<'a>| p.child_by_field_name("type").map(|t| self.type_of(file, t, depth + 1));
         let value = |p: Node<'a>| p.child_by_field_name("value").map(|v| self.expr_type(file, v, depth + 1));
         match parent.kind() {
@@ -816,6 +836,9 @@ impl JsIndex {
 
     /// The type a call to the target returns, by its declared return type.
     fn return_type<'a>(&'a self, target: &Target, depth: usize) -> Ty<'a> {
+        if let Target::Doc { file, byte } = target {
+            return self.doc_function_return(self.doc_target(*file, *byte, depth+1), depth+1).unwrap_or(Ty::Unknown);
+        }
         let Target::Decl { file, byte } = target else {
             return Ty::Unknown;
         };
@@ -825,6 +848,9 @@ impl JsIndex {
         let Some(parent) = node.parent() else {
             return Ty::Unknown;
         };
+        if parent.child_by_field_name("type").is_none() {
+            if let Some(ty) = self.doc_type(*file, node, false, depth+1).and_then(|t| self.doc_function_return(t, depth+1)) { return ty; }
+        }
         let func = match parent.kind() {
             "variable_declarator" | "public_field_definition" | "field_definition" | "pair" => {
                 // Angular's signals and inputs: calling one reads its value.
@@ -861,6 +887,9 @@ impl JsIndex {
             }
             _ => parent,
         };
+        if func.child_by_field_name("return_type").is_none() {
+            if let Some(ty) = self.doc_type(*file, node, true, depth + 1) { return ty; }
+        }
         match func.child_by_field_name("return_type") {
             Some(r) => self.type_of(*file, r, depth + 1),
             // Undeclared: what its one `return` (or its expression body) gives back — a
@@ -953,7 +982,7 @@ impl JsIndex {
     }
 
     /// The type a type name's target stands for: a class's instances, an interface.
-    fn type_target<'a>(&'a self, target: &Target, depth: usize) -> Ty<'a> {
+    pub(super) fn type_target<'a>(&'a self, target: &Target, depth: usize) -> Ty<'a> {
         match target {
             Target::Decl { file, byte } => {
                 let Some(node) = self.node_at(*file, *byte) else {
@@ -976,6 +1005,7 @@ impl JsIndex {
                 Some(&fi) => Ty::Module(fi),
                 None => Ty::Unknown,
             },
+            Target::Doc { file, byte } => self.doc_target(*file, *byte, depth+1),
             Target::Style { .. } => Ty::External,
         }
     }
@@ -1081,6 +1111,9 @@ impl JsIndex {
         };
         if !matches!(func.kind(), "arrow_function" | "function_expression") {
             return None;
+        }
+        if let Some(binding) = func.parent().filter(|p| p.kind() == "variable_declarator" && p.child_by_field_name("type").is_none()).and_then(|p| p.child_by_field_name("name")) {
+            if let Some(ty) = self.doc_type(file, binding, false, depth+1).and_then(|ty| self.doc_parameter_type(ty, index, depth+1)) { return Some(ty); }
         }
         // `onClick={(e) => ..}` on an intrinsic element: a DOM event, the runtime's.
         let attr = func.parent().filter(|p| p.kind() == "jsx_expression").and_then(|p| p.parent());
@@ -1231,6 +1264,8 @@ impl JsIndex {
             return Member::Missing { complete: false };
         }
         match ty {
+            Ty::DocShape { file, fields } => self.doc_member(*file, fields, name),
+            Ty::DocFunction { .. } => Member::Missing { complete: false },
             Ty::Unknown => Member::Missing { complete: false },
             Ty::External | Ty::Promise(_) | Ty::Array(_) | Ty::Tuple(_) | Ty::Boxed { .. } => Member::External,
             Ty::CssModule(rel) => self.css_module_class(rel, name),
