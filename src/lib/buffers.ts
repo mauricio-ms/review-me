@@ -3,6 +3,7 @@ import { useUIStore } from "../state/ui";
 import {
   inProjectMode,
   isFileKey,
+  isFrameKey,
   mainWindow,
   selectedBuffer,
   useWindowStore,
@@ -46,10 +47,24 @@ export type ShowOptions = {
   select?: boolean;
 };
 
-/** Show `key` in the selected window — or the other one — and give it the keyboard. */
+/** Files use the selected/other window; normal application-buffer switches take the frame. */
 export function showBuffer(key: BufferKey, options: ShowOptions = {}): void {
-  const { selected } = useWindowStore.getState();
-  display(key, options.other ? otherWindowFor(key, selected) : selected, options.select ?? true);
+  const ws = useWindowStore.getState();
+  if (isFrameKey(key) && !options.other && windowOrder(ws.layout).length > 1) {
+    const win = key === "diff" ? mainWindow(ws) : ws.selected;
+    ws.setPreview(null);
+    if (inProjectMode(ws)) ws.setProjectPane(ws.treeFocused ? "tree" : "viewer");
+    // Switching between application buffers must keep the original project stash.
+    if (ws.stash) {
+      ws.keepOnly(win);
+      display(key, win, options.select ?? true);
+    } else {
+      ws.takeFrame(win, key);
+      useUIStore.getState().requestFocus();
+    }
+    return;
+  }
+  display(key, options.other ? otherWindowFor(key, ws.selected) : ws.selected, options.select ?? true);
 }
 
 /** `C-h b` / `C-h m`: the help buffer, listing `from`'s keys first (or only). */
@@ -62,17 +77,11 @@ export function openHelp(from: KeyScope, only: boolean, options: ShowOptions = {
  * Switch to the diff — `q` in the project buffer, `M-x diff`, `C-x b diff`, entering a
  * commit. From project mode it has the frame to itself, as magit's status does: the
  * windows it covers are stashed and come back with the project buffer
- * (`bringBackProject`). In the other window (`C-x 4 b diff`) it just shows there.
+ * (`bringBackProject`). Explicit other-window display is used by commit navigation;
+ * the other-window buffer picker lists files only.
  */
 export function showDiff(options: ShowOptions = {}): void {
-  const ws = useWindowStore.getState();
-  if (options.other || !inProjectMode(ws) || windowOrder(ws.layout).length === 1) {
-    showBuffer("diff", options);
-    return;
-  }
-  ws.setProjectPane(ws.treeFocused ? "tree" : "viewer");
-  ws.takeFrame(mainWindow(ws), "diff");
-  useUIStore.getState().requestFocus();
+  showBuffer("diff", options);
 }
 
 /**
@@ -106,7 +115,12 @@ export function quitWindow(): void {
   const next = (ws.prev[win] ?? []).find((k) =>
     isFileKey(k) ? fileBuffer(k) !== undefined : !others.has(k),
   );
-  if (next == null && windowOrder(ws.layout).length > 1) ws.remove(win);
+  const restored = next != null ? bringBackProject(win, next) : null;
+  if (restored != null) {
+    const now = useWindowStore.getState();
+    useWindowStore.setState({ prev: { ...now.prev, [win]: (now.prev[win] ?? []).filter((key) => key !== "help") } });
+    now.select(restored);
+  } else if (next == null && windowOrder(ws.layout).length > 1) ws.remove(win);
   else ws.quitTo(win, next ?? "diff");
   ws.setTreeFocused(false);
   useUIStore.getState().requestFocus();
@@ -181,8 +195,8 @@ export function stepBuffer(dir: "back" | "ahead"): void {
     ui.showFlash(dir === "back" ? "No previous buffer" : "No next buffer");
     return;
   }
-  // The diff and the project buffer trade the frame here as they do everywhere else.
-  if (target === "diff" && inProjectMode(ws) && windowOrder(ws.layout).length > 1) {
+  // Application buffers and project files trade the frame here as in C-x b.
+  if (isFrameKey(target) && inProjectMode(ws) && windowOrder(ws.layout).length > 1) {
     ws.setProjectPane("viewer");
     ws.takeFrame(win, target, dir);
   } else if (bringBackProject(win, target, dir) != null) {

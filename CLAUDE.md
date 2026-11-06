@@ -86,15 +86,15 @@ keeping its cursor and folds). `C-x b project` / `M-x project` (`showProject`) s
 main window to it — the file it last showed, else "no file open" — with the keyboard where
 it was left (`projectPane`: tree or viewer); `q` in the tree or a file (`showDiff` /
 `quitFile`) goes back to the diff, except that a window split off beside it closes.
-**Switching to the diff from project mode gives it the whole frame**, as magit's status
+**Switching to diff, log or help from project mode gives it the whole frame**, as magit's status
 takes it (`showDiff` — `q`, `M-x diff`, `C-x b diff`, `M-,`, entering a commit — and
 `C-x ←`/`→`): `takeFrame` stashes the project's windows (`useWindowStore.stash`), and any
 way back to the project buffer — `M-x project`, RET on a file, `C-x b`, `M-,`, `C-x ←` —
 puts them back through `display`/`stepBuffer`'s `bringBackProject` (`unstash`), going to
 the window that already shows the file if one does. Files killed meanwhile leave their
 windows as `forget` has them; back in project mode any other way, the stash is dropped (a
-store subscription keeps it only outside project mode). `C-x 4 b diff` still shows the diff
-beside the file. A file
+store subscription keeps it only outside project mode). `C-x 4 b` offers only open file
+buffers; application buffers cannot be selected there. A file
 opened by a plain gesture (RET in the diff, the finder, the tree, a definition) goes to
 `targetWindow()`: the selected window when it's in the project buffer or reading a file,
 else the main window — so from the diff or the log it opens the project buffer, as it
@@ -102,14 +102,14 @@ always has. `useWindowStore` holds what each window shows, what it showed before
 where help's `q` — `quitWindow` — and `C-x ←` go back to), what `C-x ←` stepped back from
 (`ahead`, where `C-x →` goes), the selected window, `treeFocused`, and `recent` (`C-x b`'s
 order); which kind of buffer has the keyboard (`activeBuffer`: diff/log/help, or `project`
-for the project buffer or the tree) is derived, never stored. `DiffBuffer` and
-`LogBuffer` are rendered **once**, as portals into
+for the project buffer or the tree) is derived, never stored. `DiffBuffer`,
+`LogBuffer` and `HelpBuffer` are rendered **once**, as portals into
 persistent host elements that `Window`'s `BufferSlot` moves into whichever window shows
 them — so their cursor, folds and scroll survive any move — and the slot carries scroll
 offsets and focus across the detach/re-attach (StrictMode re-runs it in dev). Each holds
 one cursor, so each shows in one window at most — showing one that another window has
-selects that window instead (`lib/windows.ts`'s `display`, Emacs's reuse-window). Help
-renders in its window; a file renders as a `FileView` (CodeMirror) per window, so one file
+selects that window instead (`lib/windows.ts`'s `display`, Emacs's reuse-window). A file
+renders as a `FileView` (CodeMirror) per window, so one file
 can be in two windows with two cursors. Every switch goes through `lib/buffers.ts`
 (`showBuffer`, `openHelp`, `quitWindow`, `killCurrentBuffer`, `stepBuffer`), every
 window operation through `lib/windows.ts`.
@@ -538,7 +538,10 @@ the covered window's own view is unmounted.
 **Picker previews** (`lib/picker-preview.ts`, `components/useFilePreview.ts`,
 `state/picker-preview.ts`) belong to a single picker session. Grep and xref lists follow
 the selected current location after 150 ms; `C-x b` / `C-x 4 b` preview existing file
-candidates immediately, leaving singleton candidates as names. `Window` keeps the
+candidates immediately. Normal `C-x b` previews diff/log/help across the whole frame,
+covering the tree and project splits without changing navigation or the stored layout;
+the real persistent buffer host moves into `FrameBufferPreview` and returns on cancel.
+The other-window picker filters out every non-file candidate. `Window` keeps the
 covered view mounted and laid out beneath a separate `FileView` (`peek`), so its exact
 selection, scroll, and registered command view survive. Peek views never register as
 the window's active view, track persistent positions, request occurrences, or take focus.

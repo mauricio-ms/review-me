@@ -15,6 +15,7 @@ import { useRepoStore } from "../state/repo";
 import { useTagsStore } from "../state/tags";
 import { useUIStore } from "../state/ui";
 import { hasKeyboard, isShown, useWindowStore } from "../state/windows";
+import { usePickerPreviewStore } from "../state/picker-preview";
 import type { CommitInfo, CommitReview, Decoration, LogRange } from "../types/repo";
 
 /** Start paging in more history once the cursor is this many rows from the end. */
@@ -149,7 +150,9 @@ export default function LogBuffer() {
   const loading = useLogStore((s) => s.loading);
   const error = useLogStore((s) => s.error);
   const complete = useLogStore((s) => s.complete);
-  const visible = useWindowStore((s) => isShown(s, "log"));
+  const displayed = useWindowStore((s) => isShown(s, "log"));
+  const previewed = usePickerPreviewStore((s) => s.frame === "log");
+  const visible = displayed || previewed;
   const focused = useWindowStore((s) => hasKeyboard(s, "log"));
   const focusRequest = useUIStore((s) => s.focusRequest);
 

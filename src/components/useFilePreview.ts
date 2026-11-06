@@ -19,10 +19,12 @@ export function useFilePreview(
     session.current = current;
     return () => { current.finish(); if (session.current === current) session.current = null; };
   }, [enabled, sessionKey]);
-  const source = target?.choice.source;
+  const file = target && "path" in target ? target : null;
+  const frame = target && "buffer" in target ? target.buffer : null;
+  const source = file?.choice.source;
   const revision = source?.kind === "commit" ? source.oid : source?.kind;
   useLayoutEffect(() => {
     if (enabled) session.current?.move(target, delay);
-  }, [enabled, sessionKey, target?.path, revision, target?.choice.label, target?.line, target?.col, target?.ranges, delay]);
+  }, [enabled, sessionKey, frame, file?.path, revision, file?.choice.label, file?.line, file?.col, file?.ranges, delay]);
   return useCallback((accept = false, path?: string) => session.current?.finish(accept, path) ?? false, []);
 }

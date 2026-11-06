@@ -114,17 +114,20 @@ one split off to the right — so from `OrderServiceTest.java`, `C-x 4 .` on `Or
 puts the class beside the test, and `C-x 4 t` from the class brings you back to the test.
 `q` in a window that was split off to show something closes it again.
 
-`C-x b` previews open file candidates as you choose between them, preserving the
+`C-x b` previews open file candidates as you choose between them; diff, commits and help
+preview across the full app area, covering the project tree and splits. It preserves the
 original view until `RET` accepts. `C-g` cancels without changing buffer order or jump
-history. `C-x 4 b` previews in the other window; a split created only for a preview goes
+history. `C-x 4 b` offers only open file buffers and previews in the other window;
+a split created only for a preview goes
 away when you cancel. Files unavailable for automatic preview show a message; accepting
 still uses normal file opening. Automatic reads are limited to 2 MiB of text.
 
-Switching to the diff from your files — `q`, `M-x diff`, `C-x b diff`, entering a commit —
+Switching to diff, commits or help from your files gives that buffer the whole app area.
+Switching to the diff — `q`, `M-x diff`, `C-x b diff`, entering a commit —
 gives it the whole screen, as magit's status does, and keeps your windows: come back to
 the project (`M-x project`, RET on a file, `C-x b`, `M-,`, `C-x ←`) and they're there as you
-left them. A file already in one of them is gone back to there. `C-x 4 b diff` puts the
-diff beside your file instead.
+left them. A file already in one of them is gone back to there. `C-x 4 b` offers other
+file buffers to show beside your file.
 
 Opening a repository lands on the diff buffer when the working tree has uncommitted
 changes, and on the commits buffer when it's clean (there would be nothing to diff).

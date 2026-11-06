@@ -96,7 +96,7 @@ const GLOBAL_KEYS = [
     command: "find-file-other-window",
     doc: "find a file, into the other window",
   },
-  { keys: ["C-x 4 b"], command: "switch-buffer-other-window", doc: "switch buffer in the other window" },
+  { keys: ["C-x 4 b"], command: "switch-buffer-other-window", doc: "switch to a file buffer in the other window" },
   { keys: ["C-x p t"], command: "test-or-code", doc: "from a test to its code, or code to its test" },
   {
     keys: ["C-x {"],

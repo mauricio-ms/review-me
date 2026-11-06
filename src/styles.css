@@ -169,6 +169,15 @@ kbd {
   min-height: 0;
 }
 
+.frame { position: relative; }
+
+.frame-content {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
 .window-content {
   display: flex;
   flex-direction: column;
@@ -177,7 +186,8 @@ kbd {
 
 .window-content > * { flex: 1; min-height: 0; }
 
-.picker-file-preview {
+.picker-file-preview,
+.frame-buffer-preview {
   position: absolute;
   inset: 0;
   display: flex;

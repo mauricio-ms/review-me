@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import type { ViewPos } from "../lib/project-view";
 import type { FileBuffer } from "./files";
-import type { WindowId } from "./windows";
+import type { FrameBufferKey, WindowId } from "./windows";
 
 /** A separate view: the covered buffer keeps its exact cursor, selection and scroll. */
 export type PickerPreview = {
@@ -15,4 +15,5 @@ export type PickerPreview = {
 export const usePickerPreviewStore = create<{
   owner: number | null;
   shown: PickerPreview | null;
-}>(() => ({ owner: null, shown: null }));
+  frame: FrameBufferKey | null;
+}>(() => ({ owner: null, shown: null, frame: null }));

@@ -747,7 +747,7 @@ export function useCommands(close: CommandClose): {
       id: "switch-buffer-other-window",
       name: "switch-buffer-other-window",
       aliases: ["buffer-other-window"],
-      label: "switch to another buffer in the other window",
+      label: "switch to a file buffer in the other window",
       enabled: !!repo,
       run: () => handleSwitchBuffer(true),
     },

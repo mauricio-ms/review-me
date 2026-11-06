@@ -1,8 +1,9 @@
 # File preview proposal
 
 Status: grep, references, ambiguous definitions, and file candidates in the buffer
-switcher are implemented. The fuzzy finder remains unchanged pending a decision on
-the manual preview gesture. Other surfaces below remain proposals.
+switcher are implemented. The normal buffer switcher also previews diff/log/help across
+the full app area; its other-window variant lists only files. Fuzzy finder previews were
+declined and remain excluded. Other surfaces below remain proposals.
 
 Implementation note: picker sessions reuse the file viewer in a separate overlay while
 keeping the original view mounted, preserving its exact selection and scroll. Existing

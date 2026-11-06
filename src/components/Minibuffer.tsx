@@ -7,7 +7,7 @@ import {
   type ReactNode,
 } from "react";
 
-import { bufferNames, openHelp, showBuffer, showDiff } from "../lib/buffers";
+import { bufferNames, showBuffer, showDiff } from "../lib/buffers";
 import { recordJump } from "../lib/jumps";
 import { contextScope, dispatchKey, type KeyHandler } from "../lib/key-dispatch";
 import { commandKeys, KEYMAP, type MinibufferAction } from "../lib/keymap";
@@ -25,6 +25,7 @@ import { useRepoStore } from "../state/repo";
 import { useUIStore, type PickerKind } from "../state/ui";
 import {
   isFileKey,
+  isFrameKey,
   isProjectKey,
   selectedBuffer,
   useWindowStore,
@@ -201,6 +202,7 @@ function Prompt({ request }: { request: Exclude<MinibufferRequest, SwiperRequest
       ].filter(
         (key) =>
           key !== shownBuffer &&
+          (!other || isFileKey(key)) &&
           (!isFileKey(key) || files.has(key)) &&
           // Already in the project buffer: `project` is where you are.
           !(key === "project" && isProjectKey(shownBuffer)),
@@ -226,7 +228,7 @@ function Prompt({ request }: { request: Exclude<MinibufferRequest, SwiperRequest
             // A switch is a move `M-,` comes back from (help is nowhere to come back to).
             if (key !== "help") recordJump();
             if (key === "log") showLog({ other });
-            else if (key === "help") openHelp(scope, false, { other });
+            else if (key === "help") showBuffer("help");
             else if (key === "project" && !other) showProject();
             else if (key === "diff") showDiff({ other });
             else {
@@ -274,9 +276,12 @@ function Prompt({ request }: { request: Exclude<MinibufferRequest, SwiperRequest
 
   const current = rows && selected >= 0 ? rows[Math.min(selected, rows.length - 1)] : undefined;
   const previewFile = request.kind === "buffer" ? fileBuffers.find((file) => file.id === current?.id) : null;
+  const previewKey = current?.id as BufferKey | undefined;
+  const previewFrame = request.kind === "buffer" && !request.other && previewKey && isFrameKey(previewKey)
+    ? { buffer: previewKey } : null;
   previewFinish.current = useFilePreview(request.kind === "buffer", request, previewFile ? {
     path: previewFile.path, choice: { source: previewFile.source, label: previewFile.sourceLabel },
-  } : null, { other: request.kind === "buffer" && request.other, bufferSwitch: true }, 0, closeMinibuffer);
+  } : previewFrame, { other: request.kind === "buffer" && request.other, bufferSwitch: true }, 0, closeMinibuffer);
 
   const move = (delta: number) => {
     if (!rows || rows.length === 0) return;
@@ -390,7 +395,7 @@ function Prompt({ request }: { request: Exclude<MinibufferRequest, SwiperRequest
             else setSelected(value.trim() || picksDefault ? 0 : -1);
           }}
         />
-        {request.kind === "buffer" && <span className="mb-hint">files preview · RET switch · C-g cancel</span>}
+        {request.kind === "buffer" && <span className="mb-hint">preview · RET switch · C-g cancel</span>}
       </div>
       {rows && (
         <div

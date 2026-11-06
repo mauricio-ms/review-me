@@ -95,6 +95,27 @@ test("quitting help forgets help instead of cycling back to it", () => {
   equal(ws().shown[1], a.id); assert(!ws().prev[1].includes("help"));
 });
 
+test("log and help take the full frame and preserve the project stash across buffer switches", () => {
+  const a = openFile(), b = openFile("b.ts"); display(a.id, 1);
+  const other = ws().split(1, "row", b.id); ws().select(other);
+  const layout = ws().layout;
+  showBuffer("log"); equal(windowOrder(ws().layout), [other]);
+  const stash = ws().stash; assert(stash);
+  showBuffer("help"); equal(ws().stash, stash); equal(ws().shown[other], "help");
+  showDiff(); equal(ws().stash, stash);
+  showProject(); equal(ws().layout, layout); equal(ws().shown, { 1: a.id, [other]: b.id });
+  equal(ws().selected, other);
+});
+
+test("buffer history displays help across the frame and restores the project split", () => {
+  const a = openFile(), b = openFile("b.ts"); display(a.id, 1);
+  const other = ws().split(1, "row", b.id);
+  const layout = ws().layout;
+  useWindowStore.setState({ prev: { ...ws().prev, 1: ["help"] } });
+  stepBuffer("back"); equal(windowOrder(ws().layout), [1]); equal(ws().shown[1], "help");
+  stepBuffer("ahead"); equal(ws().layout, layout); equal(ws().shown, { 1: a.id, [other]: b.id });
+});
+
 test("quitting a secondary file closes its window while the main file goes to diff", () => {
   const a = openFile(); display(a.id, 1);
   const other = ws().split(1, "row", a.id); ws().select(other); quitFile();

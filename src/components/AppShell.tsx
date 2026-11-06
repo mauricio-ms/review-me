@@ -18,6 +18,7 @@ import { KEYMAP, type GlobalAction, type KeyBinding } from "../lib/keymap";
 import { useProjectSource } from "../lib/project";
 import { useMinibufferStore } from "../state/minibuffer";
 import { useProjectStore } from "../state/project";
+import { usePickerPreviewStore } from "../state/picker-preview";
 import { useRepoStore } from "../state/repo";
 import { useUIStore } from "../state/ui";
 import {
@@ -43,7 +44,7 @@ import ProjectTree from "./ProjectTree";
 import RecentReposHost from "./RecentReposHost";
 import StartupDashboard from "./StartupDashboard";
 import { type CommandClose, type CommandId, useCommands } from "./useCommands";
-import { bufferHost, WindowArea } from "./Window";
+import { bufferHost, FrameBufferPreview, WindowArea } from "./Window";
 import XrefHost from "./XrefHost";
 
 /** Where typed characters are text: a field, or a CodeMirror editor in insert mode. */
@@ -141,6 +142,7 @@ function GlobalKeys() {
 function Frame() {
   const treeHidden = useProjectStore((s) => s.treeHidden);
   const projectMode = useWindowStore(inProjectMode);
+  const preview = usePickerPreviewStore((s) => s.frame);
   // The tree and the finder read the revision of the file you're reading — the old
   // side's, for a deletion — as they always have.
   const file = useCurrentFile();
@@ -149,9 +151,13 @@ function Frame() {
   }, [file?.source, file?.sourceLabel]);
   return (
     <div className="frame">
-      {/* Hidden rather than unmounted, so its cursor and folds wait for project mode. */}
-      <ProjectTree hidden={!projectMode || treeHidden} />
-      <WindowArea />
+      <div className="frame-content" style={preview ? { visibility: "hidden" } : undefined}
+        aria-hidden={preview ? true : undefined}>
+        {/* Hidden rather than unmounted, so its cursor and folds wait for project mode. */}
+        <ProjectTree hidden={!projectMode || treeHidden} />
+        <WindowArea />
+      </div>
+      {preview && <FrameBufferPreview name={preview} />}
     </div>
   );
 }
@@ -182,11 +188,11 @@ export default function AppShell() {
           <StartupDashboard />
         )}
       </div>
-      {/* Mounted once for as long as a repo is open, and moved into whichever window
-          shows them (see Window.tsx) — which is also how leaving a commit lands back
-          on its row in the log. */}
+      {/* Persistent application buffers move between their window and a full-frame
+          picker preview without losing their cursor, folds, search, or scroll. */}
       {hasRepo && createPortal(<DiffBuffer />, bufferHost("diff"))}
       {hasRepo && createPortal(<LogBuffer />, bufferHost("log"))}
+      {hasRepo && createPortal(<HelpBuffer />, bufferHost("help"))}
       {hasRepo && <BufferStatusBar />}
       <Minibuffer />
       <OpenRepoHost />

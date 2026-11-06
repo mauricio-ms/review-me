@@ -42,6 +42,8 @@ beforeEach(() => {
   mock("symbol_occurrences", () => null);
   mock("list_repo_dir", ({ path }) => ({ path, entries: [] }));
   mock("list_recent_repos", () => []);
+  mock("list_commits", () => ({ range: { kind: "all" }, commits: [] }));
+  mock("log_coverage", () => ({ total: 0, reviewed: 0, flagged: 0, ignored: 0 }));
   mock("cancel_repo_search", () => {});
   mock("search_repo", () => ({ hits: [
     { path: "candidate.txt", line: 2, col: 3, snippet: "😀 needle needle", ranges: [{ from: 3, to: 9 }, { from: 10, to: 16 }] },
@@ -51,7 +53,7 @@ beforeEach(() => {
 afterEach(() => {
   root?.unmount(); root = null; parent?.remove(); parent = null;
   useXrefStore.getState().close(); resetState();
-  equal(usePickerPreviewStore.getState(), { owner: null, shown: null });
+  equal(usePickerPreviewStore.getState(), { owner: null, shown: null, frame: null });
 });
 async function mount() {
   parent = document.body.appendChild(document.createElement("div")); parent.className = "fixture";
@@ -217,13 +219,84 @@ test("buffer switching previews file candidates immediately without reads or reo
   equal(useHistoryStore.getState().back.length, 1);
 });
 
-test("buffer switcher leaves singleton candidates as names and can accept them", async () => {
+test("buffer switcher previews a diff across the frame without changing project windows", async () => {
   await origin(); useMinibufferStore.getState().open({ kind: "buffer" });
   await waitFor(() => document.activeElement?.id === "minibuffer-input"); type("diff");
   await waitFor(() => document.querySelector(".mb-row.is-selected .mb-name")?.textContent === "diff");
+  await waitFor(() => document.querySelector('.frame-buffer-preview[data-preview-buffer="diff"] .diff-buffer'));
   equal(pane(), null); key("Enter");
   await waitFor(() => useMinibufferStore.getState().request == null);
   equal(ws().shown[ws().selected], "diff"); equal(useHistoryStore.getState().back.length, 1);
+});
+
+test("other-window buffer switching offers only files and never creates a frame preview", async () => {
+  openFile("second.txt"); await origin(); const before = snapshot();
+  useMinibufferStore.getState().open({ kind: "buffer", other: true });
+  await waitFor(() => document.activeElement?.id === "minibuffer-input");
+  equal([...document.querySelectorAll(".mb-row .mb-name")].map((row) => row.textContent), ["second.txt"]);
+  type("diff"); await waitFor(() => document.querySelector(".mb-empty")?.textContent === "[No match]");
+  equal(document.querySelector(".frame-buffer-preview"), null);
+  key("Escape"); await waitFor(() => useMinibufferStore.getState().request == null);
+  equal(snapshot(), before);
+});
+
+test("application buffer previews fill the frame and cancel back to the exact project split", async () => {
+  await origin(); const original = activeView();
+  const second = openFile("second.txt"); ws().split(1, "row", second.id);
+  useProjectStore.setState({ treeHidden: false });
+  await waitFor(() => document.querySelectorAll(".window").length === 2);
+  const before = snapshot();
+  useMinibufferStore.getState().open({ kind: "buffer" });
+  await waitFor(() => document.activeElement?.id === "minibuffer-input");
+  for (const name of ["log", "help", "diff", "help", "log"] as const) {
+    type(name);
+    await waitFor(() => document.querySelector(`[data-preview-buffer="${name}"] .${name}-buffer`));
+    const preview = document.querySelector<HTMLElement>(".frame-buffer-preview")!;
+    const frame = document.querySelector(".frame")!.getBoundingClientRect();
+    equal(preview.getBoundingClientRect().width, frame.width);
+    equal(preview.getBoundingClientRect().height, frame.height);
+    equal(preview.getBoundingClientRect().left, frame.left);
+    equal(preview.getBoundingClientRect().top, frame.top);
+    equal(getComputedStyle(document.querySelector(".project-tree")!).visibility, "hidden");
+    equal(document.activeElement?.id, "minibuffer-input");
+    equal(snapshot(), before); equal(useHistoryStore.getState().back, []);
+  }
+  type("second.txt"); await previewReady("second.txt");
+  equal(document.querySelector(".frame-buffer-preview"), null);
+  key("Escape"); await waitFor(() => useMinibufferStore.getState().request == null && activeView()?.hasFocus);
+  equal(snapshot(), before); assert(activeView() === original);
+  equal(positionOf(1, ws().shown[1] as `file:${string}`)?.line, 85);
+});
+
+test("previewing a buffer already in a neighboring window returns its live host on cancel", async () => {
+  await origin(); const neighbor = ws().split(1, "row", "diff");
+  await waitFor(() => document.querySelector(`[data-window="${neighbor}"] .diff-buffer`));
+  const diff = document.querySelector(".diff-buffer"); const before = snapshot();
+  useMinibufferStore.getState().open({ kind: "buffer" });
+  await waitFor(() => document.activeElement?.id === "minibuffer-input"); type("diff");
+  await waitFor(() => document.querySelector(".frame-buffer-preview .diff-buffer"));
+  assert(document.querySelector(".frame-buffer-preview .diff-buffer") === diff);
+  key("Escape");
+  await waitFor(() => document.querySelector(`[data-window="${neighbor}"] .diff-buffer`));
+  assert(document.querySelector(`[data-window="${neighbor}"] .diff-buffer`) === diff);
+  equal(snapshot(), before);
+});
+
+test("accepting help takes the whole frame and q restores the saved project layout", async () => {
+  await origin(); const second = openFile("second.txt");
+  const other = ws().split(1, "row", second.id); ws().select(other);
+  await waitFor(() => activeView()?.hasFocus && document.querySelectorAll(".window").length === 2);
+  const layout = ws().layout; const shown = ws().shown;
+  useMinibufferStore.getState().open({ kind: "buffer" });
+  await waitFor(() => document.activeElement?.id === "minibuffer-input"); type("help");
+  await waitFor(() => document.querySelector(".frame-buffer-preview .help-buffer")); key("Enter");
+  await waitFor(() => useMinibufferStore.getState().request == null && document.activeElement?.classList.contains("help-buffer"));
+  equal(windowOrder(ws().layout), [other]); equal(ws().shown[other], "help"); assert(ws().stash);
+  equal(useHistoryStore.getState().back, []);
+  key("q");
+  await waitFor(() => activeView()?.hasFocus && document.querySelectorAll(".window").length === 2);
+  equal(ws().layout, layout); equal(ws().shown, shown); equal(ws().selected, other);
+  assert(!ws().prev[other]?.includes("help"));
 });
 
 test("late preview successes and failures cannot replace newer results or survive cancellation", async () => {

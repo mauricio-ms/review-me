@@ -44,6 +44,7 @@ import { useRepoStore, type Folds } from "../state/repo";
 import { useTagsStore } from "../state/tags";
 import { useUIStore } from "../state/ui";
 import { hasKeyboard, isShown, useWindowStore } from "../state/windows";
+import { usePickerPreviewStore } from "../state/picker-preview";
 import {
   comparisonLabel,
   shortOid,
@@ -475,7 +476,9 @@ export default function DiffBuffer() {
   const flags = useTagsStore((s) => s.flags);
   const ignored = useTagsStore((s) => s.ignored);
   // Whether a window shows this buffer, and whether that window has the keyboard.
-  const visible = useWindowStore((s) => isShown(s, "diff"));
+  const displayed = useWindowStore((s) => isShown(s, "diff"));
+  const previewed = usePickerPreviewStore((s) => s.frame === "diff");
+  const visible = displayed || previewed;
   const focused = useWindowStore((s) => hasKeyboard(s, "diff"));
   const focusRequest = useUIStore((s) => s.focusRequest);
   const diffHighlight = useUIStore((s) => s.diffHighlight);

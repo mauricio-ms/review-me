@@ -3,15 +3,17 @@ import { usePickerPreviewStore } from "../state/picker-preview";
 import { useRepoStore } from "../state/repo";
 import { useMinibufferStore } from "../state/minibuffer";
 import { useXrefStore } from "../state/xref";
-import { useWindowStore, windowOrder, windowShowing, type WindowId } from "../state/windows";
+import { useLogStore } from "../state/log";
+import { useWindowStore, windowOrder, windowShowing, type FrameBufferKey, type WindowId } from "../state/windows";
 import { sameSource } from "../types/repo";
 import { findFileBuffer } from "./buffers";
 import type { SourceChoice } from "./project";
 import { positionOf } from "./project-view";
 import { readPreview } from "./tauri";
 import { targetWindow } from "./windows";
+import { loadLog } from "./log";
 
-export type PreviewTarget = {
+export type FilePreviewTarget = {
   path: string;
   choice: SourceChoice;
   line?: number;
@@ -20,6 +22,8 @@ export type PreviewTarget = {
   /** Validate asynchronous candidate sets even before React commits their replacement. */
   current?: () => boolean;
 };
+
+export type PreviewTarget = FilePreviewTarget | { buffer: FrameBufferKey };
 
 export type PreviewOptions = { other?: boolean; window?: WindowId; bufferSwitch?: boolean };
 let nextOwner = 0;
@@ -47,7 +51,7 @@ export function startPickerPreview(options: PreviewOptions = {}, onInvalidate = 
   const buffers = new Map<string, FileBuffer>();
   const valid = () => !ended && useRepoStore.getState().repoPath === repo.repoPath &&
     useRepoStore.getState().diff === repo.diff && useWindowStore.getState().shown[base] === ws.shown[base];
-  usePickerPreviewStore.setState({ owner, shown: null });
+  usePickerPreviewStore.setState({ owner, shown: null, frame: null });
 
   const unsubscribe = useRepoStore.subscribe((now) => {
     if (now.repoPath !== repo.repoPath || now.diff !== repo.diff) {
@@ -74,7 +78,7 @@ export function startPickerPreview(options: PreviewOptions = {}, onInvalidate = 
     stopMinibuffer();
     stopXref();
     const pane = usePickerPreviewStore.getState().shown;
-    if (accept && current && pane && target && (path == null || pane.buffer.path === path) && pane.buffer.path === target.path &&
+    if (accept && current && pane && target && "path" in target && (path == null || pane.buffer.path === path) && pane.buffer.path === target.path &&
         sameSource(pane.buffer.source, target.choice.source) && pane.buffer.content != null && !pane.error) {
       const files = useFilesStore.getState();
       if (!findFileBuffer(pane.buffer.source, pane.buffer.path)) {
@@ -83,7 +87,7 @@ export function startPickerPreview(options: PreviewOptions = {}, onInvalidate = 
       }
     }
     if (usePickerPreviewStore.getState().owner === owner) {
-      usePickerPreviewStore.setState({ owner: null, shown: null });
+      usePickerPreviewStore.setState({ owner: null, shown: null, frame: null });
     }
     if (split != null && useWindowStore.getState().shown[split] === "project") {
       useWindowStore.getState().remove(split);
@@ -94,7 +98,7 @@ export function startPickerPreview(options: PreviewOptions = {}, onInvalidate = 
     return current;
   }
 
-  async function show(candidate: PreviewTarget, ticket: number): Promise<void> {
+  async function show(candidate: FilePreviewTarget, ticket: number): Promise<void> {
     const current = () => valid() && ticket === generation && (candidate.current?.() ?? true);
     if (!current() || !repo.repoPath) return;
     const key = JSON.stringify([candidate.choice.source, candidate.path]);
@@ -122,7 +126,7 @@ export function startPickerPreview(options: PreviewOptions = {}, onInvalidate = 
     const position = candidate.line != null ? { line: candidate.line, col: candidate.col ?? 0, center: true } :
       positionOf(win, buffer.id) ?? positionOf(from, buffer.id) ?? { line: 1, col: 0 };
     const pane = { win, buffer, position, ranges: candidate.ranges ?? NO_RANGES, error: null };
-    usePickerPreviewStore.setState({ shown: pane });
+    usePickerPreviewStore.setState({ shown: pane, frame: null });
     if (buffer.content != null) return;
     let read = reads.get(key);
     if (!read) {
@@ -154,7 +158,12 @@ export function startPickerPreview(options: PreviewOptions = {}, onInvalidate = 
       clearTimeout(timer);
       // Clear stale query results immediately; row navigation may retain the old view
       // during the debounce, labelled with its own path rather than the new candidate's.
-      if (!candidate) usePickerPreviewStore.setState({ shown: null });
+      if (!candidate) usePickerPreviewStore.setState({ shown: null, frame: null });
+      else if ("buffer" in candidate) {
+        // Full-frame buffers never belong in the other-window picker.
+        usePickerPreviewStore.setState({ shown: null, frame: options.other ? null : candidate.buffer });
+        if (!options.other && candidate.buffer === "log" && useLogStore.getState().ref == null) void loadLog();
+      }
       else if (delay === 0) void show(candidate, ticket);
       else timer = setTimeout(() => { void show(candidate, ticket); }, delay);
     },

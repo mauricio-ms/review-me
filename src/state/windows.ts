@@ -11,6 +11,13 @@ export type FileBufferId = `file:${string}`;
  */
 export type BufferKey = "diff" | "log" | "help" | "project" | FileBufferId;
 
+/** Application buffers that normal buffer switching displays across the frame. */
+export type FrameBufferKey = "diff" | "log" | "help";
+
+export function isFrameKey(key: BufferKey): key is FrameBufferKey {
+  return key === "diff" || key === "log" || key === "help";
+}
+
 /** What has the keyboard, by kind — what buffer-scoped commands and keymaps key on. */
 export type BufferName = "diff" | "log" | "project" | "help";
 
@@ -144,7 +151,7 @@ type WindowState = {
   recent: BufferKey[];
   nextId: WindowId;
   /**
-   * Project mode's windows while the diff has the frame to itself (`takeFrame`), put
+   * Project mode's windows while an application buffer has the frame (`takeFrame`), put
    * back on the way back (`unstash`). Only ever set outside project mode.
    */
   stash: Stash | null;
@@ -398,7 +405,7 @@ export const useWindowStore = create<WindowState>((set, get) => ({
   reset: () => set(initial()),
 }));
 
-// A stash is for coming back to project mode from the diff. Back in it any other way —
+// A stash is for coming back to project mode from an application buffer. Back another way —
 // the window beside the diff closed, say — what was stashed is no longer the way back.
 useWindowStore.subscribe((s) => {
   if (s.stash && inProjectMode(s)) useWindowStore.setState({ stash: null });

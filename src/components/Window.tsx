@@ -2,9 +2,11 @@ import { useEffect, useLayoutEffect, useMemo, useRef, type CSSProperties } from 
 
 import {
   isFileKey,
+  isFrameKey,
   onScreen,
   useWindowStore,
   type Layout,
+  type FrameBufferKey,
   type SplitPath,
   type WindowId,
 } from "../state/windows";
@@ -12,18 +14,18 @@ import { openPreview } from "../lib/project";
 import { focusTree } from "../lib/windows";
 import { useProjectStore } from "../state/project";
 import { usePickerPreviewStore } from "../state/picker-preview";
+import { useUIStore } from "../state/ui";
 import FileView from "./FileView";
-import HelpBuffer from "./HelpBuffer";
 
 /**
- * The diff and the log are rendered once (portals into these elements, from
+ * The diff, log and help are rendered once (portals into these elements, from
  * `AppShell`) and each moved into whichever window shows it: their cursor, folds and
  * scroll live in the component, which must never remount just because it moved. While
  * no window shows one, its element is detached — mounted, but laid out at zero size.
  */
-const hosts = new Map<"diff" | "log", HTMLDivElement>();
+const hosts = new Map<FrameBufferKey, HTMLDivElement>();
 
-export function bufferHost(name: "diff" | "log"): HTMLDivElement {
+export function bufferHost(name: FrameBufferKey): HTMLDivElement {
   let host = hosts.get(name);
   if (!host) {
     host = document.createElement("div");
@@ -44,17 +46,19 @@ const detached = new WeakMap<
 >();
 
 /** Where a window holds a persistent buffer's element while it shows it. */
-function BufferSlot({ name }: { name: "diff" | "log" }) {
+function BufferSlot({ name, preview = false }: { name: FrameBufferKey; preview?: boolean }) {
   const slotRef = useRef<HTMLDivElement | null>(null);
+  const frame = usePickerPreviewStore((s) => s.frame);
+  const active = preview ? frame === name : frame !== name;
   useLayoutEffect(() => {
     const slot = slotRef.current;
     const host = bufferHost(name);
-    if (!slot) return;
+    if (!slot || !active) return;
     slot.appendChild(host);
     const saved = detached.get(host);
     if (saved) {
       for (const [el, top] of saved.scrolls) el.scrollTop = top;
-      saved.focused?.focus({ preventScroll: true });
+      if (useUIStore.getState().modalDepth === 0) saved.focused?.focus({ preventScroll: true });
       detached.delete(host);
     }
     return () => {
@@ -68,8 +72,18 @@ function BufferSlot({ name }: { name: "diff" | "log" }) {
       detached.set(host, { scrolls, focused });
       slot.removeChild(host);
     };
-  }, [name]);
+  }, [name, active]);
   return <div ref={slotRef} className="buffer-slot" />;
+}
+
+/** Reuse the real buffer host, without selecting it or changing the window layout. */
+export function FrameBufferPreview({ name }: { name: FrameBufferKey }) {
+  return (
+    <div className="frame-buffer-preview" data-preview-buffer={name}
+      onMouseDownCapture={(event) => event.preventDefault()}>
+      <BufferSlot name={name} preview />
+    </div>
+  );
 }
 
 /**
@@ -130,10 +144,8 @@ function Window({
   return (
     <div ref={rootRef} className={className} style={style} data-window={id}>
       <div className="window-content" style={pane ? { visibility: "hidden" } : undefined} aria-hidden={pane ? true : undefined}>
-        {key === "diff" || key === "log" ? (
+        {key && isFrameKey(key) ? (
           <BufferSlot name={key} />
-        ) : key === "help" ? (
-          <HelpBuffer />
         ) : key === "project" ? (
           <NoFileOpen win={id} />
         ) : key && isFileKey(key) ? (
