@@ -977,6 +977,7 @@ kbd {
 /* ---------- log buffer (commits) ---------- */
 
 .grep-picker { border-top: 1px solid var(--bg-3); }
+.grep-picker .mb-hint { flex: 0 1 55ch; }
 .grep-revision {
   max-width: 24ch;
   overflow: hidden;
@@ -986,7 +987,11 @@ kbd {
   font-size: var(--fs-ui);
 }
 .grep-summary { padding: 2px 12px; font-size: var(--fs-ui); color: var(--fg-dim); }
-.grep-picker .grep-list { max-height: min(35vh, calc(10 * (1.5em + 4px))); overflow: auto; }
+.grep-picker .grep-list {
+  height: min(35vh, calc(10 * (1.5em + 4px)));
+  max-height: none;
+  overflow: auto;
+}
 .grep-row {
   display: flex;
   align-items: baseline;

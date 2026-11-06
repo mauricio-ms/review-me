@@ -1,12 +1,13 @@
 import { useGrepStore, type GrepContext } from "../state/grep";
 import { useMinibufferStore } from "../state/minibuffer";
+import { useProjectStore } from "../state/project";
 import { useRepoStore } from "../state/repo";
 import { useUIStore } from "../state/ui";
 import { inProjectMode, useWindowStore, windowOrder } from "../state/windows";
 import { sameSource } from "../types/repo";
 import type { GrepScope } from "../types/grep";
 import { currentPlace, recordJump } from "./jumps";
-import { ambientSource, visitFile } from "./project";
+import { ambientSource, revealInTree, useProjectSource, visitFile } from "./project";
 import { activeView } from "./project-view";
 import { cancelRepoSearch, searchRepo } from "./tauri";
 import { selectWindow, showProject } from "./windows";
@@ -14,6 +15,11 @@ import { selectWindow, showProject } from "./windows";
 let timer: ReturnType<typeof setTimeout> | null = null;
 let pending: string | null = null;
 let generation = 0;
+
+/** Count characters rather than UTF-16 units, including non-BMP symbols. */
+export function grepCharsRemaining(query: string): number {
+  return Math.max(0, 3 - Array.from(query).length);
+}
 
 /** Stop backend work as well as invalidating replies already on their way back. */
 function invalidate(): void {
@@ -60,7 +66,8 @@ export async function runGrep(): Promise<void> {
   invalidate();
   const ticket = generation;
   const { context, query, scope } = useGrepStore.getState();
-  if (!context || !current(context) || !query) {
+  if (!context || !current(context)) return;
+  if (grepCharsRemaining(query) > 0) {
     useGrepStore.setState({ results: null, status: "idle", error: null, selected: 0 });
     return;
   }
@@ -68,30 +75,40 @@ export async function runGrep(): Promise<void> {
   const changedFiles = (useRepoStore.getState().diff?.files ?? [])
     .filter((f) => f.status !== "deleted").map((f) => f.path);
   pending = searchId;
-  useGrepStore.setState({ results: null, status: "loading", error: null, selected: 0 });
+  useGrepStore.setState({ status: "loading", error: null });
   try {
     const results = await searchRepo(searchId, {
       repo: context.repo, source: context.choice.source, query,
       only: scope === "changed" ? changedFiles : null,
     });
     if (ticket !== generation || !current(context)) return;
-    useGrepStore.setState({ results, status: results.cancelled ? "cancelled" : "ready" });
+    useGrepStore.setState((state) => {
+      const selected = state.results?.hits[state.selected];
+      const index = selected ? results.hits.findIndex((hit) => hit.path === selected.path && hit.line === selected.line) : -1;
+      return { results, selected: Math.max(0, index), status: results.cancelled ? "cancelled" : "ready" };
+    });
   } catch (error) {
     if (ticket === generation && current(context)) {
-      useGrepStore.setState({ status: "error", error: String(error), results: null });
+      useGrepStore.setState({ status: "error", error: String(error) });
     }
   } finally {
     if (pending === searchId) pending = null;
   }
 }
 
-/** Debounce edits, clearing obsolete matches immediately so they cannot be opened. */
+/** Keep the displayed candidates until their replacement is ready, without blanking the picker. */
 export function editGrep(query: string, scope = useGrepStore.getState().scope): void {
-  const { context } = useGrepStore.getState();
+  const state = useGrepStore.getState();
+  const { context } = state;
   if (!context || !current(context)) return;
+  if (query === state.query && scope === state.scope) return;
   invalidate();
-  useGrepStore.setState({ query, scope, results: null, selected: 0, error: null, status: query ? "loading" : "idle" });
-  if (query) timer = setTimeout(() => { timer = null; void runGrep(); }, 150);
+  if (grepCharsRemaining(query) > 0) {
+    useGrepStore.setState({ query, scope, results: null, selected: 0, error: null, status: "idle" });
+    return;
+  }
+  useGrepStore.setState({ query, scope, error: null, status: "loading" });
+  timer = setTimeout(() => { timer = null; void runGrep(); }, 150);
 }
 
 export function setGrepScope(scope: GrepScope): void {
@@ -105,11 +122,16 @@ export function cancelGrep(): void {
 
 /** Accept a candidate, close the picker, then visit it in the originating project window. */
 export function visitGrepHit(index: number): void {
-  const { context, results } = useGrepStore.getState();
+  const { context, results, status } = useGrepStore.getState();
   const hit = results?.hits[index];
-  if (!context || !current(context) || !hit) return;
+  // Previous candidates stay visible while updating, but only the current query may navigate.
+  if (!context || !current(context) || !hit || status !== "ready") return;
   recordJump(context.origin);
   resetGrep();
+  useProjectSource(context.choice);
+  const project = useProjectStore.getState();
+  const changed = useRepoStore.getState().diff?.files.some((file) => file.path === hit.path);
+  if (project.filter === "changed" && !changed) project.toggleFilter();
   const ws = useWindowStore.getState();
   if (context.window != null && inProjectMode(ws) && windowOrder(ws.layout).includes(context.window)) {
     selectWindow(context.window);
@@ -117,6 +139,7 @@ export function visitGrepHit(index: number): void {
     showProject();
   }
   visitFile(hit.path, context.choice, { line: hit.line, col: hit.col });
+  revealInTree(hit.path);
 }
 
 export function moveGrep(delta: number): void {

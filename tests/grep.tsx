@@ -10,6 +10,7 @@ import { useFilesStore } from "../src/state/files";
 import { useGrepStore } from "../src/state/grep";
 import { useHistoryStore } from "../src/state/history";
 import { useMinibufferStore } from "../src/state/minibuffer";
+import { useProjectStore } from "../src/state/project";
 import { useRepoStore } from "../src/state/repo";
 import { inProjectMode, selectedBuffer, useWindowStore, windowOrder } from "../src/state/windows";
 import type { SearchHit, SearchResults } from "../src/types/grep";
@@ -36,6 +37,17 @@ beforeEach(() => {
   mock("search_repo", () => found());
   mock("read_file", () => "first\n😀 needle needle\nthird needle");
   mock("symbol_occurrences", () => null);
+  mock("list_repo_dir", ({ path }) => ({ path, entries: path === "" ? [
+    { name: "src", path: "src", isDir: true },
+    { name: "origin.txt", path: "origin.txt", isDir: false },
+  ] : path === "src" ? [
+    { name: "a.txt", path: "src/a.txt", isDir: false },
+    { name: "b.txt", path: "src/b.txt", isDir: false },
+    { name: "services", path: "src/services", isDir: true },
+  ] : path === "src/services" ? [
+    { name: "unused.txt", path: "src/services/unused.txt", isDir: false },
+    { name: "changed.txt", path: "src/services/changed.txt", isDir: false },
+  ] : [] }));
 });
 afterEach(() => {
   root?.unmount(); root = null; parent?.remove(); parent = null;
@@ -106,6 +118,85 @@ test("candidate navigation only changes selection and scroll, without opening or
   equal(windowSnapshot(), before); equal(fileReads().length, 0);
   equal(useHistoryStore.getState().back, []); equal(useFilesStore.getState().buffers, []);
   assert(document.activeElement === input);
+});
+
+test("search waits for three characters and shows how many more are needed", async () => {
+  await mount(); openGrep(); const input = await prompt();
+  await waitFor(() => document.querySelector(".grep-picker .mb-empty")?.textContent === "3 chars more");
+  const height = document.querySelector(".grep-list")!.getBoundingClientRect().height;
+  type(input, "n");
+  await waitFor(() => document.querySelector(".grep-picker .mb-empty")?.textContent === "2 chars more");
+  await runGrep(); equal(searchCalls().length, 0);
+  type(input, "ne");
+  await waitFor(() => document.querySelector(".grep-picker .mb-empty")?.textContent === "1 char more");
+  await runGrep(); equal(searchCalls().length, 0);
+  type(input, "nee");
+  await waitFor(() => gs().status === "ready" && document.querySelector(".grep-row"));
+  equal(searchCalls().length, 1); equal((searchCalls()[0].args.request as { query: string }).query, "nee");
+  equal(document.querySelector(".grep-list")!.getBoundingClientRect().height, height);
+});
+
+test("the minimum query length counts Unicode characters rather than UTF-16 units", async () => {
+  await mount(); openGrep(); const input = await prompt();
+  type(input, "😀");
+  await waitFor(() => document.querySelector(".grep-picker .mb-empty")?.textContent === "2 chars more");
+  await runGrep(); equal(searchCalls().length, 0);
+  type(input, "😀é");
+  await waitFor(() => document.querySelector(".grep-picker .mb-empty")?.textContent === "1 char more");
+  await runGrep(); equal(searchCalls().length, 0);
+  type(input, "😀éx"); await waitFor(() => searchCalls().length === 1);
+  equal((searchCalls()[0].args.request as { query: string }).query, "😀éx");
+});
+
+test("rapid edits debounce into a single search for the latest query", async () => {
+  openGrep(); editGrep("nee"); editGrep("need"); editGrep("needle");
+  equal(searchCalls().length, 0);
+  await waitFor(() => gs().status === "ready");
+  equal(searchCalls().length, 1); equal((searchCalls()[0].args.request as { query: string }).query, "needle");
+});
+
+test("query updates retain mounted rows, selection and picker height until results arrive", async () => {
+  mock("search_repo", () => found(matches));
+  await mount(); const input = await search(); key("n", { ctrlKey: true }, input);
+  await waitFor(() => gs().selected === 1);
+  const selected = document.querySelector<HTMLElement>(".grep-row.is-selected")!;
+  const list = document.querySelector(".grep-list")!;
+  const height = list.getBoundingClientRect().height;
+  const bodyHeight = document.querySelector(".app-body")!.getBoundingClientRect().height;
+  const scopeLeft = document.querySelector(".grep-scope")!.getBoundingClientRect().left;
+  const pending = deferred<SearchResults>(); mock("search_repo", () => pending.promise);
+  type(input, "needleX");
+  await waitFor(() => gs().status === "loading" && searchCalls().length === 2);
+  assert(document.querySelector(".grep-row.is-selected") === selected);
+  equal(gs().selected, 1); equal(document.querySelectorAll(".grep-row").length, 2);
+  equal(list.getBoundingClientRect().height, height);
+  equal(document.querySelector(".app-body")!.getBoundingClientRect().height, bodyHeight);
+  equal(document.querySelector(".grep-scope")!.getBoundingClientRect().left, scopeLeft);
+  assert(!document.querySelector(".grep-picker .mb-empty"));
+  assert(document.querySelector(".grep-picker .mb-hint")?.textContent?.includes("Updating"));
+  key("Enter", {}, input); selected.click();
+  assert(document.querySelector(".grep-picker")); equal(fileReads().length, 0);
+  pending.resolve(found([hit({ path: "src/b.txt", line: 3, col: 6, snippet: "third needleX", ranges: [{ from: 6, to: 13 }] })]));
+  await waitFor(() => gs().status === "ready" && document.querySelectorAll(".grep-row").length === 1);
+  assert(document.querySelector(".grep-row.is-selected") === selected);
+  equal(gs().selected, 0); assert(selected.textContent?.includes("third needleX"));
+  equal(list.getBoundingClientRect().height, height); assert(document.activeElement === input);
+  equal(fileReads().length, 0);
+});
+
+test("failed updates keep the displayed rows and report the error without allowing outdated selection", async () => {
+  await mount(); const input = await search();
+  const row = document.querySelector(".grep-row")!;
+  mock("search_repo", () => { throw new Error("read failed"); });
+  type(input, "needleX");
+  await waitFor(() => gs().status === "error");
+  assert(document.querySelector(".grep-row") === row);
+  assert(document.querySelector(".grep-summary")?.textContent?.includes("read failed"));
+  key("Enter", {}, input); assert(document.querySelector(".grep-picker")); equal(fileReads().length, 0);
+  mock("search_repo", () => found([])); type(input, "needleXY");
+  await waitFor(() => gs().status === "ready");
+  equal(document.querySelectorAll(".grep-row").length, 0);
+  assert(document.querySelector(".grep-picker .mb-empty")?.textContent?.includes("No matching lines"));
 });
 
 test("Enter from the diff closes search and opens the selected match in project mode without splitting", async () => {
@@ -194,6 +285,38 @@ test("a search from the project tree opens its result in the existing project wi
   key("Enter", {}, input);
   await waitFor(() => activeView()?.hasFocus && !document.querySelector(".grep-picker"));
   assert(inProjectMode(ws())); assert(!ws().treeFocused); equal(windowOrder(ws().layout), [1]);
+});
+
+test("opening an unchanged result switches to all files and reveals its folders at the searched revision", async () => {
+  repoFixture(branchSpec, summary(branches(), [file({ path: "src/services/changed.txt" })]));
+  mock("search_repo", () => found([hit({ path: "src/services/unused.txt" })]));
+  useProjectStore.getState().setSource({ kind: "commit", oid: "a".repeat(40) }, "old side");
+  await mount(); const input = await search();
+  equal(useProjectStore.getState().filter, "changed");
+  key("Enter", {}, input);
+  await waitFor(() => document.querySelector(".tree-row.is-selected.is-open .tree-name")?.textContent === "unused.txt");
+  const project = useProjectStore.getState();
+  equal(project.filter, "all"); equal(project.treeCursor, "src/services/unused.txt");
+  equal(project.source, { kind: "commit", oid: OID });
+  assert(project.expanded.has("src")); assert(project.expanded.has("src/services"));
+  equal(document.querySelector(".project-tree-mode")?.textContent, "all files");
+  const listings = calls.filter((call) => call.command === "list_repo_dir");
+  assert(listings.some((call) => call.args.path === "src/services"));
+  for (const listing of listings) equal(listing.args.source, { kind: "commit", oid: OID });
+  assert(activeView()?.hasFocus); assert(!ws().treeFocused);
+});
+
+test("opening a changed result reveals a folded path without switching out of changed files", async () => {
+  repoFixture(branchSpec, summary(branches(), [file({ path: "src/services/changed.txt" })]));
+  mock("search_repo", () => found([hit({ path: "src/services/changed.txt" })]));
+  await mount(); useProjectStore.getState().closeFolder("src/services");
+  const input = await search(); key("Enter", {}, input);
+  await waitFor(() => document.querySelector(".tree-row.is-selected.is-open .tree-name")?.textContent === "changed.txt");
+  equal(useProjectStore.getState().filter, "changed");
+  equal(useProjectStore.getState().treeCursor, "src/services/changed.txt");
+  assert(useProjectStore.getState().expanded.has("src/services"));
+  equal(calls.filter((call) => call.command === "list_repo_dir").length, 0);
+  assert(activeView()?.hasFocus);
 });
 
 test("C-g dismisses completed results, restores the originating focus and leaves no grep buffer to switch to", async () => {
@@ -311,6 +434,19 @@ test("clearing input cancels the old query without launching an empty repository
   pending.resolve(found()); await first;
   equal(gs().results, null); equal(searchCalls().length, 1);
   cancelGrep(); equal(useMinibufferStore.getState().request, null);
+});
+
+test("shortening a pending query below three characters cancels it and restores the length hint", async () => {
+  const pending = deferred<SearchResults>(); mock("search_repo", () => pending.promise);
+  await mount(); openGrep(); const input = await prompt(); type(input, "needle");
+  await waitFor(() => searchCalls().length === 1);
+  type(input, "ne");
+  await waitFor(() => document.querySelector(".grep-picker .mb-empty")?.textContent === "1 char more");
+  assert(calls.some((call) => call.command === "cancel_repo_search"));
+  await runGrep(); equal(searchCalls().length, 1);
+  pending.resolve(found()); await new Promise((resolve) => setTimeout(resolve, 0));
+  equal(gs().results, null); equal(gs().status, "idle"); equal(gs().query, "ne");
+  equal(document.querySelectorAll(".grep-row").length, 0);
 });
 
 void run();

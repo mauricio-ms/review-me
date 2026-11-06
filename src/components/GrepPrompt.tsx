@@ -1,6 +1,6 @@
 import { useEffect, useRef, type ReactNode } from "react";
 
-import { cancelGrep, editGrep, moveGrep, setGrepScope, visitGrepHit } from "../lib/grep";
+import { cancelGrep, editGrep, grepCharsRemaining, moveGrep, setGrepScope, visitGrepHit } from "../lib/grep";
 import { dispatchKey, type KeyHandler } from "../lib/key-dispatch";
 import { KEYMAP, type MinibufferAction } from "../lib/keymap";
 import { useGrepStore } from "../state/grep";
@@ -23,6 +23,7 @@ function marked(hit: SearchHit): ReactNode {
 /** A temporary horizontal picker below the current buffer, with no file previews. */
 export default function GrepPrompt({ atPoint }: { atPoint: string | null }) {
   const { context, query, scope, results, selected, status, error } = useGrepStore();
+  const remaining = grepCharsRemaining(query);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const selectedRef = useRef<HTMLDivElement | null>(null);
@@ -62,26 +63,31 @@ export default function GrepPrompt({ atPoint }: { atPoint: string | null }) {
         <span className="grep-revision" title={context?.choice.source.kind === "commit" ? context.choice.source.oid : undefined}>
           {context?.choice.label ?? "working tree"}
         </span>
-        <span className="mb-hint">C-n / C-p choose · M-n symbol · RET open · C-g cancel</span>
+        <span className="mb-hint" role="status" aria-live="polite">
+          {status === "loading" && results ? "Updating…" : "C-n / C-p choose · M-n symbol · RET open · C-g cancel"}
+        </span>
       </div>
       <div id="grep-results" className="mb-list grep-list" role="listbox" aria-label="Matching lines" aria-busy={status === "loading"}>
         {results?.hits.length ? results.hits.map((hit, index) => (
           <div key={`${hit.path}:${hit.line}`} id={`grep-hit-${index}`}
             className={`grep-row${index === selected ? " is-selected" : ""}`} role="option" aria-selected={index === selected}
+            aria-disabled={status !== "ready"}
             ref={index === selected ? selectedRef : undefined} onClick={() => visitGrepHit(index)}>
             <span className="grep-location"><PathLabel path={hit.path} />:<span className="grep-line">{hit.line}</span>:</span>
             <span className="grep-snippet">{marked(hit)}</span>
           </div>
         )) : (
           <div className="mb-empty" role="status">
-            {status === "loading" ? "Searching…" : status === "error" ? `Search failed: ${error}` :
+            {remaining > 0 ? `${remaining} char${remaining === 1 ? "" : "s"} more` :
+              status === "loading" ? "Searching…" : status === "error" ? `Search failed: ${error}` :
               status === "cancelled" ? "Search stopped — edit the query to retry" :
                 results ? "No matching lines" : "Type literal text to search · case insensitive until you type a capital"}
           </div>
         )}
       </div>
-      {results && (results.truncated || results.skippedFiles > 0 || results.skippedLines > 0) && (
+      {results && (status === "error" || results.truncated || results.skippedFiles > 0 || results.skippedLines > 0) && (
         <div className="grep-summary" role="status">
+          {status === "error" && <span>Search failed: {error}. Edit the query to retry. </span>}
           {results.truncated && <span>Results limited to the first 1,000 matching lines; narrow the search. </span>}
           {results.skippedFiles > 0 && <span>{results.skippedFiles} files skipped (binary, invalid text, symlinks, unreadable, or over 2 MiB). </span>}
           {results.skippedLines > 0 && <span>{results.skippedLines} lines over 16 KiB skipped.</span>}

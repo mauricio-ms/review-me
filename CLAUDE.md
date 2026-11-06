@@ -140,6 +140,11 @@ candidate closes the picker and visits the file in that window, or enters projec
 when invoked elsewhere; cancelling closes it without navigation. Closing/replacing the
 minibuffer cancels backend work and discards candidates, and only an accepted match
 records a jump. Search content still comes from the comparison's target revision.
+Queries need three Unicode characters. Updates retain the last candidate rows and
+selection until a replacement response arrives, with a fixed picker height; only
+results for the completed current query may navigate. Accepting a result sets the
+tree to its revision, opens its parent folders, selects its path, and switches from
+changed files to all files when that path is unchanged.
 
 **Commands and keys are Emacs-style; there is no `:` command line and no Space palette**
 (the user removed both). A single **`components/useCommands.ts`** registry (typed

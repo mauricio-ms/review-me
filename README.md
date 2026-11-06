@@ -649,9 +649,17 @@ searches literal text: punctuation and spaces match themselves, and case is igno
 until the query contains a capital. `M-n` inserts the symbol at the cursor when the
 search was opened.
 
+Search starts at three characters; shorter queries show how many more are needed.
+Typing keeps the last results and the selected line in place until the updated results
+arrive, with the picker staying the same height. Rapid edits are debounced, and results
+being updated become selectable when the current query completes.
+
 `C-n` / `C-p` or the arrows select a candidate while the main view stays in place.
 `RET` or a click opens that result and closes the picker. From project mode the result
 replaces the file in the current window; from elsewhere it opens in project mode.
+The tree expands the file's parent folders and selects it. An unchanged file switches
+the tree to **all files** so the opened file is visible; a changed file keeps the current
+tree filter.
 `M-,` returns to where the search started. `C-g` / `ESC` cancels pending work and
 closes the picker without navigating. Each new search starts with an empty query.
 
