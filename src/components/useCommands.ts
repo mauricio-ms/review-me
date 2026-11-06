@@ -9,6 +9,7 @@ import {
   useCurrentFile,
 } from "../lib/buffers";
 import { visitCounterpart } from "../lib/counterpart";
+import { openGrep, resetGrep } from "../lib/grep";
 import { contextScope, startDescribeKey } from "../lib/key-dispatch";
 import { showLog } from "../lib/log";
 import {
@@ -60,6 +61,7 @@ export type CommandId =
   | "open"
   | "recent"
   | "find"
+  | "grep"
   | "refresh"
   | "diff-mode"
   | "flag"
@@ -192,6 +194,7 @@ export function useCommands(close: CommandClose): {
 
   const handleCloseRepo = useCallback(() => {
     close({ restoreFocus: false });
+    resetGrep();
     closeRepo();
     useTagsStore.getState().clear();
     useLogStore.getState().reset();
@@ -208,6 +211,11 @@ export function useCommands(close: CommandClose): {
     },
     [close, openPicker],
   );
+
+  const handleGrep = useCallback(() => {
+    close({ restoreFocus: false });
+    openGrep();
+  }, [close]);
 
   const handleClearTags = useCallback(() => {
     close({ restoreFocus: false });
@@ -402,6 +410,14 @@ export function useCommands(close: CommandClose): {
       label: "find file (fuzzy)",
       enabled: !!repo,
       run: () => handleFind(false),
+    },
+    {
+      id: "grep",
+      name: "grep",
+      aliases: ["project-search"],
+      label: "search text across the revision under review",
+      enabled: !!repo,
+      run: handleGrep,
     },
     {
       id: "refresh",

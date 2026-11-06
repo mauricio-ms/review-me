@@ -1,5 +1,6 @@
 import { useFilesStore, newFileBufferId, type FileBuffer } from "../src/state/files";
 import { useHistoryStore } from "../src/state/history";
+import { resetGrep } from "../src/lib/grep";
 import { useLogStore } from "../src/state/log";
 import { useMinibufferStore } from "../src/state/minibuffer";
 import { useNotesStore } from "../src/state/notes";
@@ -56,6 +57,7 @@ export function openFile(path = "a.ts", source: ProjectSource = { kind: "worktre
   return buffer;
 }
 export function resetState() {
+  resetGrep();
   const request = useMinibufferStore.getState().request;
   if (request?.kind === "confirm") request.onAnswer(false);
   useMinibufferStore.getState().close();

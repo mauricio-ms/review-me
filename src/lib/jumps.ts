@@ -1,4 +1,5 @@
 import { useHistoryStore, type Place } from "../state/history";
+import { useGrepStore } from "../state/grep";
 import { useUIStore } from "../state/ui";
 import { isFileKey, selectedBuffer, useWindowStore } from "../state/windows";
 import { currentFile } from "./buffers";
@@ -31,6 +32,7 @@ export function currentPlace(): Place | null {
     return { kind: "diff", path: cursor?.path ?? null, line: cursor?.line ?? null };
   }
   if (key === "log") return { kind: "log", oid: logCursor() };
+  if (key === "grep") return { kind: "grep", index: useGrepStore.getState().selected };
   return null;
 }
 

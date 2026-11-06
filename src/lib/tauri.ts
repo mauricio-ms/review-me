@@ -31,6 +31,7 @@ import type {
   TagStore,
 } from "../types/tags";
 import type { IndexStats, ImportAudit, Occurrences, SymbolRef, XrefResult } from "../types/xref";
+import type { SearchRequest, SearchResults } from "../types/grep";
 
 export function openRepo(path: string): Promise<RepoInfo> {
   return invoke<RepoInfo>("open_repo", { path });
@@ -283,6 +284,14 @@ export function fuzzyFiles(
   only: string[] | null,
 ): Promise<FileMatch[]> {
   return invoke<FileMatch[]>("fuzzy_files", { repo, source, query, limit, only });
+}
+
+export function searchRepo(searchId: string, request: SearchRequest): Promise<SearchResults> {
+  return invoke("search_repo", { searchId, request });
+}
+
+export function cancelRepoSearch(searchId: string): Promise<void> {
+  return invoke("cancel_repo_search", { searchId });
 }
 
 /** The code a test exercises, or a file's tests, by naming convention. */

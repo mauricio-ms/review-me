@@ -8,7 +8,8 @@ export type Place =
   | { kind: "file"; path: string; choice: SourceChoice; line: number; col: number }
   /** A row of the diff buffer: a file, and a line of it when the cursor was on one. */
   | { kind: "diff"; path: string | null; line: number | null }
-  | { kind: "log"; oid: string | null };
+  | { kind: "log"; oid: string | null }
+  | { kind: "grep"; index: number };
 
 const EMPTY: Place[] = [];
 
@@ -28,6 +29,8 @@ export function samePlace(a: Place, b: Place): boolean {
       return b.kind === "diff" && a.path === b.path && a.line === b.line;
     case "log":
       return b.kind === "log" && a.oid === b.oid;
+    case "grep":
+      return b.kind === "grep" && a.index === b.index;
   }
 }
 

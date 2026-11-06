@@ -34,6 +34,7 @@ const ORDER: KeyScope[] = [
   "start",
   "diff",
   "log",
+  "grep",
   "tree",
   "viewer",
   "minibuffer",

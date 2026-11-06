@@ -63,6 +63,8 @@ Reviewing agent-generated code has a different shape than reviewing a human PR:
   make later, typically by an LLM. Every commit's notes are kept as structured Markdown
   under `.review-me/notes/`, and `M-x export` bundles a whole branch's into one file.
 - **Fuzzy file finder** — jump to any (non-ignored) file in the repo.
+- **Repository grep** — search literal text across the revision under review, preview
+  matches beside a persistent results buffer, and narrow to changed files.
 - **Project mode** — a read-only, IDE-like browser, initially showing the files the
   comparison on screen changed with deleted lines inline. `C-x v c` / `M-x changed`
   switches to the entire repo and hides deleted lines. Review a whole file at a time
@@ -77,7 +79,7 @@ files → hunks → lines, with Emacs keys: `M-x` and a minibuffer at the bottom
 
 ## Core concepts
 
-### Three buffers
+### Buffers
 
 All stay mounted; you switch between them and keep your cursor/scroll position.
 
@@ -86,6 +88,7 @@ All stay mounted; you switch between them and keep your cursor/scroll position.
 | **Diff** | The active comparison as a navigable file/hunk/line list. | Review, flag **and** note |
 | **Commits** | The review branch's history, magit-style; `Enter` opens a commit in the diff buffer. | — |
 | **Project** | Read-only file tree + syntax-highlighted viewer over the whole repo, at the compared revision. Every file you open in it stays open as a buffer of its own. | Review whole files, flag lines |
+| **Grep** | Repository search results, grouped by file, with matches previewed in another window. | — |
 
 The file tree belongs to the project buffer only: the diff, the commits and help never show
 it. Opening a file *beside* the diff (`o`) keeps you in the diff, with no tree; `RET` takes
@@ -335,6 +338,7 @@ just the current buffer's keys; `C-h k` tells you what a key does.
 | `M-x` | — | Run any command by name: type to narrow, `↑`/`↓` or `C-n`/`C-p`, `TAB` completes, `RET` runs |
 | `C-g` | — | Cancel: a half-typed key, the minibuffer, a picker, a selection |
 | `C-x C-f` | `find` | Fuzzy file finder → opens the file as a buffer |
+| `C-x p g` | `grep` | Search text across the revision under review |
 | `M-,` / `C-M-,` | `back` / `forward` | Back to where you were — a file, the diff, the log — and forward again |
 | `C-x b` | `switch-buffer` | Switch buffer (diff, log, project, help, every open file); `RET` alone goes back to the last one |
 | `C-x k` | `kill-buffer` | Close the file in the window |
@@ -638,6 +642,32 @@ search brings back the last one, and `M-n` searches for the symbol at the cursor
 | `C-x o` | To the tree (or the next window) |
 | `q` | Back to the diff (a window split off beside it closes) |
 
+### Repository search
+
+`C-x p g` / `M-x grep` opens a live search in the minibuffer and keeps its matches in
+the **grep** buffer, grouped by file with line and column numbers. It searches literal
+text: punctuation and spaces match themselves, and case is ignored until the query
+contains a capital. `M-n` inserts the symbol at the cursor when the search was opened.
+
+`C-n` / `C-p` select matches and show their files beside the results while the input
+keeps the keyboard. `RET` opens the selected match there, and `M-,` returns to its
+result. `C-g` closes the prompt and stops pending work, keeping any completed results.
+`C-x b grep` returns to the results at any time. In that buffer, `j` / `k`, `gg` / `G`
+move, `/` or `C-s` edits the search, `r` repeats it, and `q` quits the window.
+
+The prompt's scope button, or `s` in the results buffer, switches between the whole
+**repository** and **changed files**. Changed files means their full current content,
+including unchanged lines; deleted files have no content on this side and are excluded.
+Working-tree searches include tracked files and untracked files Git doesn't ignore.
+Branch and commit searches read the reviewed target's committed tree, with the exact
+revision shown above the results, even when a different branch is checked out or an
+old-side file is open. Switching comparisons or revisions clears the old search.
+
+Results are limited to 1,000 matching lines, with truncation explicitly shown. Files
+over 2 MiB, lines over 16 KiB, binary/invalid text, symlinks and unreadable files are
+skipped and counted. Editing a query cancels its previous search; obsolete replies
+cannot replace the current results.
+
 ### Cross-references
 
 Definitions and usages resolve via tree-sitter indexes for **Java, JavaScript and
@@ -687,7 +717,7 @@ React component → src/lib/*.ts action → invoke() in src/lib/tauri.ts
   `notes` (the Markdown export), `review_dir` (the `.review-me/` folder and its local
   exclusion), `tree` (ignore-aware listing), `fuzzy` (nucleo matcher), `queries` + `xref`
   (tree-sitter symbol index).
-- **Frontend (`src/`)** — `AppShell` keeps all three buffers mounted; a single command registry
+- **Frontend (`src/`)** — `AppShell` keeps the diff, log and grep buffers mounted; a single command registry
   (`components/useCommands.ts`) feeds `M-x`, and one keymap table (`lib/keymap.ts`) drives
   every key, `M-x`'s key column, and the `C-h b` help buffer; state is
   Zustand (`src/state/`). The diff buffer is a custom keyboard-navigable list (not

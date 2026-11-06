@@ -56,6 +56,9 @@ symbol index per language in a global `Mutex`.
 - `commits.rs` `list(repo, ref, skip, limit)` → a newest-first page of `CommitInfo`s, each with its ref `Decoration`s (filled by `list` only), and `resolve(repo, rev)` → (oid, **first** parent oid, info, full message). Any revision resolves (full oid, abbreviation, `HEAD~2`), but only full oids may reach a `DiffSpec`/`ReviewScope`.
 - `diff.rs` `compute(repo, &DiffSpec)` → `DiffSummary { comparison, files }` (`ChangedFile`/`Hunk`/`DiffLine`). See "Comparisons" below.
 - `revision.rs` `ProjectSource` (worktree | commit) and tree-backed content/listing/file-list reads.
+- `grep.rs` literal smart-case search over `ProjectSource`, bounded text reads and
+  UTF-16 match ranges. `SearchRegistry` holds cancellation tokens for async searches;
+  `search_repo` runs blocking Git/filesystem reads on Tauri's worker pool.
 - `tags.rs` review/flag persistence + **anchoring** (see below). `tree.rs` ignore-aware dir listing that **compacts single-folder chains**: a folder holding only one folder is one entry (`name` `java/com/acme`, `path` the deepest folder, which is what expanding it lists) — the changed-files view (`buildChanged`) does the same, and parent navigation climbs to the nearest listed ancestor. `fuzzy.rs` nucleo-matcher file ranking.
 - `coverage.rs` review progress over a computed diff (`summarize`, `commit_reviews` for the log's rows) and the covers/overlaps helpers `review_commit.rs` stages by — the Rust twin of `src/lib/coverage.ts`; keep the two in step.
 - `counterpart.rs` test ↔ code by naming convention (`FooTest.java` ↔ `Foo.java`, `foo.test.ts`, `Foo.spec.ts` ↔ `Foo.vue`/`.svelte`/`.astro`, `foo.cy.ts`, `test_foo.py`, `foo_test.go`, `__tests__/`) for `C-x 4 t`: `rank` is pure (closeness = same folder with role folders like `test`/`main` set aside, then shared tail, then shared head) and says whether its best is `decisive`.
@@ -71,7 +74,7 @@ symbol index per language in a global `Mutex`.
 
 **Frontend (`src/`)** — Emacs's model: a **frame** (`AppShell`'s `Frame`) holds the
 **windows** (`Window`), each showing one **buffer** (`state/windows.ts`'s `BufferKey`):
-`"diff"`, `"log"`, `"help"`, or the **project buffer** — an open file (`file:<n>`,
+`"diff"`, `"log"`, `"grep"`, `"help"`, or the **project buffer** — an open file (`file:<n>`,
 `state/files.ts`), or `"project"` with none open ("no file open"). The project buffer is
 what it always was — the file tree (`ProjectTree`) fixed at the left, the viewer beside
 it — and the tree exists **only there**: project mode (`inProjectMode`) is the main window
@@ -97,7 +100,8 @@ always has. `useWindowStore` holds what each window shows, what it showed before
 where help's `q` — `quitWindow` — and `C-x ←` go back to), what `C-x ←` stepped back from
 (`ahead`, where `C-x →` goes), the selected window, `treeFocused`, and `recent` (`C-x b`'s
 order); which kind of buffer has the keyboard (`activeBuffer`: diff/log/help, or `project`
-for the project buffer or the tree) is derived, never stored. `DiffBuffer` and `LogBuffer` are rendered **once**, as portals into
+for the project buffer or the tree) is derived, never stored. `DiffBuffer`, `LogBuffer`
+and `GrepBuffer` are rendered **once**, as portals into
 persistent host elements that `Window`'s `BufferSlot` moves into whichever window shows
 them — so their cursor, folds and scroll survive any move — and the slot carries scroll
 offsets and focus across the detach/re-attach (StrictMode re-runs it in dev). Each holds
@@ -887,6 +891,7 @@ and keep their TypeScript included in `tsconfig.tests.json`.
 Existing suites: `test:coverage` (review classification/progress, not code-coverage
 instrumentation), `test:algorithms`, `test:navigation`, `test:loading`, `test:keyboard`,
 `test:review`, `test:log` (full-range progress, paging, refresh and stale replies),
+`test:grep` (live repository search, scopes, previews, focus and cancellation),
 `test:jsdoc` (documentation highlighting), `test:markdown` (layout and
 navigation), and `test:resolve` (flag selection, confirmation and resolution).
 

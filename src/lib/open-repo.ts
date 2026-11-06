@@ -14,6 +14,7 @@ import {
 } from "../types/repo";
 import { scopeForSpec } from "../types/tags";
 import { showBuffer, showDiff, type ShowOptions } from "./buffers";
+import { resetGrep } from "./grep";
 import { loadLog, refreshCommitReviews, showLog } from "./log";
 import { ambientSource, reconcileFileBuffers, useProjectSource } from "./project";
 import { buildSymbolIndex, computeDiff, loadTags, openRepo, reviewBaseFor } from "./tauri";
@@ -86,6 +87,7 @@ export async function openRepoByPath(path: string): Promise<void> {
   // Even the same repo reopened gets a fresh history — and no files open, one window, a
   // tree read afresh.
   useLogStore.getState().reset();
+  resetGrep();
   useFilesStore.getState().reset();
   useWindowStore.getState().reset();
   useProjectStore.getState().reset();

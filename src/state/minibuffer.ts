@@ -12,6 +12,7 @@ import { useUIStore } from "./ui";
  */
 export type MinibufferRequest =
   | { kind: "command" }
+  | { kind: "grep"; atPoint: string | null }
   | { kind: "buffer"; /** Into the other window (`C-x 4 b`). */ other?: boolean }
   | {
       kind: "choice";

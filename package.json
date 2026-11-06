@@ -19,7 +19,8 @@
     "test:keyboard": "node scripts/browser-tests.mjs tests/keyboard.ts",
     "test:review": "node scripts/browser-tests.mjs tests/review.tsx",
     "test:log": "node scripts/browser-tests.mjs tests/log.tsx",
-    "test:frontend": "npm run test:typecheck && npm run test:coverage && npm run test:algorithms && npm run test:navigation && npm run test:loading && npm run test:keyboard && npm run test:review && npm run test:log && npm run test:jsdoc && npm run test:markdown && npm run test:resolve"
+    "test:grep": "node scripts/browser-tests.mjs tests/grep.tsx",
+    "test:frontend": "npm run test:typecheck && npm run test:coverage && npm run test:algorithms && npm run test:navigation && npm run test:loading && npm run test:keyboard && npm run test:review && npm run test:log && npm run test:grep && npm run test:jsdoc && npm run test:markdown && npm run test:resolve"
   },
   "dependencies": {
     "@codemirror/commands": "^6.6.0",

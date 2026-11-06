@@ -30,6 +30,7 @@ import {
 } from "../state/windows";
 import { useXrefStore } from "../state/xref";
 import SwiperPrompt from "./SwiperPrompt";
+import GrepPrompt from "./GrepPrompt";
 import { type CommandClose, useCommands } from "./useCommands";
 import { useModalFocus } from "./useModalFocus";
 
@@ -57,6 +58,7 @@ export default function Minibuffer() {
   const pickerDocked = useUIStore((s) => DOCKED_PICKERS.has(s.picker));
   const xrefOpen = useXrefStore((s) => s.open);
   if (request?.kind === "swiper") return <SwiperPrompt key={session} request={request} />;
+  if (request?.kind === "grep") return <GrepPrompt key={session} atPoint={request.atPoint} />;
   if (request) return <Prompt key={session} request={request} />;
   if (pickerDocked || xrefOpen) return null;
   return <EchoArea />;
@@ -114,7 +116,7 @@ function highlight(text: string, query: string): ReactNode {
 }
 
 /** The buffers that always exist, after whatever was shown most recently. */
-const STANDING: BufferKey[] = ["diff", "log", "project", "help"];
+const STANDING: BufferKey[] = ["diff", "log", "grep", "project", "help"];
 
 /** The name column's width for a list of buffers: the longest name, 16 to 48ch. */
 function nameWidth(candidates: Candidate[] | null): number {
@@ -122,7 +124,7 @@ function nameWidth(candidates: Candidate[] | null): number {
   return Math.min(48, Math.max(16, longest + 1));
 }
 
-function Prompt({ request }: { request: Exclude<MinibufferRequest, SwiperRequest> }) {
+function Prompt({ request }: { request: Exclude<MinibufferRequest, SwiperRequest | { kind: "grep" }> }) {
   const closeMinibuffer = useMinibufferStore((s) => s.close);
   const requestFocus = useUIStore((s) => s.requestFocus);
   const showFlash = useUIStore((s) => s.showFlash);
@@ -183,6 +185,7 @@ function Prompt({ request }: { request: Exclude<MinibufferRequest, SwiperRequest
       const label = {
         diff: "the changes under review",
         log: `commits on ${reviewBranch?.display ?? "HEAD"}`,
+        grep: "repository search results",
         project: "the files of the revision under review",
         help: "every key binding and command",
       };
