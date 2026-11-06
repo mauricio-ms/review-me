@@ -9,7 +9,7 @@ use crate::error::AppResult;
 use crate::tags::{self, Anchor, AnchorSide, ReviewScope, ReviewedTag, TagStore};
 
 /// How far a tag store's marks get through a diff, counted in review *units*: a text
-/// hunk with something to review, or a whole binary file. Each unit lands in exactly
+/// hunk with something to review, or a whole binary/hunkless file. Each unit lands in exactly
 /// one bucket by the diff buffer's precedence — flagged > ignored > reviewed — so the
 /// three counts never overlap. Mirrors `reviewProgress`/`sectionForHunk` in
 /// `src/lib/coverage.ts`, which renders the same thing live.
@@ -131,7 +131,7 @@ pub fn summarize(files: &[ChangedFile], store: &TagStore) -> Coverage {
         }
     };
     for file in files {
-        if file.binary {
+        if is_file_unit(file) {
             count(
                 file_tagged(flags(), &file.path),
                 file_tagged(ignored(), &file.path),
@@ -153,6 +153,11 @@ pub fn summarize(files: &[ChangedFile], store: &TagStore) -> Coverage {
         }
     }
     out
+}
+
+/// Binary and hunkless changes (including pure renames) are reviewed as one file.
+pub fn is_file_unit(file: &ChangedFile) -> bool {
+    file.binary || !file.hunks.iter().any(|h| hunk_target(h).is_some())
 }
 
 /// The side and line span a hunk is reviewed against: the old side for a pure
@@ -289,6 +294,28 @@ mod tests {
             branch_ref: None,
         };
         diff::compute(&repo, &spec).unwrap().files
+    }
+
+    #[test]
+    fn rename_only_review_survives_reload_and_counts_in_commit_history() {
+        let fixture = crate::test_support::TestRepo::new();
+        fixture.write("old.txt", "unchanged\n");
+        fixture.commit("base");
+        fs::rename(fixture.path().join("old.txt"), fixture.path().join("new.txt")).unwrap();
+        let oid = fixture.commit("rename");
+        let files = files(fixture.path(), &oid);
+        assert_eq!(files.len(), 1);
+        assert!(files[0].hunks.is_empty());
+        assert_eq!(summarize(&files, &TagStore::default()).total, 1);
+        let scope = ReviewScope::Commit { oid: oid.clone() };
+        tags::add_reviewed(fixture.path(), &scope, "new.txt", 0, 0, AnchorKind::File, AnchorSide::File).unwrap();
+        let store = tags::load(fixture.path(), &scope).unwrap();
+        assert!(!store.reviewed[0].anchor.stale);
+        let expected = Coverage { total: 1, reviewed: 1, flagged: 0, ignored: 0 };
+        assert_eq!(summarize(&files, &store), expected);
+        let reviews = commit_reviews(&fixture.repo, fixture.path(), &[oid]).unwrap();
+        assert_eq!(reviews.len(), 1);
+        assert_eq!(reviews[0].coverage, expected);
     }
 
     #[test]

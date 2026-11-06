@@ -18,7 +18,7 @@ import {
   setFlagNote,
   unmarkRange,
 } from "./tauri";
-import { fileReviewState, hunkTarget } from "./coverage";
+import { fileReviewState, hunkTarget, isFileUnit } from "./coverage";
 import { hasNote } from "./notes";
 import type { NoteEdit } from "../state/notes";
 
@@ -55,14 +55,14 @@ export async function reviewLines(
 }
 
 /**
- * Mark each unit of a file: a binary file as a single file-scope unit, otherwise every
- * reviewable hunk on its own side (new for edits, old for pure deletions).
+ * Mark each unit of a file: a binary or hunkless change as a single file-scope unit,
+ * otherwise every reviewable hunk on its own side (new for edits, old for deletions).
  */
 async function markEachUnit(file: ChangedFile, add: typeof addReviewedTag): Promise<void> {
   const t = target();
   if (!t) return;
   let store: TagStore | null = null;
-  if (file.binary) {
+  if (isFileUnit(file)) {
     store = await add(t.repo, t.scope, file.path, 0, 0, "file", "file");
   } else {
     for (const hunk of file.hunks) {

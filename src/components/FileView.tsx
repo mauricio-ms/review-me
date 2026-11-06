@@ -246,7 +246,7 @@ export default function FileView({ win, bufferId }: { win: WindowId; bufferId: F
   return (
     <div className={`project-viewer${preview ? " is-preview" : ""}`}>
       <div className="project-viewer-path">
-        <PathLabel className="project-viewer-file" path={buffer.path} />
+        <PathLabel className="project-viewer-file" path={buffer.path} oldPath={change?.oldPath} />
         {change && (
           <span
             className="project-viewer-change"

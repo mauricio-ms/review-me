@@ -112,13 +112,18 @@ export function hunkTarget(hunk: Hunk): ReviewTarget | null {
   return r ? { side: "new", lo: r.lo, hi: r.hi } : null;
 }
 
+/** Binary and hunkless changes (including pure renames) are reviewed as one file. */
+export function isFileUnit(file: ChangedFile): boolean {
+  return file.binary || !file.hunks.some((h) => hunkTarget(h) != null);
+}
+
 /**
  * The side + line span a whole file is flagged or ignored against: the file itself
- * when binary, else the new-side span of its hunks, else (only removals) the old-side
- * one. Null for a text file with no lines to point at.
+ * when binary or hunkless, else the new-side span of its hunks, else (only removals)
+ * the old-side one.
  */
 export function fileTarget(file: ChangedFile): ReviewTarget | null {
-  if (file.binary) return { side: "file", lo: 0, hi: 0 };
+  if (isFileUnit(file)) return { side: "file", lo: 0, hi: 0 };
   const nr = fileNewRange(file);
   if (nr) return { side: "new", ...nr };
   const or = fileOldRange(file);
@@ -191,8 +196,7 @@ export function isFileReviewed(
   reviewed: ReviewedTag[],
   file: ChangedFile,
 ): boolean {
-  if (file.binary) return coversFile(reviewed, file.path);
-  if (file.hunks.length === 0) return false;
+  if (isFileUnit(file)) return coversFile(reviewed, file.path);
   return file.hunks.every((h) => {
     const t = hunkTarget(h);
     // Hunks with no reviewable lines don't count against file coverage.
@@ -321,7 +325,7 @@ export function firstToReview(
   );
 }
 
-/** reviewed unit count / total reviewable unit count (text hunks + binary files). */
+/** Reviewed unit count / total reviewable unit count (hunks or whole files). */
 export function reviewProgress(
   files: ChangedFile[],
   reviewed: ReviewedTag[],
@@ -329,7 +333,7 @@ export function reviewProgress(
   let done = 0;
   let total = 0;
   for (const file of files) {
-    if (file.binary) {
+    if (isFileUnit(file)) {
       total += 1;
       if (coversFile(reviewed, file.path)) done += 1;
       continue;

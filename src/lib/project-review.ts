@@ -67,10 +67,6 @@ function changeOrWhy(path: string): ChangedFile | null {
 export async function reviewFile(path: string): Promise<void> {
   const change = changeOrWhy(path);
   if (!change) return;
-  if (!change.binary && !change.hunks.some((h) => hunkTarget(h) != null)) {
-    flash(`Nothing in ${path} to review`);
-    return;
-  }
   await reviewWholeFile(change);
   flash(`Reviewed ${path}${leftHint()}`);
 }
@@ -79,10 +75,6 @@ export async function reviewFile(path: string): Promise<void> {
 export async function ignoreFile(path: string): Promise<void> {
   const change = changeOrWhy(path);
   if (!change) return;
-  if (!change.binary && !change.hunks.some((h) => hunkTarget(h) != null)) {
-    flash(`Nothing in ${path} to ignore`);
-    return;
-  }
   await ignoreWholeFile(change);
   flash(`Ignored ${path}${leftHint()}`);
 }

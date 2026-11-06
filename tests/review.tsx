@@ -5,7 +5,7 @@ import { EditorView } from "@codemirror/view";
 import DiffBuffer from "../src/components/DiffBuffer";
 import Minibuffer from "../src/components/Minibuffer";
 import NoteEditorHost from "../src/components/NoteEditorHost";
-import { projectFileNoteTarget } from "../src/lib/project-review";
+import { flagFile, ignoreFile, projectFileNoteTarget, reviewFile } from "../src/lib/project-review";
 import { addFlag, ignoreGeneratedFiles, reviewWholeFile, saveNote, unmarkWholeFile } from "../src/lib/review-actions";
 import { useMinibufferStore } from "../src/state/minibuffer";
 import { useNotesStore } from "../src/state/notes";
@@ -65,6 +65,31 @@ test("reviewing a file through its diff key marks its complete hunk and updates 
     repo: "/fixture", scope: { kind: "worktree" }, file: "a.ts", startLine: 1, endLine: 3, kind: "hunk", side: "new",
   });
   await waitFor(() => document.querySelector(".diff-section-header.section-reviewed"), "Reviewed section missing");
+});
+
+test("rename-only rows display both paths and can be reviewed with r", async () => {
+  const renamed = file({ oldPath: "old.ts", status: "renamed", hunks: [], addedLines: 0, removedLines: 0 });
+  repoFixture(undefined, summary(undefined, [renamed]));
+  await mount(); await click(".diff-file-row");
+  equal(document.querySelector(".diff-file-path")?.textContent, "old.ts → a.ts");
+  equal(document.querySelector(".diff-status-glyph")?.textContent, "R");
+  key("r");
+  await waitFor(() => useTagsStore.getState().reviewed.length === 1);
+  equal(calls.find(c => c.command === "add_reviewed_tag")?.args, {
+    repo: "/fixture", scope: { kind: "worktree" }, file: "a.ts", startLine: 0, endLine: 0, kind: "file", side: "file",
+  });
+  await waitFor(() => document.querySelector(".section-reviewed .diff-section-count")?.textContent === "1");
+  assert(document.querySelector(".diff-file-row .mark-reviewed"));
+});
+
+test("rename-only files support review, flag and ignore from project mode", async () => {
+  repoFixture(undefined, summary(undefined, [file({ oldPath: "old.ts", status: "renamed", hunks: [] })]));
+  await reviewFile("a.ts");
+  await flagFile("a.ts");
+  await ignoreFile("a.ts");
+  equal(calls.filter(c => c.command.startsWith("add_")).map(c => [c.command, c.args.side, c.args.startLine, c.args.endLine]), [
+    ["add_reviewed_tag", "file", 0, 0], ["add_flag_tag", "file", 0, 0], ["add_ignored_tag", "file", 0, 0],
+  ]);
 });
 
 test("flag and ignore keys update the selected hunk's classification", async () => {

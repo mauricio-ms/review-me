@@ -4,6 +4,7 @@ import {
   fileTarget,
   hunkTarget,
   isFileReviewed,
+  isFileUnit,
   isHunkFlagged,
   isHunkIgnored,
   isHunkReviewed,
@@ -355,8 +356,7 @@ function buildRows(
   };
 
   for (const file of files) {
-    const reviewable = file.hunks.some((h) => hunkTarget(h) != null);
-    if (file.binary || !reviewable) {
+    if (isFileUnit(file)) {
       // Binary / hunkless files are reviewed as a single file-scope unit.
       buckets[sectionForFile(reviewed, flags, ignored, file.path)].push({
         file,

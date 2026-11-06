@@ -21,10 +21,26 @@ test("pure deletion reviews use removed old lines rather than surviving context"
   assert(!isHunkReviewed([tag()], "a.ts", deleted));
 });
 
-test("empty hunks and empty text files have no line target", () => {
+test("empty hunks have no line target and hunkless files use a file target", () => {
   equal(hunkTarget(hunk({ lines: [] })), null);
-  equal(fileTarget(file({ hunks: [] })), null);
+  equal(fileTarget(file({ hunks: [] })), { side: "file", lo: 0, hi: 0 });
   equal(isFileReviewed([], file({ hunks: [] })), false);
+});
+
+test("rename-only files can be reviewed, flagged, ignored and counted without text hunks", () => {
+  const renamed = file({ path: "new.ts", oldPath: "old.ts", status: "renamed", hunks: [], addedLines: 0, removedLines: 0 });
+  const mark = tag({ file: "new.ts", side: "file", kind: "file", startLine: 0, endLine: 0 });
+  equal(fileTarget(renamed), { side: "file", lo: 0, hi: 0 });
+  equal(firstToReview([], [], [], renamed), "file");
+  equal(reviewProgress([renamed], []), { done: 0, total: 1 });
+  assert(isFileReviewed([mark], renamed));
+  equal(reviewProgress([renamed], [mark]), { done: 1, total: 1 });
+  equal(fileReviewState([mark], [], [], renamed), "done");
+  equal(fileReviewState([], [], [mark], renamed), "done");
+  equal(fileReviewState([mark], [mark], [], renamed), "flagged");
+  equal(firstToReview([mark], [], [], renamed), null);
+  assert(!isFileReviewed([tag()], renamed));
+  assert(!isFileReviewed([{ ...mark, anchor: { ...mark.anchor, stale: true } }], renamed));
 });
 
 test("whole-file targets distinguish binaries, edits, and deleted text", () => {

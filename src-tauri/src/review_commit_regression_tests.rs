@@ -438,3 +438,72 @@ fn a_reviewed_untracked_file_can_be_staged_without_picking_up_other_untracked_fi
     assert!(tree.get_path(Path::new("new.txt")).is_ok());
     assert!(tree.get_path(Path::new("unreviewed.txt")).is_err());
 }
+
+#[test]
+fn reviewed_renames_stage_both_paths_and_commit_only_the_reviewed_change() {
+    for content in [b"unchanged\n".as_slice(), b"bin\0ary".as_slice()] {
+        let fixture = TestRepo::new();
+        fixture.write("old.txt", content);
+        fixture.commit("base");
+        fs::rename(fixture.path().join("old.txt"), fixture.path().join("new.txt")).unwrap();
+        fixture.write("unreviewed.txt", "leave untracked\n");
+        tags::add_reviewed(fixture.path(), &ReviewScope::Worktree, "new.txt", 0, 0, AnchorKind::File, AnchorSide::File).unwrap();
+
+        let before = preflight(&fixture.repo).unwrap();
+        assert_eq!(before.reviewed_hunk_count, 1);
+        assert_eq!(before.reviewed_paths, ["new.txt", "old.txt"]);
+        let prepared = prepare(&fixture.repo, false).unwrap();
+        assert_eq!(prepared.hunk_count, 1);
+        assert_eq!(prepared.staged_paths, ["new.txt", "old.txt"]);
+        let result = commit(&fixture.repo, "rename reviewed file", &prepared.reviewed_tag_ids).unwrap();
+        assert!(result.tag_store.reviewed.is_empty());
+        let tree = fixture.repo.head().unwrap().peel_to_tree().unwrap();
+        assert!(tree.get_path(Path::new("old.txt")).is_err());
+        assert!(tree.get_path(Path::new("unreviewed.txt")).is_err());
+        let entry = tree.get_path(Path::new("new.txt")).unwrap();
+        assert_eq!(fixture.repo.find_blob(entry.id()).unwrap().content(), content);
+        assert_eq!(fs::read(fixture.path().join("new.txt")).unwrap(), content);
+    }
+}
+
+#[test]
+fn flagged_ignored_or_changed_renames_are_excluded_from_reviewed_commits() {
+    for excluded in ["flagged", "ignored", "changed"] {
+        let fixture = TestRepo::new();
+        fixture.write("old.txt", "unchanged\n");
+        fixture.commit("base");
+        fs::rename(fixture.path().join("old.txt"), fixture.path().join("new.txt")).unwrap();
+        let scope = &ReviewScope::Worktree;
+        tags::add_reviewed(fixture.path(), scope, "new.txt", 0, 0, AnchorKind::File, AnchorSide::File).unwrap();
+        match excluded {
+            "flagged" => { tags::add_flag(fixture.path(), scope, "new.txt", 0, 0, AnchorKind::File, AnchorSide::File, None, None).unwrap(); }
+            "ignored" => { tags::add_ignored(fixture.path(), scope, "new.txt", 0, 0, AnchorKind::File, AnchorSide::File).unwrap(); }
+            _ => fixture.write("new.txt", "new content after review\n"),
+        }
+        assert_eq!(preflight(&fixture.repo).unwrap().reviewed_hunk_count, 0, "{excluded}");
+    }
+}
+
+#[test]
+fn reviewed_hunks_of_a_renamed_file_leave_other_edits_uncommitted() {
+    let fixture = TestRepo::new();
+    let text = (1..=30).map(|n| format!("line {n}\n")).collect::<String>();
+    fixture.write("old.txt", &text);
+    fixture.commit("base");
+    fs::rename(fixture.path().join("old.txt"), fixture.path().join("new.txt")).unwrap();
+    fixture.write("new.txt", text.replace("line 2\n", "reviewed change\n").replace("line 28\n", "unreviewed change\n"));
+    fixture.write("unreviewed.txt", "leave untracked\n");
+    tags::add_reviewed(fixture.path(), &ReviewScope::Worktree, "new.txt", 1, 5, AnchorKind::Hunk, AnchorSide::New).unwrap();
+    let prepared = prepare(&fixture.repo, false).unwrap();
+    assert_eq!(prepared.hunk_count, 1);
+    commit(&fixture.repo, "rename with reviewed edit", &prepared.reviewed_tag_ids).unwrap();
+    let tree = fixture.repo.head().unwrap().peel_to_tree().unwrap();
+    assert!(tree.get_path(Path::new("old.txt")).is_err());
+    assert!(tree.get_path(Path::new("unreviewed.txt")).is_err());
+    let entry = tree.get_path(Path::new("new.txt")).unwrap();
+    let blob = fixture.repo.find_blob(entry.id()).unwrap();
+    let committed = std::str::from_utf8(blob.content()).unwrap();
+    assert!(committed.contains("reviewed change"));
+    assert!(!committed.contains("unreviewed change"));
+    assert!(fs::read_to_string(fixture.path().join("new.txt")).unwrap().contains("unreviewed change"));
+}

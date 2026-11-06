@@ -147,11 +147,11 @@ struct EligibleHunk {
     key: HunkKey,
 }
 
-/// A whole-file binary unit to stage (added/modified/deleted). Binary content can't be
-/// applied hunk-by-hunk, so the blob is staged or removed wholesale.
+/// A binary or hunkless change to stage whole, including both paths of a rename.
 #[derive(Debug, Clone)]
 struct EligibleFile {
     path: String,
+    old_path: Option<String>,
     deleted: bool,
 }
 
@@ -164,13 +164,15 @@ struct Eligibility {
 }
 
 impl Eligibility {
-    /// Paths touched by any eligible unit (hunks + binary files), sorted + deduped.
+    /// Paths touched by any eligible unit, sorted + deduped.
     fn paths(&self) -> Vec<String> {
         let mut paths = self
             .hunks
             .iter()
             .map(|h| h.path.clone())
-            .chain(self.files.iter().map(|f| f.path.clone()))
+            .chain(self.files.iter().flat_map(|f| {
+                std::iter::once(f.path.clone()).chain(f.old_path.clone())
+            }))
             .collect::<HashSet<_>>()
             .into_iter()
             .collect::<Vec<_>>();
@@ -178,7 +180,7 @@ impl Eligibility {
         paths
     }
 
-    /// Total reviewable units (text hunks + binary files).
+    /// Total reviewable units (hunks + whole files).
     fn unit_count(&self) -> u32 {
         (self.hunks.len() + self.files.len()) as u32
     }
@@ -417,7 +419,7 @@ fn restore_index(
 fn reviewed_hunks(repo: &Repository, root: &Path) -> AppResult<Eligibility> {
     let store = tags::load(root, &ReviewScope::Worktree)?;
     let mut diff = workdir_diff(repo)?;
-    diff.find_similar(Some(DiffFindOptions::new().renames(true)))?;
+    diff.find_similar(Some(DiffFindOptions::new().renames(true).for_untracked(true)))?;
 
     let mut hunks = Vec::new();
     let mut files = Vec::new();
@@ -439,8 +441,10 @@ fn reviewed_hunks(repo: &Repository, root: &Path) -> AppResult<Eligibility> {
             continue;
         };
 
-        // Binary files are one whole-file unit, reviewed/flagged/ignored at file scope.
-        if crate::diff::path_change_is_binary(repo, root, &path) {
+        let binary = crate::diff::path_change_is_binary(repo, root, &path);
+        let patch = if binary { None } else { Patch::from_diff(&diff, idx)? };
+        // Binary and hunkless changes are reviewed/flagged/ignored at file scope.
+        if binary || patch.as_ref().map_or(true, |p| p.num_hunks() == 0) {
             let reviewed = covers_file(&store.reviewed, &path);
             let flagged = file_tagged(store.flags.iter().map(|t| &t.anchor), &path);
             let ignored = file_tagged(store.ignored.iter().map(|t| &t.anchor), &path);
@@ -450,6 +454,11 @@ fn reviewed_hunks(repo: &Repository, root: &Path) -> AppResult<Eligibility> {
             if reviewed && !flagged && !ignored {
                 files.push(EligibleFile {
                     path: path.clone(),
+                    old_path: if delta.status() == Delta::Renamed {
+                        delta.old_file().path().map(|p| p.to_string_lossy().into_owned())
+                    } else {
+                        None
+                    },
                     deleted: delta.status() == Delta::Deleted,
                 });
                 eligible_files.insert(path.clone());
@@ -457,7 +466,7 @@ fn reviewed_hunks(repo: &Repository, root: &Path) -> AppResult<Eligibility> {
             continue;
         }
 
-        let Some(patch) = Patch::from_diff(&diff, idx)? else {
+        let Some(patch) = patch else {
             continue;
         };
         for hunk_idx in 0..patch.num_hunks() {
@@ -559,7 +568,7 @@ fn stage_hunks(repo: &Repository, hunks: &[EligibleHunk]) -> AppResult<()> {
     }
 
     let mut diff = workdir_diff(repo)?;
-    diff.find_similar(Some(DiffFindOptions::new().renames(true)))?;
+    diff.find_similar(Some(DiffFindOptions::new().renames(true).for_untracked(true)))?;
     if diff
         .deltas()
         .any(|delta| delta.status() == Delta::Untracked)
@@ -600,11 +609,14 @@ fn stage_hunks(repo: &Repository, hunks: &[EligibleHunk]) -> AppResult<()> {
     Ok(())
 }
 
-/// Stage whole-file binary units: add the working blob, or remove the path for a
-/// reviewed deletion.
+/// Stage whole-file units: add the working blob, removing the old path on a rename
+/// or the current path on a deletion.
 fn stage_files(repo: &Repository, files: &[EligibleFile]) -> AppResult<()> {
     let mut index = repo.index()?;
     for file in files {
+        if let Some(old) = &file.old_path {
+            index.remove_path(Path::new(old))?;
+        }
         let path = Path::new(&file.path);
         if file.deleted {
             index.remove_path(path)?;

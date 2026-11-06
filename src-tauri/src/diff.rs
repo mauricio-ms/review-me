@@ -186,7 +186,7 @@ fn compute_worktree(repo: &Repository) -> AppResult<DiffSummary> {
         .show_untracked_content(true)
         .context_lines(3);
     let mut diff = repo.diff_tree_to_workdir_with_index(head_tree.as_ref(), Some(&mut opts))?;
-    diff.find_similar(Some(DiffFindOptions::new().renames(true)))?;
+    diff.find_similar(Some(DiffFindOptions::new().renames(true).for_untracked(true)))?;
 
     let staged = staged_paths(repo, head_tree.as_ref())?;
     let root = repo::root(repo)?;
@@ -624,6 +624,31 @@ mod tests {
         run(path, &["commit", "-qm", "change"]);
         let head = oid_of(&repo, "HEAD");
         assert_eq!(labels(compute(&repo, &commit_spec(&head, None)).unwrap()), expected);
+    }
+
+    #[test]
+    fn detects_renames_before_and_after_staging_with_or_without_edits() {
+        for edited in [false, true] {
+            let fixture = crate::test_support::TestRepo::new();
+            fixture.write("old.txt", "one\ntwo\nthree\nfour\nfive\nsix\n");
+            fixture.commit("base");
+            fs::create_dir_all(fixture.path().join("nested")).unwrap();
+            fs::rename(fixture.path().join("old.txt"), fixture.path().join("nested/new.txt")).unwrap();
+            if edited {
+                fixture.write("nested/new.txt", "one\ntwo\nchanged\nfour\nfive\nsix\n");
+            }
+            for staged in [false, true] {
+                if staged { run(fixture.path(), &["add", "-A"]); }
+                let summary = compute(&fixture.repo, &DiffSpec::Worktree).unwrap();
+                assert_eq!(summary.files.len(), 1, "edited={edited}, staged={staged}");
+                let file = &summary.files[0];
+                assert!(matches!(file.status, ChangeStatus::Renamed));
+                assert_eq!(file.path, "nested/new.txt");
+                assert_eq!(file.old_path.as_deref(), Some("old.txt"));
+                assert_eq!(file.staged, Some(staged));
+                assert_eq!(file.hunks.is_empty(), !edited);
+            }
+        }
     }
 
     #[test]
