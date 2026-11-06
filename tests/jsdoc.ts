@@ -68,6 +68,14 @@ test("tags, types, parameter names and inline link targets have precise source r
   ]);
 });
 
+test("repeated same-line tags preserve every type and parameter", () => {
+  equal(tokens('/** @param {User} user @param {Options} [options={label: "@param fake"}] @returns {User} */'), [
+    ["tag", "@param"], ["type", "{User}"], ["name", "user"],
+    ["tag", "@param"], ["type", "{Options}"], ["name", '[options={label: "@param fake"}]'],
+    ["tag", "@returns"], ["type", "{User}"],
+  ]);
+});
+
 test("nested records, quoted braces, unions, generics and optional defaults stay intact", () => {
   const type = "{Array<{label: '}', value: (number|string)}>}";
   const name = '[options={label: "a ] b", values: [1, 2]}]';

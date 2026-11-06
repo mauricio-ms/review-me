@@ -1,5 +1,5 @@
 import { syntaxTree } from "@codemirror/language";
-import { type Range } from "@codemirror/state";
+import { type EditorState, type Range } from "@codemirror/state";
 import { Decoration, type DecorationSet, type EditorView, ViewPlugin, type ViewUpdate } from "@codemirror/view";
 import { NodeProp, type Tree } from "@lezer/common";
 
@@ -9,7 +9,7 @@ export type JSDocToken = { from: number; to: number; kind: Kind };
 const typeTags = new Set([
   "param", "arg", "argument", "property", "prop", "returns", "return", "type", "typedef",
   "throws", "exception", "yields", "yield", "extends", "augments", "implements", "this",
-  "enum", "member", "var", "template", "satisfies",
+  "enum", "member", "var", "template", "satisfies", "import",
 ]);
 const nameTags = new Set(["param", "arg", "argument", "property", "prop", "typedef", "callback", "template"]);
 const linkTags = new Set(["link", "linkcode", "linkplain", "tutorial"]);
@@ -46,7 +46,29 @@ export function jsdocTokens(comment: string): JSDocToken[] {
   const add = (from: number, to: number, kind: Kind) => {
     if (to > from) tokens.push({ from: from + 3, to: to + 3, kind });
   };
-  const tags = Array.from(body.matchAll(/^[\t ]*(@[a-zA-Z][\w-]*)\b/gm));
+  const tags: RegExpMatchArray[] = [];
+  const hardTags = [...body.matchAll(/^[\t ]*@/gm)].map(m => m.index!);
+  hardTags.push(body.length);
+  let hardTag = 0;
+  let active = false, linePrefix = true;
+  for (let pos = 0; pos < body.length;) {
+    if (body[pos] === "\n") { active = false; linePrefix = true; pos++; continue; }
+    const match = body[pos] === "@" ? /^(@[a-zA-Z][\w-]*)\b/.exec(body.slice(pos)) : null;
+    if (match && (linePrefix ||
+        (active && /\s/.test(body[pos - 1])))) {
+      match.index = pos;
+      tags.push(match);
+      active = true;
+      linePrefix = false;
+      pos += match[0].length;
+    } else if (active && (body[pos] === "{" || body[pos] === "[")) {
+      // A malformed delimiter recovers at the next documentation line.
+      while (hardTags[hardTag] <= pos && hardTag < hardTags.length - 1) hardTag++;
+      const bound = hardTags[hardTag];
+      const end = delimitedEnd(body, pos, bound);
+      pos = end;
+    } else { if (!/[\t \r]/.test(body[pos])) linePrefix = false; pos++; }
+  }
   for (let i = 0; i < tags.length; i++) {
     const match = tags[i];
     const tag = match[1];
@@ -88,6 +110,25 @@ export function jsdocTokens(comment: string): JSDocToken[] {
     }
   }
   return tokens.sort((a, b) => a.from - b.from);
+}
+
+/** Whether the cursor is on a documentation identifier rather than prose or a default. */
+export function isJSDocSymbolAt(state: EditorState, pos: number): boolean {
+  const node = syntaxTree(state).resolveInner(pos, 1);
+  if (node.name !== "BlockComment" || !state.languageDataAt<boolean>("jsdoc", node.from + 2).includes(true)) return false;
+  const comment = state.sliceDoc(node.from, node.to), offset = pos - node.from;
+  const token = jsdocTokens(comment).find(t => t.from <= offset && offset < t.to && t.kind !== "tag");
+  if (!token) return false;
+  let quote = "";
+  for (let i = token.from; i < offset; i++) {
+    const c = comment[i];
+    if (c === "\\") { i++; continue; }
+    if (quote) { if (c === quote) quote = ""; }
+    else if (c === '"' || c === "'" || c === "`") quote = c;
+    else if (token.kind === "name" && c === "=") return false;
+  }
+  if (quote) return false;
+  return /[\p{L}\p{N}_$]/u.test(comment[offset] ?? "");
 }
 
 const marks = {
