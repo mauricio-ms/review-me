@@ -406,6 +406,8 @@ just the current buffer's keys; `C-h k` tells you what a key does.
 | `o` | The same, in the other window |
 | `C-o` | Show it in the other window, staying in the diff |
 | `v` / `V` | Start/clear a visual line selection (extend with `j`/`k`) |
+| `yy` / `3yy` | Yank one / three source lines to the system clipboard |
+| `y` + motion / visual `y` | Yank through a row motion, or yank the selected lines |
 | `r` | Mark the file / hunk / selection **reviewed** (`✓`) |
 | `u` | Unmark (asks first when that deletes a note) |
 | `f` | **Flag** (`⚑`) the file / hunk / selection (flagging it again keeps its note) |
@@ -419,6 +421,11 @@ just the current buffer's keys; `C-h k` tells you what a key does.
 Glyphs: `A`/`M`/`D`/`R` file status, `+adds −dels` counts, a green `●` for staged changes
 (working-tree diff only — committed history has no staging state), `✓` reviewed, `⚑`
 flagged. Edited lines highlight only the characters that changed.
+
+Yanks copy source text, including removed lines, without gutters or diff signs.
+Selections stay within one file and copy rows in displayed order; folded content is
+excluded. Counts work before the operator and motion (`2y3j`), and `Esc` / `C-g`
+cancel an unfinished yank. A visual yank ends the selection at its beginning.
 
 `C-s` searches the diff as Swiper does (the keys and the matching are the viewer's, below):
 every file path, hunk header, line and note, whether it's folded or not, each shown beside
@@ -639,6 +646,7 @@ search brings back the last one, and `M-n` searches for the symbol at the cursor
 | Key | Action |
 | --- | --- |
 | `j`/`k`, `gg`/`G`, `w`/`b`, `/search` | Standard vim motions |
+| `yy`, `y` + motion, visual `y` | Yank to the system clipboard, with Vim counts and registers |
 | `C-s` | **Swiper**: search the file as you type (`M-x swiper` too) |
 | `M-.` / `M-?` | Go to definition / find references |
 | `C-x 4 .` | Go to definition in the other window |
@@ -794,7 +802,8 @@ effects run normally. Each suite has a 30-second deadline and an isolated browse
 
 `test:coverage` checks review classification and progress (it does not measure code
 coverage); `test:algorithms` checks word diffs, change blocks and changed-file trees;
-`test:keyboard` checks dispatch and Vim integration; `test:review` checks review actions,
+`test:keyboard` checks dispatch and Vim integration; `test:yank` checks clipboard yanks,
+motions, counts, selections and failures; `test:review` checks review actions,
 prompts, notes and focus. The existing `test:jsdoc`, `test:markdown` and `test:resolve`
 commands remain available. `test:typecheck` checks both application and test TypeScript.
 

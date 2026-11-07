@@ -43,6 +43,8 @@ export type KeyBinding = {
   readonly vim?: true;
   /** A `vim` key that also works in visual mode, on the selection (which it ends). */
   readonly visual?: true;
+  /** Accept Vim numeric prefixes (including an operator's motion count). */
+  readonly counted?: true;
 };
 
 type ActionOfEntry<E> = E extends { readonly action: infer A extends string } ? A : never;
@@ -144,10 +146,10 @@ const START_KEYS = [
 ] as const satisfies readonly KeyBinding[];
 
 const DIFF_KEYS = [
-  { keys: ["j", "<down>"], action: "down", doc: "next row" },
-  { keys: ["k", "<up>"], action: "up", doc: "previous row" },
-  { keys: ["g g"], action: "first", doc: "first row" },
-  { keys: ["G"], action: "last", doc: "last row" },
+  { keys: ["j", "<down>"], action: "down", counted: true, doc: "next row (accepts a count)" },
+  { keys: ["k", "<up>"], action: "up", counted: true, doc: "previous row (accepts a count)" },
+  { keys: ["g g"], action: "first", counted: true, doc: "first row (or counted row)" },
+  { keys: ["G"], action: "last", counted: true, doc: "last row (or counted row)" },
   { keys: ["] h"], action: "next-hunk", doc: "next hunk" },
   { keys: ["[ h"], action: "prev-hunk", doc: "previous hunk" },
   { keys: ["] f"], action: "next-file", doc: "next file" },
@@ -163,6 +165,13 @@ const DIFF_KEYS = [
     doc: "show the file in the other window, staying here",
   },
   { keys: ["v", "V"], action: "visual", doc: "select lines" },
+  { keys: ["y"], action: "yank", counted: true, doc: "yank selection to clipboard; otherwise start a yank motion" },
+  { keys: ["y y"], action: "yank-lines", counted: true, doc: "yank source line(s) to clipboard (3yy yanks three)" },
+  {
+    keys: ["y j", "y <down>", "y k", "y <up>", "y g g", "y G", "y ] h", "y [ h", "y ] f", "y [ f", "y ] s", "y [ s"],
+    label: "y {motion}", action: "yank-motion", counted: true,
+    doc: "yank through a row motion to clipboard (accepts counts)",
+  },
   { keys: ["ESC", "C-g"], action: "escape", doc: "end the selection" },
   { keys: ["r"], action: "review", doc: "mark reviewed" },
   { keys: ["f"], action: "flag", doc: "flag" },
@@ -233,6 +242,7 @@ const TREE_KEYS = [
 
 /** The code viewer is CodeMirror in vim normal mode; these go through its keymap. */
 const VIEWER_KEYS = [
+  { keys: ["y"], external: true, doc: "Vim yank to clipboard: yy, y + motion, or visual selection; counts work" },
   { keys: ["] c"], action: "next-change", vim: true, doc: "next change in this file" },
   { keys: ["[ c"], action: "prev-change", vim: true, doc: "previous change in this file" },
   {

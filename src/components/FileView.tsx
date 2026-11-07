@@ -21,6 +21,7 @@ import { viewerKeymap } from "../editor/viewer-keymap";
 import { defineNavVim } from "../editor/vim-nav";
 import { visualLines } from "../editor/visual-lines";
 import { xrefClick } from "../editor/xref-click";
+import { clipboardYank } from "../editor/yank";
 import { isMarkdownPath } from "../lib/markdown";
 import { changeBlocks, changeForFile, deletionForFile } from "../lib/project-diff";
 import { sideRead } from "../lib/project-review";
@@ -220,6 +221,7 @@ export default function FileView({ win, bufferId, peek }: { win: WindowId; buffe
   const extensions = useMemo(() => {
     const ext = [
       vim(),
+      ...(transient ? [] : [clipboardYank]),
       swallowColonKeymap,
       vimEscapeKeymap,
       vimNavKeymap,
@@ -240,7 +242,7 @@ export default function FileView({ win, bufferId, peek }: { win: WindowId; buffe
     if (langExt) ext.push(langExt);
     if (rendered) ext.push(markdownView);
     return ext;
-  }, [langExt, occurrences, rendered, tracker]);
+  }, [langExt, occurrences, rendered, tracker, transient]);
 
   const onCreateEditor = useCallback(
     (created: EditorView) => {

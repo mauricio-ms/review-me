@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Vim } from "@replit/codemirror-vim";
 
 import {
   fileTarget,
@@ -17,8 +18,9 @@ import {
   type ReviewSection,
 } from "../lib/coverage";
 import type { ShowOptions } from "../lib/buffers";
+import { yankText } from "../lib/clipboard";
 import { setDiffMover, setDiffTargetSource } from "../lib/diff-view";
-import { dispatchKey, type KeyHandler } from "../lib/key-dispatch";
+import { cancelKeySequence, continueKeySequence, dispatchKey, vimSequence, type KeyHandler } from "../lib/key-dispatch";
 import { KEYMAP, type DiffAction } from "../lib/keymap";
 import { COMMIT_TARGET, flagTarget, hasNote, openNoteFor } from "../lib/notes";
 import { wholeFileTarget } from "../lib/project-review";
@@ -718,6 +720,11 @@ export default function DiffBuffer() {
   }, [comparisonEpoch]);
 
   useEffect(() => {
+    cancelKeySequence("diff");
+    return () => cancelKeySequence("diff");
+  }, [rows, focused]);
+
+  useEffect(() => {
     if (focused) rootRef.current?.focus({ preventScroll: true });
   }, [focused, focusRequest]);
 
@@ -1236,11 +1243,55 @@ export default function DiffBuffer() {
     return callback;
   };
 
+  const doYank = (from: number, to: number, visual = false) => {
+    const selected = rows.slice(Math.max(0, Math.min(from, to)), Math.max(from, to) + 1)
+      .filter((row): row is Extract<Row, { kind: "line" }> => row.kind === "line");
+    if (selected.length === 0) {
+      useUIStore.getState().showFlash("No source lines to yank");
+      return;
+    }
+    if (selected.some((row) => row.file.path !== selected[0].file.path)) {
+      useUIStore.getState().showFlash("Select lines within one file");
+      return;
+    }
+    const text = selected.map((row) => row.line.content).join("\n") + "\n";
+    Vim.getRegisterController().pushText(undefined, "yank", text, true);
+    yankText(text, true);
+    if (visual) {
+      setCursor(Math.min(from, to));
+      exitVisual();
+    }
+  };
+
+  const yankMotion = (keys: string) => {
+    const sequence = vimSequence(keys);
+    const motion = sequence.keys.slice(2);
+    let target = cursor;
+    if (motion === "j" || motion === "<down>") target = Math.min(rows.length - 1, cursor + sequence.count);
+    else if (motion === "k" || motion === "<up>") target = Math.max(0, cursor - sequence.count);
+    else if (motion === "g g" || motion === "G") target = sequence.hasCount
+      ? Math.min(rows.length - 1, sequence.count - 1)
+      : motion === "G" ? rows.length - 1 : 0;
+    else {
+      const dir = motion.startsWith("]") ? 1 : -1;
+      const kind = motion.endsWith("h") ? "hunk" : motion.endsWith("f") ? "file" : "section";
+      let remaining = sequence.count;
+      for (let i = cursor + dir; i >= 0 && i < rows.length; i += dir) {
+        if (rows[i].kind === kind) {
+          target = i;
+          if (--remaining === 0) break;
+        }
+      }
+    }
+    doYank(cursor, target);
+  };
+
   const handlers: Record<DiffAction, KeyHandler> = {
-    down: () => setCursor((c) => Math.min(rows.length - 1, c + 1)),
-    up: () => setCursor((c) => Math.max(0, c - 1)),
-    first: () => setCursor(0),
-    last: () => setCursor(Math.max(0, rows.length - 1)),
+    down: (keys) => setCursor((c) => Math.min(rows.length - 1, c + vimSequence(keys).count)),
+    up: (keys) => setCursor((c) => Math.max(0, c - vimSequence(keys).count)),
+    first: (keys) => setCursor(Math.max(0, Math.min(rows.length - 1, vimSequence(keys).count - 1))),
+    last: (keys) => setCursor(Math.max(0, vimSequence(keys).hasCount
+      ? Math.min(rows.length - 1, vimSequence(keys).count - 1) : rows.length - 1)),
     "next-hunk": () => jumpTo((r) => r.kind === "hunk", 1),
     "prev-hunk": () => jumpTo((r) => r.kind === "hunk", -1),
     "next-file": () => jumpTo((r) => r.kind === "file", 1),
@@ -1252,6 +1303,29 @@ export default function DiffBuffer() {
     "open-other": () => openAtCursor({ other: true }),
     "display-other": () => openAtCursor({ other: true, select: false }),
     visual: () => setVisualAnchor((a) => (a == null ? cursor : null)),
+    yank: (keys) => {
+      if (visualAnchor != null) doYank(visualAnchor, cursor, true);
+      else continueKeySequence("diff", keys);
+    },
+    "yank-lines": (keys) => {
+      if (rows[cursor]?.kind !== "line") {
+        useUIStore.getState().showFlash("No source line at cursor");
+        return;
+      }
+      const path = rowFile(rows[cursor])!.path;
+      let remaining = vimSequence(keys).count;
+      let end = cursor;
+      for (let i = cursor; i < rows.length; i++) {
+        const file = rowFile(rows[i]);
+        if (file && file.path !== path) break;
+        if (rows[i].kind === "line") {
+          end = i;
+          if (--remaining === 0) break;
+        }
+      }
+      doYank(cursor, end);
+    },
+    "yank-motion": yankMotion,
     // Nothing selected: let the key go on (C-g has already said "Quit").
     escape: () => {
       if (visualAnchor == null) return false;
@@ -1309,6 +1383,8 @@ export default function DiffBuffer() {
       className={`buffer diff-buffer ${visual ? "is-visual" : ""}`}
       tabIndex={0}
       onKeyDown={onKeyDown}
+      onMouseDown={() => cancelKeySequence("diff")}
+      onBlur={() => cancelKeySequence("diff")}
     >
       <div className="diff-header">
         <span className="diff-header-branch">

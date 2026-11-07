@@ -17,11 +17,12 @@
     "test:navigation": "node scripts/browser-tests.mjs tests/navigation.ts",
     "test:loading": "node scripts/browser-tests.mjs tests/loading.ts",
     "test:keyboard": "node scripts/browser-tests.mjs tests/keyboard.ts",
+    "test:yank": "node scripts/browser-tests.mjs tests/yank.tsx",
     "test:review": "node scripts/browser-tests.mjs tests/review.tsx",
     "test:log": "node scripts/browser-tests.mjs tests/log.tsx",
     "test:grep": "node scripts/browser-tests.mjs tests/grep.tsx",
     "test:previews": "node scripts/browser-tests.mjs tests/previews.tsx",
-    "test:frontend": "npm run test:typecheck && npm run test:coverage && npm run test:algorithms && npm run test:navigation && npm run test:loading && npm run test:keyboard && npm run test:review && npm run test:log && npm run test:grep && npm run test:previews && npm run test:jsdoc && npm run test:markdown && npm run test:resolve"
+    "test:frontend": "npm run test:typecheck && npm run test:coverage && npm run test:algorithms && npm run test:navigation && npm run test:loading && npm run test:keyboard && npm run test:yank && npm run test:review && npm run test:log && npm run test:grep && npm run test:previews && npm run test:jsdoc && npm run test:markdown && npm run test:resolve"
   },
   "dependencies": {
     "@codemirror/commands": "^6.6.0",
@@ -35,6 +36,7 @@
     "@replit/codemirror-lang-svelte": "^6.0.0",
     "@replit/codemirror-vim": "^6.3.0",
     "@tauri-apps/api": "^2.1.1",
+    "@tauri-apps/plugin-clipboard-manager": "^2.3.0",
     "@uiw/react-codemirror": "^4.23.5",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

@@ -95,6 +95,32 @@ export type Fed =
   | { kind: "quit" }
   | { kind: "none" };
 
+/** Numeric prefixes before a command and after y multiply, as in Vim's 3y2j. */
+export function vimSequence(keys: string): { keys: string; count: number; hasCount: boolean } {
+  const parts = keys.split(" ");
+  let count = 1;
+  let hasCount = false;
+  const takeCount = (at: number) => {
+    if (!/^[1-9]$/.test(parts[at] ?? "")) return;
+    let digits = "";
+    while (/^\d$/.test(parts[at] ?? "")) digits += parts.splice(at, 1)[0];
+    count = Math.min(1_000_000, count * Number(digits));
+    hasCount = true;
+  };
+  takeCount(0);
+  if (parts[0] === "y") takeCount(1);
+  return { keys: parts.join(" "), count, hasCount };
+}
+
+/** An operator matched its first key and now needs a motion in the shared prefix. */
+export function continueKeySequence(owner: KeyScope, keys: string): void {
+  setPending({ owner, keys });
+}
+
+export function cancelKeySequence(owner: KeyScope): void {
+  if (pending?.owner === owner) setPending(null);
+}
+
 /**
  * Add `chord` to `owner`'s pending sequence and look it up in `bindings`. `none`
  * means the key is not this dispatcher's business and should go on its way; a
@@ -102,21 +128,23 @@ export type Fed =
  */
 export function feedKey(owner: string, chord: string, bindings: readonly KeyBinding[]): Fed {
   // C-g abandons any half-typed sequence, whoever started it.
-  if (chord === "C-g" && pending) {
+  if ((chord === "C-g" || chord === "ESC") && pending) {
     setPending(null);
     return { kind: "quit" };
   }
   const prior = pending?.owner === owner ? pending.keys : null;
   const keys = prior ? `${prior} ${chord}` : chord;
+  const counted = vimSequence(keys).keys;
   let prefix = false;
   for (const binding of bindings) {
     if (binding.external) continue;
+    const candidate = binding.counted ? counted : keys;
     for (const k of binding.keys) {
-      if (k === keys) {
+      if (k === candidate) {
         setPending(null);
         return { kind: "match", binding, keys };
       }
-      if (k.startsWith(`${keys} `)) prefix = true;
+      if (candidate === "" || k.startsWith(`${candidate} `)) prefix = true;
     }
   }
   if (prefix) {

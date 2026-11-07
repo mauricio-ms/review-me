@@ -320,6 +320,14 @@ refresh never moves you, which is why the diff buffer's clean state still exists
 
 ### The diff buffer is NOT CodeMirror
 
+**Yanking uses Vim keys in both views:** `yy`, `y` plus a motion, or visual `y` copy
+source text to the system clipboard through `lib/clipboard.ts` and Tauri's clipboard
+plugin. Diff bindings accept numeric counts through `key-dispatch.ts` and read logical
+rows (including unmounted ones), omitting metadata and rejecting multiple files.
+`editor/yank.ts` lets the viewer's Vim engine resolve ranges/counts and retain registers;
+its operator is global, but only opted-in file views write the native clipboard, so
+modal editors keep their normal behavior. `npm run test:yank` covers both surfaces.
+
 `DiffBuffer.tsx` is a custom keyboard-navigable HTML list (magit-status), driven by its
 own `onKeyDown` over a flattened `Row[]` (file/hunk/line) — its keys, sequences like
 `g g` and `] h` included, are `keymap.ts`'s `diff` scope — and a `visualAnchor` for `v`
