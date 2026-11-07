@@ -268,6 +268,40 @@ test("application buffer previews fill the frame and cancel back to the exact pr
   equal(positionOf(1, ws().shown[1] as `file:${string}`)?.line, 85);
 });
 
+test("full help preview scrolls inside the buffer area and leaves the picker visible and clickable", async () => {
+  await origin();
+  useMinibufferStore.getState().open({ kind: "buffer" });
+  await waitFor(() => document.activeElement?.id === "minibuffer-input"); type("help");
+  await waitFor(() => document.querySelector('.frame-buffer-preview[data-preview-buffer="help"] .help-buffer'));
+  const shell = document.querySelector<HTMLElement>(".app-shell")!;
+  const input = document.querySelector<HTMLInputElement>("#minibuffer-input")!;
+  const help = document.querySelector<HTMLElement>(".frame-buffer-preview .help-buffer")!;
+  const scroll = help.querySelector<HTMLElement>(".help-scroll")!;
+  for (const height of [600, 340]) {
+    shell.style.height = `${height}px`;
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    const body = document.querySelector(".app-body")!.getBoundingClientRect();
+    const bounds = help.getBoundingClientRect();
+    assert(bounds.top >= body.top && bounds.bottom <= body.bottom + 1,
+      `Help escaped its buffer area: bottom ${bounds.bottom}, buffer bottom ${body.bottom}`);
+    assert(scroll.clientHeight > 0 && scroll.scrollHeight > scroll.clientHeight,
+      "Long help must scroll within the preview");
+    const selected = document.querySelector<HTMLElement>(".mb-row.is-selected")!;
+    const row = selected.getBoundingClientRect();
+    const topmost = document.elementFromPoint(Math.max(0, row.left) + 10, row.top + row.height / 2);
+    assert(selected.contains(topmost),
+      `Selected buffer candidate is covered: ${JSON.stringify({ height, row: row.toJSON(), body: body.toJSON(),
+        hit: topmost?.className, viewport: innerHeight, scroll: window.scrollY })}`);
+    const field = input.getBoundingClientRect();
+    assert(document.elementFromPoint(field.left + 2, field.top + field.height / 2) === input,
+      "Help covered the minibuffer input");
+    assert(document.activeElement === input);
+    scroll.scrollTop = scroll.scrollHeight;
+    assert(scroll.scrollTop > 0);
+  }
+  key("Escape"); await waitFor(() => activeView()?.hasFocus);
+});
+
 test("previewing a buffer already in a neighboring window returns its live host on cancel", async () => {
   await origin(); const neighbor = ws().split(1, "row", "diff");
   await waitFor(() => document.querySelector(`[data-window="${neighbor}"] .diff-buffer`));

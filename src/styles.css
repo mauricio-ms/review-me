@@ -195,6 +195,16 @@ kbd {
   background: var(--bg-0);
 }
 
+/* A live buffer must shrink to the preview area, keeping long help inside its
+   own scroller instead of painting over the mode line and minibuffer below. */
+.frame-buffer-preview { overflow: hidden; }
+
+.frame-buffer-preview > .buffer-slot {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
 .picker-file-preview .cm-preview-line {
   background: color-mix(in srgb, var(--accent-amber) 12%, transparent);
 }
