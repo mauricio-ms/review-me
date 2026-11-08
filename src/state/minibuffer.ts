@@ -41,10 +41,15 @@ export type MinibufferRequest =
 
 /**
  * Swiper: the lines that match as you type, the buffer following the selected one — a
- * file's lines (`editor/swiper.ts`), or the diff's or the log's rows (`lib/swiper-list.ts`).
+ * file's lines (`editor/swiper.ts`), the diff's rows (`lib/swiper-list.ts`), or the
+ * log's independent commit finder (`shareSearch: false`).
  */
 export type SwiperRequest = {
   kind: "swiper";
+  /** A local picker can opt out of global search history and persistent highlights. */
+  shareSearch?: boolean;
+  /** Prompt label; defaults to Swiper. */
+  prompt?: string;
   /** The buffer's lines, searched in order. */
   lines: readonly string[];
   /** What each line is shown beside (`Foo.java:70`, a short oid); else its number. */
@@ -56,7 +61,7 @@ export type SwiperRequest = {
   /** The selected line as it changes (null: nothing matches), for the buffer to show. */
   onMove: (hit: SwiperHit | null, matcher: SwiperMatcher | null) => void;
   /** `RET` on a line; `RET` with nothing matching is a cancel. */
-  onAccept: (hit: SwiperHit) => void;
+  onAccept: (hit: SwiperHit, query: string) => void;
   onCancel: () => void;
 };
 

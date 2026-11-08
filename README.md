@@ -482,7 +482,13 @@ upstream or nothing unpushed, its whole history under **Recent commits**.
 | `Enter` | Review that commit against its first parent, in the diff buffer |
 | `o` | The same, in the other window (the log stays beside it) |
 | `b` | Review the whole listed range as one diff (`base...branch`) |
-| `C-s` | **Swiper** over the commits' subjects (the loaded ones), as in the viewer |
+| `C-s` | **Search commits**: a separate picker over loaded commit subjects, starting empty |
+| `n` / `N` | Repeat the log's own search forward / backward |
+
+Commit search is local to the log. It never inherits searches from files or the diff,
+filters the log's rows, or leaves matches highlighted there. Accepting a commit search
+does not change the global search term or highlights. Each new picker starts empty;
+`n` / `N` repeats only a search accepted in this log.
 
 `q` in the diff buffer brings you back, on the same row. Each row shows its review:
 `✓` when every change is reviewed (or ignored), `done/total` while partial, `⚑ n` flags and
@@ -648,6 +654,8 @@ search brings back the last one, and `M-n` searches for the symbol at the cursor
 | `j`/`k`, `gg`/`G`, `w`/`b`, `/search` | Standard vim motions |
 | `yy`, `y` + motion, visual `y` | Yank to the system clipboard, with Vim counts and registers |
 | `C-s` | **Swiper**: search the file as you type (`M-x swiper` too) |
+| `n` / `N` | Next / previous search match, wrapping around (counts work in files and diffs) |
+| `:noh` / `:nohlsearch` + `RET` | Clear search highlights; `n` / `N` brings them back |
 | `M-.` / `M-?` | Go to definition / find references |
 | `C-x 4 .` | Go to definition in the other window |
 | `M-g g` | Go to line |
@@ -660,6 +668,19 @@ search brings back the last one, and `M-n` searches for the symbol at the cursor
 | `u` | Unmark the visual selection, else the whole file (asks first when that deletes a note) |
 | `C-x o` | To the tree (or the next window) |
 | `q` | Back to the diff (a window split off beside it closes) |
+
+After accepting a `C-s`, `/`, or `?` search with `RET` (or searching a word with
+`*` / `#`), the shared search stays active as you switch buffers. Matches stay
+highlighted in open files, diffs, the project tree, and help. `n` / `N`
+repeat the search from the current cursor in files, diffs (revealing folded matches),
+the project tree, and help. Files visit each occurrence, including multiple on one line;
+list buffers visit matching rows. The log has its own independent commit search.
+As in Evil, `:noh` (or `:nohlsearch`) followed
+by `RET` in any buffer clears the highlights everywhere while keeping the query so
+`n` / `N` can resume. Project navigation reuses its match index until the file,
+visible deleted lines, or search pattern changes.
+`Esc` cancels prompts and selections while preserving accepted search highlights.
+Cancelling a new search restores the previous search.
 
 ### Repository search
 

@@ -6,7 +6,7 @@ import { EditorView } from "@codemirror/view";
 import { getCM, vim } from "@replit/codemirror-vim";
 import CodeMirror from "@uiw/react-codemirror";
 
-import { swallowColonKeymap, vimEscapeKeymap, vimNavKeymap } from "../editor/cm-shared";
+import { vimEscapeKeymap, vimNavKeymap } from "../editor/cm-shared";
 import { diffMarks, setDeletedFile, setDiffMarks } from "../editor/diff-marks";
 import { flagDecorations, setFlagLines } from "../editor/flag-decorations";
 import { gruberDarkerTheme } from "../editor/gruber-darker";
@@ -222,7 +222,6 @@ export default function FileView({ win, bufferId, peek }: { win: WindowId; buffe
     const ext = [
       vim(),
       ...(transient ? [] : [clipboardYank]),
-      swallowColonKeymap,
       vimEscapeKeymap,
       vimNavKeymap,
       viewerKeymap,

@@ -27,7 +27,7 @@ import { wholeFileTarget } from "../lib/project-review";
 import { confirmAndResolve, setResolveHandler } from "../lib/resolve-flags";
 import { leaveHistory } from "../lib/open-repo";
 import { openFileFromDiff } from "../lib/project";
-import type { SwiperMatcher } from "../lib/swiper";
+import type { SearchRepeat, SwiperMatcher } from "../lib/swiper";
 import { markMatches, setListSwiper, swipeList } from "../lib/swiper-list";
 import {
   addFlag,
@@ -43,6 +43,7 @@ import DiffCleanState from "./DiffCleanState";
 import PathLabel, { renameParts, splitPath } from "./PathLabel";
 import { useNotesStore } from "../state/notes";
 import { useRepoStore, type Folds } from "../state/repo";
+import { useSearchStore } from "../state/search";
 import { useTagsStore } from "../state/tags";
 import { useUIStore } from "../state/ui";
 import { hasKeyboard, isShown, useWindowStore } from "../state/windows";
@@ -916,7 +917,9 @@ export default function DiffBuffer() {
 
   // Swiper: the matches lit on screen, and the row a search wants the cursor on — once
   // the folds it opened (or put back) have re-rendered the rows.
-  const [swiperMatcher, setSwiperMatcher] = useState<SwiperMatcher | null>(null);
+  const [previewMatcher, setSwiperMatcher] = useState<SwiperMatcher | null | undefined>();
+  const savedMatcher = useSearchStore((s) => s.visible ? s.matcher : null);
+  const swiperMatcher = previewMatcher === undefined ? savedMatcher : previewMatcher;
   const [seekKey, setSeekKey] = useState<string | null>(null);
   const restoreScroll = useRef<number | null>(null);
   useLayoutEffect(() => {
@@ -938,7 +941,7 @@ export default function DiffBuffer() {
     const list = listRef.current;
     // Cleared once, so another buffer's search keeps its marks.
     if (!swiperMatcher || !list) {
-      if (lit.current) markMatches([], null, null);
+      if (lit.current) markMatches([], null, null, listRef);
       lit.current = false;
       return;
     }
@@ -946,13 +949,14 @@ export default function DiffBuffer() {
     const current = rows[cursor]
       ? (rowElements.current.get(rows[cursor].key)?.querySelector<HTMLElement>(SEARCHED) ?? null)
       : null;
-    markMatches(list.querySelectorAll<HTMLElement>(SEARCHED), current, swiperMatcher);
+    markMatches(list.querySelectorAll<HTMLElement>(SEARCHED), current, swiperMatcher, listRef);
   }, [cursor, diffHighlight, rowOffsets, rows, swiperMatcher, viewport]);
+  useEffect(() => () => markMatches([], null, null, listRef), []);
 
   // `C-s`: Swiper over every row the diff has — folded files, hunks and sections too.
   // Landing on a row opens just the folds it needs, and moving on closes them again;
   // `RET` keeps the last one open, `C-g` puts every fold, the cursor and the scroll back.
-  const startSwiper = () => {
+  const startSwiper = (repeat?: SearchRepeat) => {
     const repo = useRepoStore.getState();
     const folds: Folds = {
       expandedFiles: repo.expandedFiles,
@@ -987,7 +991,9 @@ export default function DiffBuffer() {
     swipeList({
       lines: searched.map((row) => searchText(row) ?? ""),
       labels: searched.map(searchLabel),
-      start: start < 0 ? searched.length - 1 : start,
+      start: repeat
+        ? start < 0 ? searched.length - 0.5 : searched[start]?.key !== here ? start - 0.5 : start
+        : start < 0 ? searched.length - 1 : start,
       show: (index, matcher) => {
         setSwiperMatcher(matcher);
         if (index == null) return;
@@ -999,7 +1005,7 @@ export default function DiffBuffer() {
         restoreScroll.current = scrollTop;
         if (here) setSeekKey(here);
       },
-    });
+    }, repeat);
   };
   useEffect(() => setListSwiper("diff", startSwiper));
   useEffect(() => () => setListSwiper("diff", null), []);
@@ -1336,7 +1342,9 @@ export default function DiffBuffer() {
     resolve: () => { void doResolve(); },
     ignore: doIgnore,
     unmark: doUnmark,
-    swiper: startSwiper,
+    swiper: () => startSwiper(),
+    "search-next": (keys) => startSwiper({ direction: 1, count: vimSequence(keys).count }),
+    "search-prev": (keys) => startSwiper({ direction: -1, count: vimSequence(keys).count }),
     "scroll-down": () => scrollByLine(1),
     // C-r must be consumed: in tauri dev (Vite) it reloads the page.
     "scroll-up": () => scrollByLine(-1),

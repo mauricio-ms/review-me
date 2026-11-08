@@ -6,6 +6,7 @@ import { useMinibufferStore } from "../src/state/minibuffer";
 import { useNotesStore } from "../src/state/notes";
 import { useProjectStore } from "../src/state/project";
 import { useRepoStore } from "../src/state/repo";
+import { useSearchStore } from "../src/state/search";
 import { useTagsStore } from "../src/state/tags";
 import { useUIStore } from "../src/state/ui";
 import { useWindowStore } from "../src/state/windows";
@@ -57,6 +58,7 @@ export function openFile(path = "a.ts", source: ProjectSource = { kind: "worktre
   return buffer;
 }
 export function resetState() {
+  useSearchStore.setState(useSearchStore.getInitialState());
   resetGrep();
   const request = useMinibufferStore.getState().request;
   if (request?.kind === "confirm") request.onAnswer(false);

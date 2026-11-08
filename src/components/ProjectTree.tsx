@@ -6,6 +6,9 @@ import { buildChanged, type TreeNode as Node } from "../lib/changed-tree";
 import { fileIcon } from "../lib/file-icons";
 import { dispatchKey, type KeyHandler } from "../lib/key-dispatch";
 import { KEYMAP, type TreeAction } from "../lib/keymap";
+import { repeatSearch } from "../lib/search";
+import { markMatches, setListSwiper } from "../lib/swiper-list";
+import { useSearchStore } from "../state/search";
 import {
   loadDir,
   openFileFromDiff,
@@ -193,6 +196,12 @@ export default function ProjectTree({ hidden }: { hidden: boolean }) {
     return 0;
   }, [nodes, treeCursor]);
   const setCursor = (idx: number) => setTreeCursor(nodes[idx]?.entry.path ?? null);
+  const matcher = useSearchStore((s) => s.visible ? s.matcher : null);
+  useEffect(() => {
+    const rows = [...(treeRef.current?.querySelectorAll<HTMLElement>(".tree-name") ?? [])];
+    markMatches(rows, rows[cursor] ?? null, matcher, treeRef);
+  }, [nodes, cursor, matcher]);
+  useEffect(() => () => markMatches([], null, null, treeRef), []);
 
   const toggleFolder = (path: string) => {
     if (!changedOnly) {
@@ -319,7 +328,16 @@ export default function ProjectTree({ hidden }: { hidden: boolean }) {
     void mark(node.change?.path ?? node.entry.path);
   };
 
+  const repeat = (direction: 1 | -1) => {
+    const hit = repeatSearch(nodes.map((node) => node.entry.name), { index: cursor, column: 0 }, { direction });
+    if (hit) moveTo(hit.index);
+  };
+  useEffect(() => setListSwiper("tree", (move) => { if (move) repeat(move.direction); }));
+  useEffect(() => () => setListSwiper("tree", null), []);
+
   const handlers: Record<TreeAction, KeyHandler> = {
+    "search-next": () => repeat(1),
+    "search-prev": () => repeat(-1),
     down: () => moveTo(cursor + 1),
     up: () => moveTo(cursor - 1),
     first: () => moveTo(0),

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 
 import { dispatchKey, type KeyHandler } from "../lib/key-dispatch";
+import { clearNativeSearchHighlights } from "../lib/search";
 import { KEYMAP, type MinibufferAction } from "../lib/keymap";
 import {
   compileSwiper,
@@ -12,15 +13,13 @@ import {
 } from "../lib/swiper";
 import { useMinibufferStore, type SwiperRequest } from "../state/minibuffer";
 import { useUIStore } from "../state/ui";
+import { useSearchStore } from "../state/search";
 import { useModalFocus } from "./useModalFocus";
 
 /** How many matching lines show at once, as ivy's `ivy-height`. */
 const HEIGHT = 10;
 /** The widest the label column gets; a longer label loses its start. */
 const LABEL_MAX = 36;
-
-/** The last search accepted, which `C-s` in an empty search brings back (`C-s C-s`). */
-let lastQuery = "";
 
 /** `text` with its matched spans marked. */
 function marked(text: string, spans: Span[]): ReactNode {
@@ -88,8 +87,11 @@ export default function SwiperPrompt({ request }: { request: SwiperRequest }) {
       request.onCancel();
       return;
     }
-    if (query.trim()) lastQuery = query;
-    request.onAccept(on);
+    if (request.shareSearch !== false && query.trim()) {
+      useSearchStore.getState().accept(query);
+      clearNativeSearchHighlights();
+    }
+    request.onAccept(on, query);
   };
 
   const move = (delta: number) => {
@@ -99,6 +101,7 @@ export default function SwiperPrompt({ request }: { request: SwiperRequest }) {
 
   const handlers: Record<MinibufferAction, KeyHandler> = {
     next: (keys) => {
+      const lastQuery = request.shareSearch === false ? "" : useSearchStore.getState().query;
       if (keys === "C-s" && !query && lastQuery) setQuery(lastQuery);
       else move(1);
     },
@@ -133,7 +136,7 @@ export default function SwiperPrompt({ request }: { request: SwiperRequest }) {
       ref={rootRef}
       className="minibuffer"
       role="dialog"
-      aria-label="Swiper"
+      aria-label={request.prompt ?? "Swiper"}
       tabIndex={-1}
       onKeyDown={(e) => dispatchKey("minibuffer", e, KEYMAP.minibuffer, handlers)}
     >
@@ -142,7 +145,7 @@ export default function SwiperPrompt({ request }: { request: SwiperRequest }) {
           {hit ? selected + 1 : 0}/{hits.length}
         </span>
         <label className="mb-prompt" htmlFor="swiper-input">
-          Swiper:
+          {request.prompt ?? "Swiper"}:
         </label>
         <input
           id="swiper-input"

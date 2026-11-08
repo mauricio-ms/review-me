@@ -52,6 +52,7 @@ type ActionOf<T extends readonly unknown[]> = ActionOfEntry<T[number]>;
 
 /** Everywhere outside a text field, a modal, or vim's insert mode. */
 const GLOBAL_KEYS = [
+  { keys: [":"], action: "search-command", doc: ":noh[lsearch] clears search highlights in every buffer" },
   { keys: ["M-x"], action: "execute-extended-command", doc: "run any command by name" },
   {
     keys: ["C-g"],
@@ -185,6 +186,8 @@ const DIFF_KEYS = [
     doc: "search the diff (Swiper), folded files too: they open as you land on them",
   },
   { keys: ["C-e"], action: "scroll-down", doc: "scroll one line down" },
+  { keys: ["n"], action: "search-next", command: "search-next", counted: true, doc: "next search match (wraps; accepts a count)" },
+  { keys: ["N"], action: "search-prev", command: "search-prev", counted: true, doc: "previous search match (wraps; accepts a count)" },
   { keys: ["C-r"], action: "scroll-up", doc: "scroll one line up" },
   {
     keys: ["q"],
@@ -204,15 +207,19 @@ const LOG_KEYS = [
   { keys: ["RET"], action: "open", doc: "review this commit" },
   { keys: ["o"], action: "open-other", doc: "review this commit in the other window" },
   { keys: ["b"], action: "range", doc: "review the whole listed range as one diff" },
+  { keys: ["n"], action: "search-next", command: "search-next", doc: "next match of this log's own search (wraps)" },
+  { keys: ["N"], action: "search-prev", command: "search-prev", doc: "previous match of this log's own search (wraps)" },
   {
     keys: ["C-s"],
     action: "swiper",
     command: "swiper",
-    doc: "search the commits' subjects (Swiper)",
+    doc: "find a commit by subject in a separate, initially empty picker",
   },
 ] as const satisfies readonly KeyBinding[];
 
 const TREE_KEYS = [
+  { keys: ["n"], action: "search-next", command: "search-next", doc: "next search match in the tree (wraps)" },
+  { keys: ["N"], action: "search-prev", command: "search-prev", doc: "previous search match in the tree (wraps)" },
   { keys: ["j", "<down>"], action: "down", doc: "next row (a file shows as a preview)" },
   { keys: ["k", "<up>"], action: "up", doc: "previous row" },
   { keys: ["g g"], action: "first", doc: "first row" },
@@ -242,7 +249,11 @@ const TREE_KEYS = [
 
 /** The code viewer is CodeMirror in vim normal mode; these go through its keymap. */
 const VIEWER_KEYS = [
+  { keys: ["n"], action: "search-next", command: "search-next", vim: true, doc: "next search match (wraps; accepts a count)" },
+  { keys: ["N"], action: "search-prev", command: "search-prev", vim: true, doc: "previous search match (wraps; accepts a count)" },
+  { keys: [":"], action: "search-command", doc: ":noh[lsearch] clears search highlights, keeping the query for n / N" },
   { keys: ["y"], external: true, doc: "Vim yank to clipboard: yy, y + motion, or visual selection; counts work" },
+  { keys: ["ESC", "C-["], external: true, doc: "cancel a Vim prefix or return to normal mode; keeps search highlights" },
   { keys: ["] c"], action: "next-change", vim: true, doc: "next change in this file" },
   { keys: ["[ c"], action: "prev-change", vim: true, doc: "previous change in this file" },
   {
@@ -322,6 +333,8 @@ const VIEWER_KEYS = [
 ] as const satisfies readonly KeyBinding[];
 
 const HELP_KEYS = [
+  { keys: ["n"], action: "search-next", command: "search-next", doc: "next search match in help (wraps)" },
+  { keys: ["N"], action: "search-prev", command: "search-prev", doc: "previous search match in help (wraps)" },
   { keys: ["j", "<down>"], action: "down", doc: "scroll down" },
   { keys: ["k", "<up>"], action: "up", doc: "scroll up" },
   { keys: ["g g"], action: "first", doc: "top" },

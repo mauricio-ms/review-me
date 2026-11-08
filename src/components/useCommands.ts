@@ -74,6 +74,8 @@ export type CommandId =
   | "find-refs"
   | "xref-audit"
   | "swiper"
+  | "search-next"
+  | "search-prev"
   | "back"
   | "forward"
   | "changed"
@@ -555,7 +557,7 @@ export function useCommands(close: CommandClose): {
         activeBuffer === "diff"
           ? "search the diff, folded files too"
           : activeBuffer === "log"
-            ? "search the commits' subjects"
+            ? "find a commit by subject (separate from global search)"
             : openPath
               ? "search the file, its removed lines too"
               : "search a file (open one first)",
@@ -563,6 +565,14 @@ export function useCommands(close: CommandClose): {
         !!repo && (activeBuffer === "diff" || activeBuffer === "log" || !!openPath),
       run: handleSwiper,
     },
+    ...([1, -1] as const).map((direction): AppCommand => ({
+      id: direction === 1 ? "search-next" : "search-prev",
+      name: direction === 1 ? "search-next" : "search-prev",
+      aliases: [],
+      label: direction === 1 ? "next search match" : "previous search match",
+      enabled: !!repo && (activeBuffer === "diff" || activeBuffer === "log" || activeBuffer === "help" || (projectMode && treeFocused) || !!openPath),
+      run: () => { close(); swiperHere({ direction }); },
+    })),
     {
       id: "back",
       name: "back",

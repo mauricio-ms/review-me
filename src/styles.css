@@ -2561,6 +2561,10 @@ kbd {
   padding: 4px 12px;
 }
 
+.mb-line-ex {
+  gap: 0;
+}
+
 .mb-count {
   flex: none;
   min-width: 5ch;

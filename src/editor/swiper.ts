@@ -2,6 +2,7 @@ import {
   type EditorState,
   type Extension,
   type Range,
+  type Text,
   StateEffect,
   StateField,
 } from "@codemirror/state";
@@ -12,15 +13,19 @@ import {
   ViewPlugin,
   type ViewUpdate,
 } from "@codemirror/view";
+import { getCM } from "@replit/codemirror-vim";
 
 import { currentPlace, recordJump } from "../lib/jumps";
 import { activeView } from "../lib/project-view";
-import type { SwiperHit, SwiperMatcher } from "../lib/swiper";
+import { clearNativeSearchHighlights, registerSearchView, repeatSearch } from "../lib/search";
+import { indexSwiper, type SearchRepeat, type SwiperHit, type SwiperMatcher } from "../lib/swiper";
 import { listSwiper, markMatches } from "../lib/swiper-list";
 import { useMinibufferStore } from "../state/minibuffer";
 import { useUIStore } from "../state/ui";
+import { useSearchStore } from "../state/search";
 import { activeBuffer, useWindowStore } from "../state/windows";
 import { markedBlocks, removedLineElements, type ShownBlock } from "./diff-marks";
+import { inVimInsertMode } from "./cm-shared";
 
 /** A line a change took out: the `index`th of its block's removed lines. */
 type RemovedLine = { block: string; index: number };
@@ -32,6 +37,30 @@ type RemovedLine = { block: string; index: number };
 type Shown = { matcher: SwiperMatcher | null; line: number | null; removed: RemovedLine | null };
 
 const setSwiper = StateEffect.define<Shown | null>();
+const setMatcher = StateEffect.define<SwiperMatcher | null>();
+const savedMatcher = () => {
+  const { visible, matcher } = useSearchStore.getState();
+  return visible ? matcher : null;
+};
+const matcherField = StateField.define<SwiperMatcher | null>({
+  create: savedMatcher,
+  update(value, tr) {
+    for (const effect of tr.effects) if (effect.is(setMatcher)) return effect.value;
+    return value;
+  },
+});
+
+// Removed text has no document position of its own. Keep its actual search position
+// until an ordinary cursor move or document replacement invalidates it.
+const setLocation = StateEffect.define<{ entry: Searched; column: number } | null>();
+const locationField = StateField.define<{ entry: Searched; column: number } | null>({
+  create: () => null,
+  update(value, tr) {
+    if (tr.docChanged || tr.selection) value = null;
+    for (const effect of tr.effects) if (effect.is(setLocation)) value = effect.value;
+    return value;
+  },
+});
 
 const swiperField = StateField.define<Shown | null>({
   create: () => null,
@@ -53,7 +82,11 @@ const currentLine = Decoration.line({ class: "cm-swiper-line" });
 /** The matches on the lines in view — a search can match every line of a long file. */
 function marks(view: EditorView): DecorationSet {
   const shown = view.state.field(swiperField);
-  if (!shown) return Decoration.none;
+  const matcher = shown ? shown.matcher : view.state.field(matcherField);
+  if (!shown && !matcher) return Decoration.none;
+  const location = view.state.field(locationField)?.entry;
+  const selectedLine = shown ? shown.line : location && !("line" in location)
+    ? null : view.state.doc.lineAt(view.state.selection.main.head).number;
   const { doc } = view.state;
   const out: Range<Decoration>[] = [];
   let last = 0;
@@ -61,9 +94,10 @@ function marks(view: EditorView): DecorationSet {
     const end = doc.lineAt(to).number;
     for (let n = Math.max(last + 1, doc.lineAt(from).number); n <= end; n++) {
       const line = doc.line(n);
-      const current = n === shown.line;
+      const spans = matcher?.match(line.text) ?? null;
+      const current = n === selectedLine && (!matcher || spans !== null);
       if (current) out.push(currentLine.range(line.from));
-      for (const [a, b] of shown.matcher?.match(line.text) ?? []) {
+      for (const [a, b] of spans ?? []) {
         out.push((current ? currentMark : matchMark).range(line.from + a, line.from + b));
       }
       last = n;
@@ -79,12 +113,15 @@ function marks(view: EditorView): DecorationSet {
  */
 function lightRemoved(view: EditorView): void {
   const shown = view.state.field(swiperField);
+  const location = view.state.field(locationField)?.entry;
+  const removed = shown ? shown.removed : location && !("line" in location) ? location : null;
+  const matcher = shown ? shown.matcher : view.state.field(matcherField);
   const lines = removedLineElements(view);
-  const current = shown?.removed
-    ? (removedLineElements(view, shown.removed.block)[shown.removed.index] ?? null)
+  const current = matcher && removed
+    ? (removedLineElements(view, removed.block)[removed.index] ?? null)
     : null;
   for (const line of lines) line.classList.toggle("cm-swiper-line", line === current);
-  markMatches(lines, current, shown?.matcher ?? null);
+  markMatches(lines, current, matcher, view);
 }
 
 const swiperMarks = ViewPlugin.fromClass(
@@ -92,34 +129,93 @@ const swiperMarks = ViewPlugin.fromClass(
     decorations: DecorationSet;
     /** Whether removed lines may be lit — cleared once, so another search keeps its marks. */
     lit = false;
-    constructor(view: EditorView) {
+    unsubscribe: () => void;
+    unregister: () => void;
+    nativePrompt = false;
+    alive = true;
+    adoptNative = () => {
+      if (!this.alive) return;
+      const search = getCM(this.view)?.state.vim?.searchState_;
+      const pattern = search?.getQuery();
+      const message = getCM(this.view)?.state.dialog?.querySelector(".cm-vim-message")?.textContent;
+      const invalid = message?.startsWith("Invalid regex:") || message === "No word under cursor";
+      if (pattern && !invalid) {
+        useSearchStore.getState().acceptNative(pattern, !!search?.isReversed());
+      }
+      clearNativeSearchHighlights();
+    };
+    nativeSearch = (event: KeyboardEvent) => {
+      const cm = getCM(this.view);
+      if (this.nativePrompt && event.target instanceof HTMLInputElement && cm?.state.dialog?.contains(event.target)) {
+        if (event.key === "Enter") {
+          this.nativePrompt = false;
+          queueMicrotask(this.adoptNative);
+        } else if (event.key === "Escape" || (event.ctrlKey && ["[", "c"].includes(event.key))) {
+          this.nativePrompt = false;
+        }
+        return;
+      }
+      if (!event.ctrlKey && !event.altKey && !event.metaKey &&
+        ["/", "?", "*", "#"].includes(event.key) && !inVimInsertMode(this.view) &&
+        !cm?.state.vim?.expectLiteralNext) {
+        if (event.key === "/" || event.key === "?") this.nativePrompt = true;
+        else queueMicrotask(this.adoptNative);
+      }
+    };
+    constructor(readonly view: EditorView) {
       this.decorations = marks(view);
+      this.unregister = registerSearchView(view);
+      // Vim consumes its search keys before ordinary CodeMirror event handlers.
+      view.dom.addEventListener("keydown", this.nativeSearch, true);
+      this.unsubscribe = useSearchStore.subscribe(() => {
+        const matcher = savedMatcher();
+        if (view.state.field(matcherField) !== matcher) view.dispatch({ effects: setMatcher.of(matcher) });
+      });
+      // A new window can open while persistent highlights are already on.
+      if (savedMatcher()) {
+        this.lit = true;
+        view.requestMeasure({ key: this, read: () => null, write: () => lightRemoved(view) });
+      }
     }
     update(update: ViewUpdate) {
+      // Native Vim paints matches on a delayed timer. Once accepted, only the shared
+      // search owns highlighting; a late native paint must not resurrect cleared marks.
+      const native = getCM(update.view)?.cm6Query as { forVim?: boolean } | undefined;
+      if (!this.nativePrompt && native?.forVim) {
+        queueMicrotask(() => {
+          if (this.alive && !this.nativePrompt && native.forVim) clearNativeSearchHighlights();
+        });
+      }
       const shown = update.state.field(swiperField);
       if (
         update.docChanged ||
+        update.selectionSet ||
         update.viewportChanged ||
+        update.startState.field(matcherField) !== update.state.field(matcherField) ||
         update.startState.field(swiperField) !== shown
       ) {
         this.decorations = marks(update.view);
       }
       // Any update can redraw a widget, which drops its marks: light them again once
       // the DOM is drawn.
-      if (shown || this.lit) {
-        this.lit = !!shown;
+      if (shown || update.state.field(matcherField) || this.lit) {
+        this.lit = !!shown || !!update.state.field(matcherField);
         update.view.requestMeasure({ key: this, read: () => null, write: (_, view) => lightRemoved(view) });
       }
     }
     destroy() {
-      if (this.lit) markMatches([], null, null);
+      this.alive = false;
+      this.unsubscribe();
+      this.unregister();
+      this.view.dom.removeEventListener("keydown", this.nativeSearch, true);
+      markMatches([], null, null, this.view);
     }
   },
   { decorations: (plugin) => plugin.decorations },
 );
 
 /** The viewer's part of a Swiper search: every match in view, the selected line lit. */
-export const swiperHighlight: Extension = [swiperField, swiperMarks];
+export const swiperHighlight: Extension = [swiperField, matcherField, locationField, swiperMarks];
 
 /** Whether `pos`'s line is wholly on screen, so going there needn't scroll. */
 function onScreen(view: EditorView, pos: number): boolean {
@@ -147,10 +243,10 @@ type Searched = { line: number } | RemovedLine;
  * each change's visible removed lines just above where they went. Labelled
  * (removed ones by their old number) only when there are removed lines among them.
  */
-function searchedLines(state: EditorState, cursorLine: number) {
+function searchedLines(state: EditorState, blocks: readonly ShownBlock[]) {
   const { doc } = state;
   const above = new Map<number, ShownBlock[]>();
-  for (const block of markedBlocks(state)) {
+  for (const block of blocks) {
     if (!block.showRemoved || block.removed.length === 0) continue;
     const at = Math.min(Math.max(1, block.removedAt), doc.lines + 1);
     above.set(at, [...(above.get(at) ?? []), block]);
@@ -158,23 +254,45 @@ function searchedLines(state: EditorState, cursorLine: number) {
   const searched: Searched[] = [];
   const lines: string[] = [];
   const labels: string[] = [];
-  let start = 0;
+  const lineIndices: number[] = [];
+  const removedIndices = new Map<string, number[]>();
   for (let n = 1; n <= doc.lines + 1; n++) {
     for (const block of above.get(n) ?? []) {
       block.removed.forEach((line, index) => {
+        const indices = removedIndices.get(block.id) ?? [];
+        indices[index] = searched.length;
+        removedIndices.set(block.id, indices);
         searched.push({ block: block.id, index });
         lines.push(line.content);
         labels.push(`${line.oldLine ?? ""} −`);
       });
     }
     if (n > doc.lines) break;
-    if (n === cursorLine) start = searched.length;
+    lineIndices[n] = searched.length;
     searched.push({ line: n });
     lines.push(doc.line(n).text);
     // Room for the removed lines' mark, so the numbers line up.
     labels.push(`${n}\u00a0\u00a0`);
   }
-  return { searched, lines, labels: above.size > 0 ? labels : undefined, start };
+  return { searched, lines, labels: above.size > 0 ? labels : undefined, lineIndices, removedIndices };
+}
+
+type SearchIndex = ReturnType<typeof searchedLines> & {
+  doc: Text;
+  blocks: readonly ShownBlock[];
+  matcher: SwiperMatcher | null;
+  hits: SwiperHit[];
+};
+const searchIndexes = new WeakMap<EditorView, SearchIndex>();
+
+function searchIndex(view: EditorView): SearchIndex {
+  const { doc } = view.state;
+  const blocks = markedBlocks(view.state);
+  const cached = searchIndexes.get(view);
+  if (cached?.doc === doc && cached.blocks === blocks) return cached;
+  const index = { ...searchedLines(view.state, blocks), doc, blocks, matcher: null, hits: [] };
+  searchIndexes.set(view, index);
+  return index;
 }
 
 /**
@@ -184,16 +302,15 @@ function searchedLines(state: EditorState, cursorLine: number) {
  * with every match in view lit. `RET` stays there (a jump `M-,` comes back from);
  * `C-g` puts the cursor and the scroll back. Search never changes deleted-line visibility.
  */
-export function swiper(view: EditorView): void {
+export function swiper(view: EditorView, repeat?: SearchRepeat): void {
   const { state } = view;
-  const from = currentPlace();
   const selection = state.selection.main;
+  const originLocation = state.field(locationField, false) ?? null;
   const scroll = view.scrollSnapshot();
   const word = state.wordAt(selection.head);
-  const { searched, lines, labels, start } = searchedLines(
-    state,
-    state.doc.lineAt(selection.head).number,
-  );
+  const index = searchIndex(view);
+  const { searched, lines, labels, lineIndices, removedIndices } = index;
+  const start = lineIndices[state.doc.lineAt(selection.head).number];
 
   // A refresh can re-read the file under the search: nothing below may outlive it.
   const alive = () => view.dom.isConnected;
@@ -213,7 +330,8 @@ export function swiper(view: EditorView): void {
       const at = Math.min(line.from + (hit.spans[0]?.[0] ?? 0), line.to);
       view.dispatch({
         selection: { anchor: at },
-        effects: onScreen(view, at) ? [] : [EditorView.scrollIntoView(at, { y: "center" })],
+        effects: [setLocation.of({ entry, column: hit.spans[0]?.[0] ?? 0 }),
+          ...(onScreen(view, at) ? [] : [EditorView.scrollIntoView(at, { y: "center" })])],
       });
       return;
     }
@@ -224,15 +342,34 @@ export function swiper(view: EditorView): void {
     const near = at >= view.viewport.from && at <= view.viewport.to;
     view.dispatch({
       selection: { anchor: at },
-      effects: near ? [] : [EditorView.scrollIntoView(at, { y: "center" })],
+      effects: [setLocation.of({ entry, column: hit.spans[0]?.[0] ?? 0 }),
+        ...(near ? [] : [EditorView.scrollIntoView(at, { y: "center" })])],
     });
     // The widget is drawn by the next frame, scrolled to if it was far: then the line.
     const move = moves;
     requestAnimationFrame(() => {
-      if (move === moves && alive()) scrollToRemoved(view, entry);
+      if (move === moves && alive() && view.state.field(locationField, false)?.entry === entry) {
+        scrollToRemoved(view, entry);
+      }
     });
   };
 
+  if (repeat) {
+    const location = state.field(locationField, false);
+    const at = location ? "line" in location.entry ? lineIndices[location.entry.line]
+      : removedIndices.get(location.entry.block)?.[location.entry.index] : undefined;
+    const column = selection.head - state.doc.lineAt(selection.head).from;
+    const { matcher } = useSearchStore.getState();
+    if (matcher && index.matcher !== matcher) {
+      index.matcher = matcher;
+      index.hits = indexSwiper(lines, matcher, true);
+    }
+    const hit = repeatSearch(lines, { index: at ?? start, column: at == null ? column : location!.column }, repeat, true, index.hits);
+    if (hit) goto(hit);
+    return;
+  }
+
+  const from = currentPlace();
   useMinibufferStore.getState().open({
     kind: "swiper",
     lines,
@@ -260,7 +397,7 @@ export function swiper(view: EditorView): void {
       const end = view.state.doc.length;
       view.dispatch({
         selection: { anchor: Math.min(selection.anchor, end), head: Math.min(selection.head, end) },
-        effects: scroll,
+        effects: [scroll, setLocation.of(originLocation)],
       });
     },
   });
@@ -270,11 +407,14 @@ export function swiper(view: EditorView): void {
  * `M-x swiper` (and the viewer's `C-s`): Swiper over whatever has the keyboard — the
  * diff's rows, the log's commits (`lib/swiper-list.ts`), or the selected window's file.
  */
-export function swiperHere(): void {
-  const buffer = activeBuffer(useWindowStore.getState());
-  const list = buffer === "diff" || buffer === "log" ? listSwiper(buffer) : null;
+export function swiperHere(repeat?: SearchRepeat): void {
+  const windows = useWindowStore.getState();
+  const buffer = activeBuffer(windows);
+  const listBuffer = repeat && windows.treeFocused ? "tree"
+    : buffer === "diff" || buffer === "log" || (repeat && buffer === "help") ? buffer : null;
+  const list = listBuffer ? listSwiper(listBuffer) : null;
   const view = buffer === "project" ? activeView() : null;
-  if (list) list();
-  else if (view) swiper(view);
+  if (list) list(repeat);
+  else if (view) swiper(view, repeat);
   else useUIStore.getState().showFlash("Nothing here to search");
 }

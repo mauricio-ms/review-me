@@ -230,7 +230,7 @@ const deletedField = StateField.define<Deleted>({
 
 /** The change blocks marked in a viewer, as last set. */
 export function markedBlocks(state: EditorState): readonly ShownBlock[] {
-  return state.field(diffMarksField, false)?.blocks ?? [];
+  return state.field(diffMarksField, false)?.blocks ?? EMPTY_MARKS.blocks;
 }
 
 /** Source lines with change signs, including removal anchors and deleted files. */

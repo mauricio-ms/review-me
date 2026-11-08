@@ -12,6 +12,9 @@ import {
   type KeyScope,
 } from "../lib/keymap";
 import { useMinibufferStore } from "../state/minibuffer";
+import { repeatSearch } from "../lib/search";
+import { markMatches, setListSwiper } from "../lib/swiper-list";
+import { useSearchStore } from "../state/search";
 import { useUIStore, type HelpView } from "../state/ui";
 import { hasKeyboard, useWindowStore } from "../state/windows";
 import { type AppCommand, type CommandClose, useCommands } from "./useCommands";
@@ -98,6 +101,8 @@ export default function HelpBuffer() {
   const [query, setQuery] = useState("");
   const rootRef = useRef<HTMLDivElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const [searchRow, setSearchRow] = useState<string | null>(null);
+  const matcher = useSearchStore((s) => s.visible ? s.matcher : null);
 
   useEffect(() => {
     if (focused) rootRef.current?.focus({ preventScroll: true });
@@ -111,6 +116,24 @@ export default function HelpBuffer() {
 
   const sections = useMemo(() => buildSections(view, all, query), [all, query, view]);
 
+  useEffect(() => {
+    const rows = [...(scrollRef.current?.querySelectorAll<HTMLElement>(".help-row") ?? [])];
+    markMatches(rows, rows.find((row) => row.textContent === searchRow) ?? null, matcher, scrollRef);
+  }, [sections, searchRow, matcher]);
+  useEffect(() => () => markMatches([], null, null, scrollRef), []);
+
+  const repeat = (direction: 1 | -1) => {
+    const rows = [...(scrollRef.current?.querySelectorAll<HTMLElement>(".help-row") ?? [])];
+    const index = rows.findIndex((row) => row.textContent === searchRow);
+    const hit = repeatSearch(rows.map((row) => row.textContent ?? ""), { index, column: 0 }, { direction });
+    if (hit) {
+      setSearchRow(rows[hit.index].textContent);
+      rows[hit.index].scrollIntoView({ block: "nearest" });
+    }
+  };
+  useEffect(() => setListSwiper("help", (move) => { if (move) repeat(move.direction); }));
+  useEffect(() => () => setListSwiper("help", null), []);
+
   const scrollLines = useCallback((lines: number) => {
     const el = scrollRef.current;
     if (!el) return;
@@ -119,6 +142,8 @@ export default function HelpBuffer() {
   }, []);
 
   const handlers: Record<HelpAction, KeyHandler> = {
+    "search-next": () => repeat(1),
+    "search-prev": () => repeat(-1),
     down: () => scrollLines(1),
     up: () => scrollLines(-1),
     first: () => scrollRef.current?.scrollTo({ top: 0 }),

@@ -151,8 +151,9 @@ results for the completed current query may navigate. Accepting a result sets th
 tree to its revision, opens its parent folders, selects its path, and switches from
 changed files to all files when that path is unchanged.
 
-**Commands and keys are Emacs-style; there is no `:` command line and no Space palette**
-(the user removed both). A single **`components/useCommands.ts`** registry (typed
+**Commands and keys are Emacs-style; there is no Space palette.** The searchable
+buffers also read Evil's `:noh[lsearch]` in a bottom text prompt to clear search
+highlights; other colon commands are unsupported. A single **`components/useCommands.ts`** registry (typed
 `CommandId`s, a `buffer` scope) feeds `M-x`. **`lib/keymap.ts`** is the one table of key
 bindings, in Emacs notation (`C-x C-f`, `M-.`, `RET`, `g g`), per scope (`global`,
 `start`, `diff`, `log`, `tree`, `viewer`, `help`, `minibuffer`, `editor`), and it drives
@@ -173,7 +174,8 @@ buffer (`C-h b`, `C-h m`; `C-h k` describes a key in the echo area). Dispatch li
   help and `C-h k`, and get vim's count (`3]c`). `visual: true` ones are mapped in visual
   mode too: the handler is told so, reads the selection, and vim-nav then ends it. The note and commit editors read `C-c C-c` / `C-c C-k` in a
   capture handler on the dialog, before vim sees them (vim's own `:wq`/`:q` stay).
-- New command: give it an `M-x` name; give it a key only if it's used often, in Emacs
+- New command: give it an `M-x` name (except Evil's `:noh[lsearch]`, explicitly requested
+  as a colon command); give it a key only if it's used often, in Emacs
   conventions. Rare or destructive ones stay `M-x` only (`show`, `note`, `export`,
   `clear`, …).
 
@@ -650,6 +652,27 @@ in-order words, `!` negation, smart case, Emacs regexp syntax (`(` literal, `\(`
 with a literal fallback. The selection is held as a *line*, so narrowing keeps it or moves
 on to the next match (`nearestHit`).
 
+Accepted Swiper and native Vim searches persist in `state/search.ts`: the shared
+query/matcher, original direction, and whether its highlights are visible.
+`n` / `N` (`M-x search-next` / `search-prev`) repeat from the
+live cursor with wraparound, visiting individual occurrences in files and matching
+rows in the diff, tree and help. The log's commit finder is independent (see below).
+Files and diffs accept counts. `:noh[lsearch]` followed by `RET`
+hides marks without forgetting the query; repeating reveals them again. `ESC` and `C-g`
+cancel prompts/selections without clearing accepted search highlights, as in default
+Evil. The global `:` binding reads the colon command from any buffer; the viewer
+handles its own binding to preserve literal colons in Vim motions. Clearing removes
+native overlays in every registered project view as well as shared highlights.
+`editor/swiper.ts` adopts accepted native `/`, `?`, `*`, and `#` searches into the
+shared matcher, preserving regex syntax, case, word boundaries and direction; cancelled
+or invalid native queries preserve the accepted search. Modal editors retain native Vim search.
+Files cache searched lines and occurrence indexes by document, marked blocks and matcher;
+n/N uses binary search over the cached hits instead of rebuilding and rescanning the
+file. Cursor-only moves and a no-op `reveal` do not notify every search subscriber.
+The project tree and help also highlight and navigate the shared search.
+CSS highlights aggregate ranges by owner, so one window cannot erase another's matches;
+each owner must unregister its ranges on unmount/destruction.
+
 A file's search also reads the lines the comparison's changes **took out**, only while
 `changed` is on (`ShownBlock.showRemoved`). Each sits just above where it went, labelled
 with its old number and `−` (`searchedLines`, from `markedBlocks`). Search never changes
@@ -658,15 +681,23 @@ the line below them, a frame later `scrollToRemoved` brings the line itself on s
 their matches light through `markMatches`' CSS highlights (re-applied after every update,
 since a redrawn widget loses them).
 
-The diff buffer and the log have `C-s` too (`lib/swiper-list.ts`'s `swipeList`; each
-registers its starter with `setListSwiper`, which `M-x swiper`'s `swiperHere` dispatches
-to). The diff searches `buildRows` with **everything unfolded** — so folded files, hunks
+The diff buffer and the log have `C-s` too; each registers its starter with
+`setListSwiper`, which `M-x swiper`'s `swiperHere` dispatches to. The diff uses
+`lib/swiper-list.ts`'s `swipeList` and searches `buildRows` with **everything unfolded** — so folded files, hunks
 and sections are found — and shows a hit by `setFolds(reveal(original, row))`, always from
 the folds it started with, so moving on folds the last one again; the cursor follows by
-row *key* (`seekKey`) once the rows re-render. The log searches the loaded commits'
-subjects. Their matches on screen are CSS custom highlights (`markMatches`), not markup;
+row *key* (`seekKey`) once the rows re-render. Its matches on screen are CSS custom highlights (`markMatches`), not markup;
 **delete a highlight name before setting it** — WebKitGTK repaints on the name being added,
 not on it being replaced.
+
+The log's **Search commits** picker searches only loaded subjects, starts empty on
+every opening, and never filters or highlights the log rows themselves. It reuses
+`SwiperPrompt` with `shareSearch: false`: no global history recall, acceptance, or
+highlight changes. Its accepted matcher is local to `LogBuffer`, used only for n/N,
+and resets on a repository, ref/base or log epoch change. Scope changes close its
+owned prompt and reject stale callbacks. `:noh` from the log still clears global
+highlights, as it does from any buffer. The colon prompt uses `.mb-line-ex` to put
+the input directly after `:`; other prompts keep their usual spacing.
 
 ### Cross-references
 
@@ -876,8 +907,9 @@ clears the history whenever the comparison (or its revision) changes.
   `.project-viewer .cm-editor { height: 100% }` in `styles.css`).
 - App keys inside the viewer must check vim insert mode and type a literal char there —
   see `editor/cm-shared.ts` (`inVimInsertMode`; `AppShell`'s `isTypingTarget` uses it too).
-  Don't rely on keymap precedence; read the authoritative vim state from the view. `:` is
-  swallowed in the viewer (`swallowColonKeymap`) so it never opens vim's ex prompt.
+  Don't rely on keymap precedence; read the authoritative vim state from the view. `:`
+  opens the bottom `:noh[lsearch]` prompt through `viewerKeymap`; defer to Vim while it
+  expects a literal character (`f:` / `t:`). Modal editors retain Vim's own ex prompt.
 - `@uiw/react-codemirror` puts `basicSetup`'s keymaps ahead of our extensions, and every
   keymap runs before `vim()`'s own keydown handler — so CodeMirror's default keymap took the
   arrows (and Home/End/PageUp/PageDown) from vim, dropping a visual selection. The viewer

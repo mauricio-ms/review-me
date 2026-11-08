@@ -16,6 +16,7 @@ import {
 import { useCurrentFile } from "../lib/buffers";
 import { KEYMAP, type GlobalAction, type KeyBinding } from "../lib/keymap";
 import { useProjectSource } from "../lib/project";
+import { openSearchCommand } from "../lib/search";
 import { useMinibufferStore } from "../state/minibuffer";
 import { useProjectStore } from "../state/project";
 import { usePickerPreviewStore } from "../state/picker-preview";
@@ -96,6 +97,11 @@ function GlobalKeys() {
     };
     const actions: Record<GlobalAction, KeyHandler> = {
       "execute-extended-command": () => openMinibuffer({ kind: "command" }),
+      "search-command": () => {
+        // The viewer must let Vim read a literal colon in f: / t: first.
+        if (contextScope() === "viewer") return false;
+        openSearchCommand();
+      },
       // Echo, then let the key on: a buffer may have something to quit (a selection).
       "keyboard-quit": () => {
         useUIStore.getState().showFlash("Quit");

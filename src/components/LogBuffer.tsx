@@ -5,13 +5,15 @@ import { dispatchKey, type KeyHandler } from "../lib/key-dispatch";
 import { KEYMAP, type LogAction } from "../lib/keymap";
 import { loadMoreLog, refreshCommitReviews, setLogHandle } from "../lib/log";
 import { enterCommit, enterLogRange } from "../lib/open-repo";
+import { currentPlace, recordJump } from "../lib/jumps";
 import { confirmAndResolve, setResolveHandler } from "../lib/resolve-flags";
 import { flagsForCommits } from "../lib/tauri";
-import type { SwiperMatcher } from "../lib/swiper";
-import { markMatches, setListSwiper, swipeList } from "../lib/swiper-list";
+import { compileSwiper, nextSwiperHit, type SearchRepeat, type SwiperMatcher } from "../lib/swiper";
+import { setListSwiper } from "../lib/swiper-list";
 import { timeAgo } from "../lib/time";
 import { useLogStore } from "../state/log";
 import { useRepoStore } from "../state/repo";
+import { useMinibufferStore, type SwiperRequest } from "../state/minibuffer";
 import { useTagsStore } from "../state/tags";
 import { useUIStore } from "../state/ui";
 import { hasKeyboard, isShown, useWindowStore } from "../state/windows";
@@ -145,6 +147,7 @@ export default function LogBuffer() {
   const range = useLogStore((s) => s.range);
   const logRef = useLogStore((s) => s.ref);
   const logBase = useLogStore((s) => s.base);
+  const logEpoch = useLogStore((s) => s.epoch);
   const commits = useLogStore((s) => s.commits);
   const reviews = useLogStore((s) => s.reviews);
   const loading = useLogStore((s) => s.loading);
@@ -215,45 +218,68 @@ export default function LogBuffer() {
     }
   }, [commits.length, complete, cursor]);
 
-  // Swiper (`C-s`) over the subjects of the commits loaded so far, its matches lit.
-  const [swiperMatcher, setSwiperMatcher] = useState<SwiperMatcher | null>(null);
-  const lit = useRef(false);
+  // The commit finder starts empty and keeps its repeat query private to this log.
+  // It never filters or highlights the log itself, or reads/writes global search.
+  const [localSearch, setLocalSearch] = useState<{ query: string; matcher: SwiperMatcher } | null>(null);
+  const searchRequest = useRef<SwiperRequest | null>(null);
   useEffect(() => {
-    // Cleared once, so another buffer's search keeps its marks.
-    if (!swiperMatcher) {
-      if (lit.current) markMatches([], null, null);
-      lit.current = false;
-      return;
-    }
-    lit.current = true;
-    const summary = (oid: string | undefined) =>
-      (oid ? rowRefs.current.get(oid)?.querySelector<HTMLElement>(".log-summary") : null) ??
-      null;
-    const all = commits.map((c) => summary(c.oid)).filter((el): el is HTMLElement => !!el);
-    markMatches(all, summary(commits[cursor]?.oid), swiperMatcher);
-  }, [commits, cursor, swiperMatcher]);
+    setLocalSearch(null);
+    return () => {
+      if (searchRequest.current && useMinibufferStore.getState().request === searchRequest.current) {
+        useMinibufferStore.getState().close();
+        useUIStore.getState().requestFocus();
+      }
+    };
+  }, [repoPath, logRef, logBase, logEpoch]);
 
-  const startSwiper = () => {
+  const startSwiper = (repeat?: SearchRepeat) => {
     if (commits.length === 0) {
       useUIStore.getState().showFlash("Nothing here to search");
       return;
     }
     const listed = commits;
+    const lines = listed.map((c) => c.summary);
+    if (repeat) {
+      if (!localSearch) {
+        useUIStore.getState().showFlash("No previous log search");
+        return;
+      }
+      const hit = nextSwiperHit(lines, localSearch.matcher, { index: cursor, column: 0 }, repeat);
+      if (hit) setCursorOid(listed[hit.index].oid);
+      else useUIStore.getState().showFlash(`No matching commits: ${localSearch.query}`);
+      return;
+    }
     const from = cursorOid;
+    const origin = currentPlace();
     const scrollTop = listRef.current?.scrollTop ?? 0;
-    swipeList({
-      lines: listed.map((c) => c.summary),
+    const current = () => useRepoStore.getState().repoPath === repoPath &&
+      useLogStore.getState().ref === logRef && useLogStore.getState().base === logBase && useLogStore.getState().epoch === logEpoch;
+    const request: SwiperRequest = {
+      kind: "swiper",
+      shareSearch: false,
+      prompt: "Search commits",
+      lines,
       labels: listed.map((c) => c.shortOid),
       start: cursor,
-      show: (index, matcher) => {
-        setSwiperMatcher(matcher);
-        if (index != null) setCursorOid(listed[index].oid);
+      atPoint: null,
+      onMove: (hit) => {
+        if (current() && hit) setCursorOid(listed[hit.index].oid);
       },
-      restore: () => {
+      onAccept: (hit, query) => {
+        if (!current()) return;
+        const matcher = compileSwiper(query);
+        setLocalSearch(matcher ? { query, matcher } : null);
+        setCursorOid(listed[hit.index].oid);
+        recordJump(origin);
+      },
+      onCancel: () => {
+        if (!current()) return;
         setCursorOid(from);
         if (listRef.current) listRef.current.scrollTop = scrollTop;
       },
-    });
+    };
+    searchRequest.current = request;
+    useMinibufferStore.getState().open(request);
   };
   useEffect(() => setListSwiper("log", startSwiper));
   useEffect(() => () => setListSwiper("log", null), []);
@@ -354,7 +380,9 @@ export default function LogBuffer() {
     // magit's way: the log stays, the commit opens beside it.
     "open-other": () => enter(commits[cursor], { other: true }),
     range: enterRange,
-    swiper: startSwiper,
+    swiper: () => startSwiper(),
+    "search-next": () => startSwiper({ direction: 1 }),
+    "search-prev": () => startSwiper({ direction: -1 }),
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {

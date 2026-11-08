@@ -368,7 +368,7 @@ function Prompt({ request }: { request: Exclude<MinibufferRequest, SwiperRequest
       tabIndex={-1}
       onKeyDown={(e) => dispatchKey("minibuffer", e, KEYMAP.minibuffer, handlers)}
     >
-      <div className="mb-line">
+      <div className={`mb-line${request.kind === "text" && request.prompt === ":" ? " mb-line-ex" : ""}`}>
         {rows && (
           <span className="mb-count">
             {selected >= 0 && rows.length > 0 ? Math.min(selected, rows.length - 1) + 1 : 0}/

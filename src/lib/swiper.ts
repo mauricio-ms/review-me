@@ -13,6 +13,8 @@ export type Span = [from: number, to: number];
 export type SwiperMatcher = {
   /** Where `line` matches, every occurrence; null when the line doesn't. */
   match: (line: string) => Span[] | null;
+  /** Complete occurrences, keeping a multi-word query together for n / N. */
+  occurrences: (line: string) => Span[];
 };
 
 /** A line that matches (0-based), and where. */
@@ -90,25 +92,94 @@ export function compileSwiper(input: string): SwiperMatcher | null {
     : null;
   const excluded = negative.map((w) => new RegExp(wordSource(w), flags));
 
-  return {
-    match: (line) => {
-      if (excluded.some((re) => re.test(line))) return null;
-      if (!all) return [];
-      const spans: Span[] = [];
-      all.lastIndex = 0;
-      let found = false;
-      for (let m = all.exec(line) as IndexedMatch | null; m; m = all.exec(line) as IndexedMatch | null) {
-        found = true;
-        for (const name of names) {
-          const span = m.indices?.groups?.[name];
-          if (span && span[1] > span[0]) spans.push([span[0], span[1]]);
-        }
-        // An empty match (`^`) would match there forever.
-        if (m[0].length === 0) all.lastIndex++;
+  const scan = (line: string): { spans: Span[]; occurrences: Span[] } | null => {
+    if (excluded.some((re) => re.test(line))) return null;
+    if (!all) return { spans: [], occurrences: [[0, 0]] };
+    const spans: Span[] = [];
+    const occurrences: Span[] = [];
+    all.lastIndex = 0;
+    let found = false;
+    for (let m = all.exec(line) as IndexedMatch | null; m; m = all.exec(line) as IndexedMatch | null) {
+      found = true;
+      occurrences.push([m.index, m.index + m[0].length]);
+      for (const name of names) {
+        const span = m.indices?.groups?.[name];
+        if (span && span[1] > span[0]) spans.push([span[0], span[1]]);
       }
-      return found ? spans : null;
+      // An empty match (`^`) would match there forever.
+      if (m[0].length === 0) all.lastIndex++;
+    }
+    return found ? { spans, occurrences } : null;
+  };
+  return {
+    match: (line) => scan(line)?.spans ?? null,
+    occurrences: (line) => scan(line)?.occurrences ?? [],
+  };
+}
+
+export type SearchRepeat = { direction: 1 | -1; count?: number };
+
+/** A reusable match index, invalidated when its text or matcher changes. */
+export function indexSwiper(lines: readonly string[], matcher: SwiperMatcher, byOccurrence = false): SwiperHit[] {
+  return byOccurrence
+    ? lines.flatMap((line, index) => matcher.occurrences(line).map((span) => ({ index, spans: [span] })))
+    : swipe(lines, matcher);
+}
+
+export function stepSwiperHit(
+  hits: readonly SwiperHit[],
+  position: { index: number; column: number },
+  { direction, count = 1 }: SearchRepeat,
+  byOccurrence = false,
+): SwiperHit | null {
+  if (!hits.length) return null;
+  let lo = 0;
+  let hi = hits.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    const relative = hits[mid].index - position.index ||
+      (byOccurrence ? (hits[mid].spans[0]?.[0] ?? 0) - position.column : 0);
+    if (direction === 1 ? relative <= 0 : relative < 0) lo = mid + 1;
+    else hi = mid;
+  }
+  const first = direction === 1 ? lo % hits.length : (lo - 1 + hits.length) % hits.length;
+  const offset = direction * ((Math.max(1, count) - 1) % hits.length);
+  return hits[(first + offset + hits.length) % hits.length];
+}
+
+/** Native Vim patterns already have their regex syntax, case and word boundaries resolved. */
+export function compileSearchRegexp(pattern: RegExp): SwiperMatcher {
+  const re = new RegExp(pattern.source, pattern.flags.replace(/[gy]/g, "") + "g");
+  const occurrences = (line: string): Span[] => {
+    const spans: Span[] = [];
+    re.lastIndex = 0;
+    for (let match = re.exec(line); match; match = re.exec(line)) {
+      spans.push([match.index, match.index + match[0].length]);
+      if (!match[0].length) {
+        const unicode = re.flags.includes("u") || re.flags.includes("v");
+        re.lastIndex += unicode && (line.codePointAt(re.lastIndex) ?? 0) > 0xffff ? 2 : 1;
+      }
+    }
+    return spans;
+  };
+  return {
+    occurrences,
+    match: (line) => {
+      const spans = occurrences(line);
+      return spans.length ? spans.filter(([from, to]) => to > from) : null;
     },
   };
+}
+
+/** Repeat from the current cursor, wrapping and honoring counts; lists step by row. */
+export function nextSwiperHit(
+  lines: readonly string[],
+  matcher: SwiperMatcher,
+  position: { index: number; column: number },
+  repeat: SearchRepeat,
+  byOccurrence = false,
+): SwiperHit | null {
+  return stepSwiperHit(indexSwiper(lines, matcher, byOccurrence), position, repeat, byOccurrence);
 }
 
 /** The lines `matcher` matches, in order (every line, for no matcher). */

@@ -16,28 +16,22 @@ export function inVimInsertMode(view: EditorView): boolean {
 }
 
 /**
- * `:` would open codemirror-vim's own ex prompt in the viewer. Commands run through
- * `M-x`, so outside insert mode the key does nothing there. (The modal editors don't
- * load this: their `:wq` / `:q` are vim's own and stay.)
+ * Hand Escape / Ctrl+[ to Vim directly: cancel prefixes and exit modes, preserving
+ * search highlights as Evil does. The extension's DOM handler also clears highlights.
+ * WebKitGTK additionally drops its Ctrl+[ binding.
  */
-export const swallowColonKeymap = Prec.highest(
-  keymap.of([{ key: ":", run: (view) => !inVimInsertMode(view) }]),
-);
-
-/** Ctrl+[ → Esc (the WebKitGTK webview drops the vim extension's own binding). */
 export const vimEscapeKeymap = Prec.highest(
-  keymap.of([
-    {
-      key: "Ctrl-[",
-      run: (view) => {
-        if (!inVimInsertMode(view)) return false;
+  keymap.of(
+    ["Escape", "Ctrl-["].map((key) => ({
+      key,
+      run: (view: EditorView) => {
         const cm = getCM(view);
         if (!cm) return false;
         Vim.handleKey(cm, "<Esc>", "user");
         return true;
       },
-    },
-  ]),
+    })),
+  ),
 );
 
 /**

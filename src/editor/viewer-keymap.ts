@@ -1,5 +1,6 @@
 import { Prec } from "@codemirror/state";
 import { EditorView, keymap, type KeyBinding as CmKeyBinding } from "@codemirror/view";
+import { getCM } from "@replit/codemirror-vim";
 
 import { quitFile } from "../lib/buffers";
 import { recordJump } from "../lib/jumps";
@@ -8,6 +9,7 @@ import { followLinkAtCursor } from "../lib/markdown";
 import { gotoChange, gotoChangedFile } from "../lib/project-diff";
 import { flagHere, gotoFileToReview, reviewHere, unmarkHere } from "../lib/project-review";
 import { setProjectCursor } from "../lib/project-view";
+import { openSearchCommand } from "../lib/search";
 import { findUsages, gotoDefinition } from "../lib/xref";
 import { useMinibufferStore } from "../state/minibuffer";
 import { inVimInsertMode } from "./cm-shared";
@@ -17,6 +19,8 @@ import { swiperHere } from "./swiper";
 function normalOnly(action: ViewerHandler) {
   return (view: EditorView) => {
     if (inVimInsertMode(view)) return false;
+    // A colon in f: / t: is a motion's literal target, not a command prompt.
+    if (action === VIEWER_HANDLERS["search-command"] && getCM(view)?.state.vim?.expectLiteralNext) return false;
     action(1, false);
     return true;
   };
@@ -48,7 +52,10 @@ export const VIEWER_HANDLERS: Record<ViewerAction, ViewerHandler> = {
   references: () => void findUsages(),
   "follow-link": () => void followLinkAtCursor(),
   "goto-line": promptGotoLine,
-  swiper: swiperHere,
+  swiper: () => swiperHere(),
+  "search-next": (count) => swiperHere({ direction: 1, count }),
+  "search-prev": (count) => swiperHere({ direction: -1, count }),
+  "search-command": openSearchCommand,
   "next-change": (count) => gotoChange(1, count),
   "prev-change": (count) => gotoChange(-1, count),
   "next-file": (count) => gotoChangedFile(1, count),

@@ -1,26 +1,26 @@
 import { useMinibufferStore } from "../state/minibuffer";
 import { currentPlace, recordJump } from "./jumps";
-import type { Span, SwiperMatcher } from "./swiper";
+import { repeatSearch } from "./search";
+import type { SearchRepeat, Span, SwiperMatcher } from "./swiper";
 
 /**
- * Swiper over the diff buffer's and the log's rows — the twin of `editor/swiper.ts`,
- * which searches a file in CodeMirror. These buffers are lists of rows rather than a
- * document, so each one hands over its rows as lines and moves its own cursor; this
- * module opens the minibuffer for them and lights the matches on screen.
+ * Shared Swiper over diff rows — the twin of `editor/swiper.ts`, which searches a file
+ * in CodeMirror. The starter registry also routes repeat commands to help, the tree,
+ * and the log's independent commit finder.
  */
 
 /** The buffers that search their rows; each registers how while it's mounted. */
-export type ListBuffer = "diff" | "log";
+export type ListBuffer = "diff" | "log" | "help" | "tree";
 
-const starters = new Map<ListBuffer, () => void>();
+const starters = new Map<ListBuffer, (repeat?: SearchRepeat) => void>();
 
-export function setListSwiper(buffer: ListBuffer, start: (() => void) | null): void {
+export function setListSwiper(buffer: ListBuffer, start: ((repeat?: SearchRepeat) => void) | null): void {
   if (start) starters.set(buffer, start);
   else starters.delete(buffer);
 }
 
 /** How `buffer` starts a search, if it is mounted. */
-export function listSwiper(buffer: ListBuffer): (() => void) | null {
+export function listSwiper(buffer: ListBuffer): ((repeat?: SearchRepeat) => void) | null {
   return starters.get(buffer) ?? null;
 }
 
@@ -33,9 +33,9 @@ export type ListSearch = {
   start: number;
   /**
    * Put the cursor on row `index` (null: leave it) and light `matcher`'s matches (null:
-   * none) — revealing the row first if it's folded away.
+   * none; undefined: the accepted search) — revealing the row first if it's folded away.
    */
-  show: (index: number | null, matcher: SwiperMatcher | null) => void;
+  show: (index: number | null, matcher: SwiperMatcher | null | undefined) => void;
   /** Put the cursor back — and whatever `show` unfolded, and the scroll. */
   restore: () => void;
 };
@@ -44,7 +44,12 @@ export type ListSearch = {
  * Swiper over a list buffer: the buffer follows the selected row; `RET` stays there (a
  * jump `M-,` comes back from), `C-g` puts it back.
  */
-export function swipeList(search: ListSearch): void {
+export function swipeList(search: ListSearch, repeat?: SearchRepeat): void {
+  if (repeat) {
+    const hit = repeatSearch(search.lines, { index: search.start, column: 0 }, repeat);
+    if (hit) search.show(hit.index, undefined);
+    return;
+  }
   const from = currentPlace();
   useMinibufferStore.getState().open({
     kind: "swiper",
@@ -54,11 +59,11 @@ export function swipeList(search: ListSearch): void {
     atPoint: null,
     onMove: (hit, matcher) => search.show(hit ? hit.index : null, matcher),
     onAccept: (hit) => {
-      search.show(hit.index, null);
+      search.show(hit.index, undefined);
       recordJump(from);
     },
     onCancel: () => {
-      search.show(null, null);
+      search.show(null, undefined);
       search.restore();
     },
   });
@@ -74,6 +79,7 @@ export function swipeList(search: ListSearch): void {
  * minibuffer marks them.
  */
 const registry = (globalThis as { CSS?: { highlights?: HighlightRegistry } }).CSS?.highlights;
+const owners = new Map<object, { matches: Range[]; selected: Range[] }>();
 
 /** DOM ranges over `element`'s text for `spans` of its `textContent`. */
 function rangesOf(element: HTMLElement, spans: Span[]): Range[] {
@@ -111,6 +117,7 @@ export function markMatches(
   targets: Iterable<HTMLElement>,
   current: HTMLElement | null,
   matcher: SwiperMatcher | null,
+  owner: object = document,
 ): void {
   if (!registry) return;
   // Always delete first: WebKitGTK repaints a highlight when its name is added to the
@@ -118,13 +125,17 @@ export function markMatches(
   // marks on screen and the new ones unpainted.
   registry.delete("swiper-match");
   registry.delete("swiper-current");
-  if (!matcher) return;
   const matches: Range[] = [];
   const selected: Range[] = [];
-  for (const element of targets) {
-    const spans = matcher.match(element.textContent ?? "");
-    if (spans?.length) (element === current ? selected : matches).push(...rangesOf(element, spans));
+  if (matcher) {
+    for (const element of targets) {
+      const spans = matcher.match(element.textContent ?? "");
+      if (spans?.length) (element === current ? selected : matches).push(...rangesOf(element, spans));
+    }
   }
-  registry.set("swiper-match", new Highlight(...matches));
-  registry.set("swiper-current", new Highlight(...selected));
+  if (matcher) owners.set(owner, { matches, selected });
+  else owners.delete(owner);
+  if (!owners.size) return;
+  registry.set("swiper-match", new Highlight(...[...owners.values()].flatMap((marks) => marks.matches)));
+  registry.set("swiper-current", new Highlight(...[...owners.values()].flatMap((marks) => marks.selected)));
 }
