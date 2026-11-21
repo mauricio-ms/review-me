@@ -71,7 +71,10 @@ export async function runBrowserTests(entry) {
     browser.stderr.on("data", chunk => { diagnostics = (diagnostics + chunk).slice(-4000); });
     browser.once("error", fail);
     browser.once("exit", code => fail(new Error(`Browser exited (${code}) before reporting results:\n${diagnostics}`)));
-    deadline = setTimeout(() => fail(new Error(`Browser tests did not finish within 30 seconds:\n${diagnostics}`)), 30000);
+    // Chrome's first launch on a cold CI runner (font cache, dbus retries) can take
+    // tens of seconds before the page even loads; the tests themselves take under one.
+    const limit = Number(process.env.REVIEW_ME_BROWSER_TIMEOUT_MS) || 120000;
+    deadline = setTimeout(() => fail(new Error(`Browser tests did not finish within ${limit / 1000} seconds:\n${diagnostics}`)), limit);
     const results = await completion;
     if (!Array.isArray(results) || results.length === 0 || results.some(r => typeof r.name !== "string")) {
       throw new Error("Browser returned no tests or invalid results");
