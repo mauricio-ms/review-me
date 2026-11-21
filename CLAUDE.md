@@ -10,11 +10,14 @@ a magit-style, vim-driven UI over a git diff — working-tree-vs-HEAD, a
 magit-style commits buffer — with reviewed/flag tagging, review notes exported as
 Markdown for an LLM to act on, a fuzzy file finder,
 an IDE-like project mode, and tree-sitter cross-references.
-The stack deliberately mirrors the sibling app at
-`/home/mms/development/projects/video-studio` (buffer model, `NeoPicker`, Zustand) —
-consult it when a pattern here looks unfamiliar. The UX has since gone its own way: its
-Space palette, `:` command line and centered pickers became an Emacs-style `M-x`
-minibuffer here (see "Commands and keys" below).
+The stack deliberately mirrors an earlier app of the author's, video-studio (buffer
+model, `NeoPicker`, Zustand). The UX has since gone its own way: its Space palette, `:`
+command line and centered pickers became an Emacs-style `M-x` minibuffer here (see
+"Commands and keys" below).
+
+It is MIT-licensed and released for Linux only: the README is the public face (what the
+tool is, installation, quick start), `docs/guide.md` the full user manual and
+`docs/development.md` the contributor guide. Keep user-visible changes reflected there.
 
 ## Commands
 
@@ -25,15 +28,24 @@ npm run test:frontend      # frontend tests, including application/test TypeScri
 cd src-tauri && cargo test # backend tests (all logic modules have unit tests w/ tempfile fixtures)
 cd src-tauri && cargo test diff::tests::marks_staged_files   # single test
 cd src-tauri && cargo check                                  # fast backend typecheck
-./packaging/build-ubuntu.sh # .deb for Ubuntu 22.04+, built in Docker (see README)
+./scripts/release.sh       # tag a release on a clean master; the user pushes the tag
 ```
 
 The version is `scripts/version.sh` (`package.json`'s major.minor + the commit count,
 `-dev` with uncommitted changes) — never bump it by hand. `vite.config.ts` stamps it and
 the build time into the frontend (`__APP_VERSION__`/`__APP_BUILT__`, read through
-`lib/version.ts`: `M-x version`, the start screen, the help header), and
-`build-ubuntu.sh` works it out on the host — the Docker context has no `.git` — passing it
-in as `REVIEW_ME_VERSION` and onto the `.deb` with `tauri build --config`.
+`lib/version.ts`: `M-x version`, the start screen, the help header); a build without
+`.git` (a source tarball) passes it in as `REVIEW_ME_VERSION`.
+
+**Releases** are GitHub Actions: `.github/workflows/ci.yml` (build + both test suites on
+every push to `master` and every PR) and `.github/workflows/release.yml`, started by the
+`v<version>` tag `scripts/release.sh` makes. It re-runs CI, refuses a tag that doesn't
+match `scripts/version.sh`, builds AppImage/`.deb`/`.rpm` on `ubuntu-22.04` (the glibc
+baseline), ships `THIRD-PARTY-NOTICES.txt` (`scripts/third-party-notices.mjs`: the
+licenses of every bundled crate and npm package) in each package via `--config`, and
+attaches everything plus `SHA256SUMS` to a **draft** release the user publishes. The
+app identifier `io.github.mauricio-ms.review-me` names the app-data directory — never
+change it.
 
 There is no linter/formatter configured (matching video-studio); TypeScript runs in
 strict mode with `noUnusedLocals`/`noUnusedParameters`, so dead code fails the build.

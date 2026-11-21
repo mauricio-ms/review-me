@@ -2,7 +2,7 @@
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "review-me",
   "version": "0.1.0",
-  "identifier": "dev.mms.reviewme",
+  "identifier": "io.github.mauricio-ms.review-me",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -28,10 +28,36 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "publisher": "mauricio-ms",
+    "homepage": "https://github.com/mauricio-ms/review-me",
+    "copyright": "Copyright (c) 2026 mauricio-ms",
+    "license": "MIT",
+    "licenseFile": "../LICENSE",
+    "category": "DeveloperTool",
+    "shortDescription": "Keyboard-driven code review for changes written by AI agents",
+    "longDescription": "review-me turns a git diff into a review checklist. Mark every file, hunk or line range as reviewed, flagged or ignored; review uncommitted changes, a whole branch or one commit at a time; follow a change through the codebase with go-to-definition and find-references; and export review notes as Markdown for a coding agent to act on. Vim motions and Emacs-style commands throughout.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
-      "icons/128x128@2x.png"
-    ]
+      "icons/128x128@2x.png",
+      "icons/icon-512.png"
+    ],
+    "linux": {
+      "deb": {
+        "files": {
+          "/usr/share/doc/review-me/LICENSE": "../LICENSE"
+        }
+      },
+      "rpm": {
+        "files": {
+          "/usr/share/licenses/review-me/LICENSE": "../LICENSE"
+        }
+      },
+      "appimage": {
+        "files": {
+          "/usr/share/doc/review-me/LICENSE": "../LICENSE"
+        }
+      }
+    }
   }
 }

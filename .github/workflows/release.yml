@@ -1,0 +1,95 @@
+name: Release
+
+# Pushing a tag made by scripts/release.sh runs the tests, builds the Linux packages and
+# drafts a GitHub release with them. Review the draft and publish it by hand.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    uses: ./.github/workflows/ci.yml
+
+  linux:
+    name: Linux packages
+    needs: test
+    # The oldest glibc we build against: the packages run on Ubuntu 22.04, Debian 12,
+    # Fedora and anything newer.
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Check the tag matches the version
+        run: |
+          version=$(./scripts/version.sh)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME doesn't match this commit's version ($version). Tag releases with scripts/release.sh."
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Install system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev libsoup-3.0-dev \
+            libgtk-3-dev librsvg2-dev libssl-dev libxdo-dev \
+            patchelf file squashfs-tools desktop-file-utils fakeroot xz-utils
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: npm ci
+
+      - name: Collect third-party licenses
+        run: node scripts/third-party-notices.mjs
+
+      - name: Build packages
+        env:
+          REVIEW_ME_VERSION: ${{ env.VERSION }}
+        run: |
+          cat > "$RUNNER_TEMP/release.json" <<EOF
+          {
+            "version": "$VERSION",
+            "bundle": {
+              "linux": {
+                "deb": { "files": { "/usr/share/doc/review-me/THIRD-PARTY-NOTICES.txt": "../THIRD-PARTY-NOTICES.txt" } },
+                "rpm": { "files": { "/usr/share/licenses/review-me/THIRD-PARTY-NOTICES.txt": "../THIRD-PARTY-NOTICES.txt" } },
+                "appimage": { "files": { "/usr/share/doc/review-me/THIRD-PARTY-NOTICES.txt": "../THIRD-PARTY-NOTICES.txt" } }
+              }
+            }
+          }
+          EOF
+          npm run tauri build -- --bundles appimage,deb,rpm --config "$RUNNER_TEMP/release.json"
+
+      - name: Collect artifacts
+        run: |
+          mkdir out
+          bundle=src-tauri/target/release/bundle
+          cp "$bundle"/appimage/*.AppImage "$bundle"/deb/*.deb "$bundle"/rpm/*.rpm THIRD-PARTY-NOTICES.txt out/
+          cd out
+          sha256sum -- * > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Draft the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" out/* \
+            --draft --verify-tag --generate-notes \
+            --title "review-me $VERSION"

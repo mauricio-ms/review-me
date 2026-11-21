@@ -1,7 +1,11 @@
 [package]
 name = "review-me"
 version = "0.1.0"
-description = "Magit-style code-review tool for LLM-agent diffs"
+description = "Keyboard-driven code review for changes written by AI agents"
+authors = ["mauricio-ms"]
+license = "MIT"
+repository = "https://github.com/mauricio-ms/review-me"
+homepage = "https://github.com/mauricio-ms/review-me"
 edition = "2021"
 rust-version = "1.78"
 

@@ -2,6 +2,15 @@
   "name": "review-me",
   "version": "0.1.0",
   "private": true,
+  "description": "Keyboard-driven code review for changes written by AI agents",
+  "license": "MIT",
+  "author": "mauricio-ms",
+  "homepage": "https://github.com/mauricio-ms/review-me",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mauricio-ms/review-me.git"
+  },
+  "bugs": "https://github.com/mauricio-ms/review-me/issues",
   "type": "module",
   "scripts": {
     "dev": "vite",

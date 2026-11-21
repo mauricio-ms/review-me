@@ -1,0 +1,61 @@
+name: Bug report
+description: Something doesn't work as it should
+labels: [bug]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open a repository with ...
+        2. Press ...
+        3. See ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: review-me version
+      description: Run `M-x version` in the app and paste what it says.
+      placeholder: review-me 0.1.160 · built 2026-11-20 18:52
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How did you install it?
+      options:
+        - .deb package
+        - .rpm package
+        - AppImage
+        - Built from source
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: Distribution and desktop
+      placeholder: Ubuntu 24.04, GNOME on Wayland
+    validations:
+      required: true
+  - type: textarea
+    id: repository
+    attributes:
+      label: The repository you were reviewing
+      description: >-
+        If the problem depends on it: roughly how big it is, its languages, and whether you
+        were reviewing uncommitted changes, a branch or a commit. Please don't share
+        private code.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Anything printed in the terminal when you start review-me from one, or a screenshot.

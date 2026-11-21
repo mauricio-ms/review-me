@@ -7,13 +7,18 @@ dist/
 # local install (./install.sh)
 bin/
 
-# ubuntu packages (./packaging/build-ubuntu.sh)
-dist-linux/
+# release builds (.github/workflows/release.yml)
+THIRD-PARTY-NOTICES.txt
+
+# icon generator scratch (src-tauri/icons/.gen/generate-icons.sh)
 src-tauri/icons/.gen/master-2048.png
 
 # rust / tauri
 src-tauri/target/
 src-tauri/gen/
+
+# personal Claude Code instructions
+CLAUDE.local.md
 
 # editor / os
 .DS_Store

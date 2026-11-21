@@ -5,8 +5,8 @@ import react from "@vitejs/plugin-react";
 const host = process.env.TAURI_DEV_HOST;
 
 /**
- * The version this build reports (`scripts/version.sh`). The Docker build has no
- * `.git`, so packaging/build-ubuntu.sh works it out beforehand and passes it in.
+ * The version this build reports (`scripts/version.sh`). A build without `.git`, such
+ * as one from a source tarball, can't count commits, so it passes `REVIEW_ME_VERSION`.
  */
 function buildVersion(): string {
   if (process.env.REVIEW_ME_VERSION) return process.env.REVIEW_ME_VERSION;
