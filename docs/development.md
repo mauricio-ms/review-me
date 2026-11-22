@@ -61,9 +61,11 @@ The tag starts `.github/workflows/release.yml`, which runs the full test suite, 
 builds the AppImage, `.deb` and `.rpm` on Ubuntu 22.04 (the glibc baseline: the packages
 run there and on every newer distribution). It also collects the licenses of every
 bundled Rust crate and npm package (`scripts/third-party-notices.mjs`) into
-`THIRD-PARTY-NOTICES.txt`, ships that file in each package, and writes `SHA256SUMS`.
-Everything is attached to a draft GitHub release with generated notes: review it, add
-anything users must know (especially breaking changes), and publish.
+`THIRD-PARTY-NOTICES.txt`, ships that file in each package, writes `SHA256SUMS`, and
+signs a build provenance attestation for every file (`actions/attest`), which
+`gh attestation verify` and mise check. Everything is attached to a draft GitHub release
+with generated notes: review it, add anything users must know (especially breaking
+changes), and publish. A draft is invisible to `releases/latest` and to mise until then.
 
 The workflow refuses a tag that doesn't match the commit's `scripts/version.sh`, so tag
 with the script rather than by hand.

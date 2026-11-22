@@ -76,11 +76,29 @@ to your application launcher. The AppImage bundles WebKitGTK and needs FUSE 2
 (`libfuse2`, or `libfuse2t64` on Ubuntu 24.04 and later). You don't need git installed:
 review-me reads repositories through libgit2.
 
-Each release lists SHA-256 checksums in `SHA256SUMS`:
+### With mise
+
+[mise](https://mise.jdx.dev) can install the AppImage straight from the GitHub releases:
+
+```bash
+mise use -g "github:mauricio-ms/review-me[asset_pattern=review-me_*_amd64.AppImage,bin=review-me]"
+```
+
+This puts `review-me` on your `PATH`; start it from a terminal, since mise adds no
+launcher entry. It needs FUSE 2, like any AppImage. `mise upgrade` moves it to a new
+release, and a project's `mise.toml` can pin the version its reviewers use.
+
+### Verifying a download
+
+Each release lists SHA-256 checksums in `SHA256SUMS`, and every file carries a signed
+attestation that GitHub Actions built it from the release's tag. Check either one:
 
 ```bash
 sha256sum --check --ignore-missing SHA256SUMS
+gh attestation verify review-me_<version>_amd64.AppImage --repo mauricio-ms/review-me
 ```
+
+mise checks the attestation by itself when it installs review-me.
 
 ### Build from source
 

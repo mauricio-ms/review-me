@@ -21,6 +21,9 @@ jobs:
     runs-on: ubuntu-22.04
     permissions:
       contents: write
+      # Signing and storing the build provenance attestations.
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v7
         with:
@@ -85,6 +88,14 @@ jobs:
           cd out
           sha256sum -- * > SHA256SUMS
           cat SHA256SUMS
+
+      # A signed record that each file was built by this workflow from this tag:
+      # `gh attestation verify <file> --repo <owner>/<repo>` checks it, and so does mise
+      # when it installs the AppImage from the release.
+      - name: Attest build provenance
+        uses: actions/attest@v4
+        with:
+          subject-path: out/*
 
       - name: Draft the GitHub release
         env:

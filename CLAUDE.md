@@ -42,8 +42,11 @@ every push to `master` and every PR) and `.github/workflows/release.yml`, starte
 `v<version>` tag `scripts/release.sh` makes. It re-runs CI, refuses a tag that doesn't
 match `scripts/version.sh`, builds AppImage/`.deb`/`.rpm` on `ubuntu-22.04` (the glibc
 baseline), ships `THIRD-PARTY-NOTICES.txt` (`scripts/third-party-notices.mjs`: the
-licenses of every bundled crate and npm package) in each package via `--config`, and
-attaches everything plus `SHA256SUMS` to a **draft** release the user publishes. The
+licenses of every bundled crate and npm package) in each package via `--config`, signs
+a build provenance attestation for every file (`actions/attest`; README's mise install
+verifies it), and attaches everything plus `SHA256SUMS` to a **draft** release the user
+publishes. The AppImage's `review-me_<version>_amd64.AppImage` name is what the README's
+mise command matches — keep it stable. The
 app identifier `io.github.mauricio-ms.review-me` names the app-data directory — never
 change it.
 
